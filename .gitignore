@@ -8,6 +8,9 @@ debian/.debhelper/
 debian/debhelper-build-stamp
 debian/files
 debian/pi-probe-discord/
+debian/*.debhelper.log
+debian/*.postrm.debhelper
+debian/*.substvars
 *.deb
 *.build
 *.buildinfo
