@@ -130,17 +130,24 @@ sudo pi-probe-discord-install
 Create a release from the development machine with:
 
 ```bash
-scripts/release.sh 0.1.1 "Improve Discord chart readability"
+scripts/release.sh "Improve Discord chart readability"
 ```
 
 That script:
 
+- derives the next patch version from `debian/changelog` by default
 - updates `debian/changelog`
 - commits the release metadata
-- creates git tag `v0.1.1`
+- creates the matching git tag
 - builds the `.deb`
 - creates a GitHub release
 - uploads the `.deb` asset
+
+If you need a specific version instead of the automatic patch bump:
+
+```bash
+scripts/release.sh --version 0.2.0 "Add Pi upgrade helper"
+```
 
 ## Pi Upgrade Helper
 
