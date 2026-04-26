@@ -9,6 +9,7 @@ This guide installs `pi-probe-discord` onto a Raspberry Pi and enables automatic
 - Python dependencies from `requirements.txt`
 - an interactive config file with your Discord webhook
 - `systemd` timers for periodic speed tests and daily full reports
+- optional Discord slash-command bot for triggering a speed test manually
 
 ## 1. Copy The Project To The Pi
 
@@ -157,6 +158,71 @@ Generate a local report from the database:
 
 ```bash
 sudo /opt/pi-probe-discord/.venv/bin/python /opt/pi-probe-discord/pihole_update_report.py report 7
+```
+
+## 12. Optional Discord Slash Bot
+
+The project includes a separate Discord bot so an approved user can run:
+
+```text
+/speedtest
+```
+
+That bot only starts this fixed service:
+
+```text
+/bin/systemctl start pi-probe-discord-speedtest.service
+```
+
+It does not run arbitrary commands.
+
+### Bot Config
+
+Create the bot env file:
+
+```bash
+sudo cp /usr/share/pi-probe-discord/pi-probe-discord-bot.env.example /etc/pi-probe-discord/pi-probe-discord-bot.env
+sudo chown root:root /etc/pi-probe-discord/pi-probe-discord-bot.env
+sudo chmod 600 /etc/pi-probe-discord/pi-probe-discord-bot.env
+```
+
+Set:
+
+- `PI_PROBE_DISCORD_BOT_TOKEN`
+- `PI_PROBE_DISCORD_ALLOWED_USER_IDS`
+
+Optional:
+
+- `PI_PROBE_DISCORD_COMMAND_GUILD_ID`
+  Use this for faster slash-command sync while testing.
+
+### Narrow sudoers Rule
+
+Install the sudoers file:
+
+```bash
+sudo visudo -f /etc/sudoers.d/pi-probe-discord-bot
+```
+
+Add:
+
+```text
+aron ALL=(root) NOPASSWD: /bin/systemctl start pi-probe-discord-speedtest.service
+```
+
+Nothing else should be granted.
+
+### Start The Bot
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now pi-probe-discord-bot.service
+```
+
+### Check Bot Logs
+
+```bash
+journalctl -u pi-probe-discord-bot.service -n 100 --no-pager
 ```
 
 ## Notes

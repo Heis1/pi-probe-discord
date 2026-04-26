@@ -1,0 +1,2 @@
+#!/bin/sh
+exec /usr/bin/python3 /opt/pi-probe-discord/pihole_speedtest_bot.py "$@"

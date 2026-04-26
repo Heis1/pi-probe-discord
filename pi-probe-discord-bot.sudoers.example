@@ -1,0 +1,6 @@
+# Install with:
+#   sudo visudo -f /etc/sudoers.d/pi-probe-discord-bot
+#
+# Replace "aron" if the bot runs under a different Linux user.
+
+aron ALL=(root) NOPASSWD: /bin/systemctl start pi-probe-discord-speedtest.service

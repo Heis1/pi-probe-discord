@@ -1,0 +1,17 @@
+[Unit]
+Description=Pi Probe Discord speedtest bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=aron
+Group=aron
+WorkingDirectory=/opt/pi-probe-discord
+EnvironmentFile=/etc/pi-probe-discord/pi-probe-discord-bot.env
+ExecStart=/usr/bin/python3 /opt/pi-probe-discord/pihole_speedtest_bot.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

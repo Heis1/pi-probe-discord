@@ -12,6 +12,7 @@ override_dh_auto_install:
 	install -d debian/pi-probe-discord/opt/pi-probe-discord
 	cp -a pi_probe_discord debian/pi-probe-discord/opt/pi-probe-discord/
 	install -m 0755 pihole_update_report.py debian/pi-probe-discord/opt/pi-probe-discord/pihole_update_report.py
+	install -m 0755 pihole_speedtest_bot.py debian/pi-probe-discord/opt/pi-probe-discord/pihole_speedtest_bot.py
 	install -m 0755 install.py debian/pi-probe-discord/opt/pi-probe-discord/install.py
 	install -m 0755 pihole-update-discord.sh debian/pi-probe-discord/opt/pi-probe-discord/pihole-update-discord.sh
 	install -d debian/pi-probe-discord/opt/pi-probe-discord/scripts
@@ -23,15 +24,19 @@ override_dh_auto_install:
 	cp -a samples/. debian/pi-probe-discord/opt/pi-probe-discord/samples/
 	install -d debian/pi-probe-discord/usr/bin
 	install -m 0755 debian/bin/pi-probe-discord debian/pi-probe-discord/usr/bin/pi-probe-discord
+	install -m 0755 debian/bin/pi-probe-discord-bot debian/pi-probe-discord/usr/bin/pi-probe-discord-bot
 	install -m 0755 debian/bin/pi-probe-discord-install debian/pi-probe-discord/usr/bin/pi-probe-discord-install
 	install -m 0755 debian/bin/pi-probe-discord-update debian/pi-probe-discord/usr/bin/pi-probe-discord-update
 	install -d debian/pi-probe-discord/usr/share/pi-probe-discord
 	install -m 0644 pihole-update-discord.env.example debian/pi-probe-discord/usr/share/pi-probe-discord/pihole-update-discord.env.example
+	install -m 0644 pi-probe-discord-bot.env.example debian/pi-probe-discord/usr/share/pi-probe-discord/pi-probe-discord-bot.env.example
+	install -m 0644 pi-probe-discord-bot.sudoers.example debian/pi-probe-discord/usr/share/pi-probe-discord/pi-probe-discord-bot.sudoers.example
 	install -d debian/pi-probe-discord/lib/systemd/system
 	install -m 0644 debian/systemd/pi-probe-discord-speedtest.service debian/pi-probe-discord/lib/systemd/system/pi-probe-discord-speedtest.service
 	install -m 0644 debian/systemd/pi-probe-discord-speedtest.timer debian/pi-probe-discord/lib/systemd/system/pi-probe-discord-speedtest.timer
 	install -m 0644 debian/systemd/pi-probe-discord-full.service debian/pi-probe-discord/lib/systemd/system/pi-probe-discord-full.service
 	install -m 0644 debian/systemd/pi-probe-discord-full.timer debian/pi-probe-discord/lib/systemd/system/pi-probe-discord-full.timer
+	install -m 0644 debian/systemd/pi-probe-discord-bot.service debian/pi-probe-discord/lib/systemd/system/pi-probe-discord-bot.service
 
 override_dh_installsystemd:
 	dh_installsystemd --no-enable --no-start

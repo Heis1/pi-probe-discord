@@ -20,6 +20,17 @@ The project is packaged as a Debian `.deb`, can run headless over SSH, and is bu
 - gravity age and blocklist size when available
 - apt update and upgrade summary
 
+## Discord Bot
+
+The repo also includes a small Discord slash-command bot for one narrow job:
+
+- `/speedtest`
+- only for configured Discord user IDs
+- starts exactly one systemd unit:
+  - `pi-probe-discord-speedtest.service`
+
+It does not run arbitrary shell commands.
+
 ## Project Layout
 
 - `pihole_update_report.py`
@@ -34,6 +45,14 @@ The project is packaged as a Debian `.deb`, can run headless over SSH, and is bu
   Source copy of the Pi-side upgrade helper.
 - `pi-probe-discord-update`
   Installed system command for upgrading from a local or released `.deb`.
+- `pihole_speedtest_bot.py`
+  Discord slash-command bot entrypoint.
+- `pi-probe-discord-bot.service`
+  Example systemd unit for running the bot at boot.
+- `pi-probe-discord-bot.env.example`
+  Bot token and allowed user ID template.
+- `pi-probe-discord-bot.sudoers.example`
+  Narrow sudoers example for the bot.
 - `debian/`
   Debian packaging files.
 - `DEPLOYMENT.md`
@@ -97,6 +116,50 @@ Short version:
 5. Enable the timers.
 
 Everything can be done over SSH. No Pi desktop session is required.
+
+## Discord Bot Setup
+
+Create the bot config file:
+
+```bash
+sudo cp /usr/share/pi-probe-discord/pi-probe-discord-bot.env.example /etc/pi-probe-discord/pi-probe-discord-bot.env
+sudo chmod 600 /etc/pi-probe-discord/pi-probe-discord-bot.env
+```
+
+Set:
+
+- `PI_PROBE_DISCORD_BOT_TOKEN`
+- `PI_PROBE_DISCORD_ALLOWED_USER_IDS`
+
+Optional:
+
+- `PI_PROBE_DISCORD_COMMAND_GUILD_ID`
+  Use this while testing so slash-command sync is fast.
+
+Install the narrow sudoers rule:
+
+```bash
+sudo visudo -f /etc/sudoers.d/pi-probe-discord-bot
+```
+
+Add exactly:
+
+```text
+aron ALL=(root) NOPASSWD: /bin/systemctl start pi-probe-discord-speedtest.service
+```
+
+Then enable the bot:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now pi-probe-discord-bot.service
+```
+
+Check logs:
+
+```bash
+journalctl -u pi-probe-discord-bot.service -n 100 --no-pager
+```
 
 ## Build The Debian Package
 
