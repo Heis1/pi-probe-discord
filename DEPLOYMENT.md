@@ -179,6 +179,15 @@ sudo systemctl daemon-reload
 sudo systemctl restart pi-probe-discord-speedtest.timer pi-probe-discord-full.timer
 ```
 
+Or use the repo helper directly on the Pi:
+
+```bash
+sudo scripts/update-from-release.sh /home/aron/pi-probe-discord_<version>-1_all.deb
+sudo scripts/update-from-release.sh latest
+```
+
+If the GitHub repo is private, `latest` and version-based downloads require either authenticated `gh` on the Pi or `GITHUB_TOKEN` in the shell.
+
 If the release changed schedule/config behavior, rerun:
 
 ```bash

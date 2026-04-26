@@ -1,264 +1,199 @@
 # pi-probe-discord
 
-Small Raspberry Pi / Pi-hole Discord reporting application.
+`pi-probe-discord` is a Raspberry Pi monitoring and Discord reporting app for a Pi-hole box or home network node.
 
-This repo contains:
+It does three jobs:
+
+- runs scheduled internet speed checks
+- reports Pi-hole and update status to Discord
+- stores local history in SQLite so charts and reports are based on the Pi's own data
+
+The project is packaged as a Debian `.deb`, can run headless over SSH, and is built to be maintained without editing one giant script.
+
+## What It Reports
+
+- download, upload, and ping
+- chart image for recent history
+- verdict based on recent local baseline, not fixed generic thresholds
+- Pi-hole service state
+- Pi-hole blocking enabled or disabled
+- gravity age and blocklist size when available
+- apt update and upgrade summary
+
+## Project Layout
 
 - `pihole_update_report.py`
-  Thin CLI entry point for the application.
-- `install.py`
-  Interactive Pi setup helper that asks for the Discord webhook and publish frequency.
+  Thin CLI entrypoint.
 - `pi_probe_discord/`
-  Modular application package with config, storage, Discord, chart, installer, and probe logic split into maintainable modules.
-- `pihole-update-discord.sh`
-  Simpler shell version for apt update + Pi-hole reporting only.
-- `pihole-update-discord.env.example`
-  Example config file for the Discord webhook URL.
-- `pi-probe-discord-speedtest.service` and `.timer`
-  Default example `systemd` units.
-- `pi-probe-discord-full.service` and `.timer`
-  Default example `systemd` units for a daily full run.
-- `samples/`
-  Mock Discord payload and chart output examples for previewing the final result.
-- `requirements.txt`
-  Python dependencies for the full application.
-- `DEPLOYMENT.md`
-  Step-by-step Raspberry Pi install guide.
+  Application package.
+- `install.py`
+  Interactive installer for Pi setup and schedule configuration.
+- `scripts/release.sh`
+  Build, tag, and publish a GitHub release with the `.deb`.
+- `scripts/update-from-release.sh`
+  Pi-side upgrade helper for installing a local or released `.deb`.
 - `debian/`
-  Debian packaging files for building a `.deb`.
+  Debian packaging files.
+- `DEPLOYMENT.md`
+  Pi installation and upgrade guide.
 
-## Features
+## How It Runs
 
-- Discord webhook config kept out of committed code
-- apt update and upgrade summary
-- Pi-hole service status
-- Pi-hole blocking enabled or disabled state
-- gravity database age
-- blocklist domain count
-- speedtest results
-- Discord embed formatting
-- SQLite storage for historical runs
-- graph upload when `matplotlib` is installed
-- built-in CLI report mode for stored history
-- interactive install/setup flow for Raspberry Pi deployment
-- configurable publishing frequency for periodic speedtest reporting
-- modular code layout intended to be modified and extended
-
-## Setup
-
-For a full Pi install, use `DEPLOYMENT.md`.
-
-To build a Debian package:
+The app is split into modes so frequent speed tests do not also run system maintenance:
 
 ```bash
-sudo apt-get install -y debhelper
-dpkg-buildpackage -us -uc -b
+python3 pihole_update_report.py speedtest-only
+python3 pihole_update_report.py full
+python3 pihole_update_report.py update-only
+python3 pihole_update_report.py report 7
 ```
 
-To install the resulting package on a Pi:
+Normal deployment uses `systemd` timers:
 
-```bash
-sudo dpkg -i ../pi-probe-discord_0.1.0-1_all.deb
-sudo pi-probe-discord-install
+- `pi-probe-discord-speedtest.timer`
+- `pi-probe-discord-full.timer`
+
+## Data Storage
+
+Runs are stored in SQLite.
+
+- default DB path: `/var/lib/pi-probe-discord/pi_probe_discord.db`
+- default retention: 12 months
+- old rows are pruned automatically
+
+This history drives the Discord chart and the health verdict logic.
+
+## Configuration
+
+The webhook is not committed in the repo.
+
+Expected installed config path:
+
+```text
+/etc/pi-probe-discord/pihole-update-discord.env
 ```
 
-## Release Workflow
-
-For future Pi updates, use the release script instead of ad hoc manual steps:
-
-```bash
-scripts/release.sh 0.1.1 "Improve Discord chart readability"
-```
-
-That script will:
-
-- verify the git worktree is clean
-- prepend a new `debian/changelog` entry
-- commit the release metadata
-- create git tag `v0.1.1`
-- build the `.deb`
-- create a GitHub release on `Heis1/pi-probe-discord`
-- upload the built `.deb` asset
-
-After that, install the new package on the Pi with:
-
-```bash
-sudo apt install ./pi-probe-discord_0.1.1-1_all.deb
-```
-
-If you want to change schedule values after upgrading:
-
-```bash
-sudo pi-probe-discord-install
-sudo systemctl daemon-reload
-sudo systemctl restart pi-probe-discord-speedtest.timer pi-probe-discord-full.timer
-```
-
-To change the packaged timer schedule later:
-
-```bash
-sudo pi-probe-discord-install
-```
-
-That command updates the config and writes `systemd` timer override files, so you do not need to reinstall the `.deb`.
-
-Interactive install on the Pi:
-
-```bash
-python3 install.py
-```
-
-This installer asks for:
-
-- Discord webhook URL
-- speedtest publish frequency in minutes
-- daily full report time
-- whether overlapping cron jobs should be removed from the current user crontab
-
-It writes:
-
-- `pihole-update-discord.env`
-- generated `systemd` unit files under `generated-systemd/`
-
-It also:
-
-- scans the current user crontab for overlapping Pi-hole, speedtest, and Discord-style jobs
-- shows a cleanup preview before removing matching cron entries
-- scans for related `systemd` service and timer units and prints disable commands for old units
-- writes the generated webhook config with `600` permissions
-- validates that the webhook URL is a real Discord HTTPS webhook format
-
-Manual config is still available. Copy the example config:
+Example template:
 
 ```bash
 cp pihole-update-discord.env.example pihole-update-discord.env
 chmod 600 pihole-update-discord.env
 ```
 
-Set your real webhook URL in `pihole-update-discord.env`.
-The intended installed location is `/etc/pi-probe-discord/pihole-update-discord.env`.
+The installer can also create this file for you.
 
-## Python Requirements
+## Install On A Pi
 
-Install the Python dependencies on the Raspberry Pi:
+Use the full guide in [DEPLOYMENT.md](DEPLOYMENT.md).
+
+Short version:
+
+1. Copy the repo to the Pi.
+2. Install Python and dependencies.
+3. Run `python3 install.py`.
+4. Install the `.deb` or copy the app into `/opt/pi-probe-discord`.
+5. Enable the timers.
+
+Everything can be done over SSH. No Pi desktop session is required.
+
+## Build The Debian Package
 
 ```bash
-python3 -m pip install -r requirements.txt
+sudo apt-get install -y debhelper
+dpkg-buildpackage -us -uc -b
 ```
 
-If you want the polished dark-mode chart, keep `matplotlib` installed.
+That produces a package like:
 
-## Stored Data
-
-The Python reporter stores every run in a local SQLite database:
-
-- default path: `/var/lib/pi-probe-discord/pi_probe_discord.db`
-- override with `DB_PATH`
-- default retention: 365 days
-
-Each stored run includes:
-
-- timestamp
-- hostname
-- apt update result and summary
-- Pi-hole status fields
-- speedtest result fields
-- warnings and errors
-
-This database is the source for the Discord trend graph.
-Old rows are pruned automatically on each run, and the database is incrementally vacuumed to keep disk usage under control.
-
-## Run
-
-Combined Python reporter:
-
-```bash
-python3 pihole_update_report.py
+```text
+../pi-probe-discord_0.1.0-1_all.deb
 ```
 
-Run only a periodic speed test and Discord post:
+## Install Or Upgrade On The Pi
+
+If you already have the `.deb` on the Pi:
 
 ```bash
-python3 pihole_update_report.py speedtest-only
-```
-
-Run only the full update and Pi-hole maintenance report:
-
-```bash
-python3 pihole_update_report.py full
-```
-
-Run only update and Pi-hole checks without a speed test:
-
-```bash
-python3 pihole_update_report.py update-only
-```
-
-Generate a local text report from the stored database:
-
-```bash
-python3 pihole_update_report.py report
-python3 pihole_update_report.py report 30
-```
-
-Shell-only reporter:
-
-```bash
-bash pihole-update-discord.sh
-```
-
-## Periodic Scheduling
-
-For a Raspberry Pi, `systemd` timers are the sensible option.
-
-Suggested schedule:
-
-- hourly `speedtest-only`
-- daily `full`
-
-The installer generates schedule-aware unit files for you. If you are installing manually, a typical flow is:
-
-```bash
-sudo mkdir -p /opt/pi-probe-discord
-sudo mkdir -p /etc/pi-probe-discord
-sudo mkdir -p /var/lib/pi-probe-discord
-sudo cp -r . /opt/pi-probe-discord/
-sudo cp pihole-update-discord.env /etc/pi-probe-discord/pihole-update-discord.env
-sudo chmod 600 /etc/pi-probe-discord/pihole-update-discord.env
-sudo cp /opt/pi-probe-discord/generated-systemd/*.service /etc/systemd/system/
-sudo cp /opt/pi-probe-discord/generated-systemd/*.timer /etc/systemd/system/
+sudo apt install /home/aron/pi-probe-discord_0.1.0-1_all.deb
 sudo systemctl daemon-reload
-sudo systemctl enable --now pi-probe-discord-speedtest.timer
-sudo systemctl enable --now pi-probe-discord-full.timer
+sudo systemctl restart pi-probe-discord-speedtest.timer pi-probe-discord-full.timer
+```
+
+If schedule or installer-managed config needs to be refreshed:
+
+```bash
+sudo pi-probe-discord-install
+```
+
+## Release Workflow
+
+Create a release from the development machine with:
+
+```bash
+scripts/release.sh 0.1.1 "Improve Discord chart readability"
+```
+
+That script:
+
+- updates `debian/changelog`
+- commits the release metadata
+- creates git tag `v0.1.1`
+- builds the `.deb`
+- creates a GitHub release
+- uploads the `.deb` asset
+
+## Pi Upgrade Helper
+
+On the Pi, the upgrade helper can install from:
+
+- a local `.deb` path
+- a direct release URL
+- a release version like `0.1.1`
+- `latest`
+
+Examples:
+
+```bash
+sudo scripts/update-from-release.sh /home/aron/pi-probe-discord_0.1.1-1_all.deb
+sudo scripts/update-from-release.sh 0.1.1
+sudo scripts/update-from-release.sh latest
+```
+
+If the GitHub repo is private, the Pi needs either:
+
+- authenticated `gh`, or
+- `GITHUB_TOKEN` exported in the shell
+
+If you also want to rerun installer-based config after upgrading:
+
+```bash
+sudo scripts/update-from-release.sh latest --reconfigure
 ```
 
 ## Notes
 
-- The Python script posts a graph image only when `matplotlib` is installed.
-- The real chart now uses the same dark-mode visual direction as the polished sample, with highlighted problem zones.
-- The Python script builds the graph from SQLite history, with both `Last 24 Hours` and `Last 7 Days` trend panels.
-- By default, the database keeps at most 12 months of data and trims large stored text fields.
-- The app now defaults to Debian-style paths: config in `/etc/pi-probe-discord` and data in `/var/lib/pi-probe-discord`.
-- The script still posts a readable Discord embed if the graph cannot be generated.
-- The real `pihole-update-discord.env` file is ignored by git.
+- The app still posts a Discord embed if chart generation is unavailable.
+- `matplotlib` is required for the image chart.
+- Pi-hole details degrade gracefully if Pi-hole commands are unavailable.
+- The repo also includes `pihole-update-discord.sh`, a simpler shell-only reporter for update/Pi-hole reporting.
 
 ## Architecture
 
-The application is deliberately split so it can grow:
-
 - `pi_probe_discord/config.py`
-  runtime configuration loading
+  config loading and validation
 - `pi_probe_discord/storage.py`
-  SQLite persistence and reporting
+  SQLite persistence and retention
 - `pi_probe_discord/system_checks.py`
   apt and Pi-hole collection
 - `pi_probe_discord/speedtest_runner.py`
-  speed test collection
+  speed test execution
+- `pi_probe_discord/status.py`
+  baseline-aware health verdict logic
 - `pi_probe_discord/charts.py`
-  chart generation and styling
+  Discord chart rendering
 - `pi_probe_discord/discord_client.py`
-  Discord payload creation and posting
+  embed/file posting
 - `pi_probe_discord/installer.py`
-  interactive setup and timer generation
+  interactive setup and timer overrides
 - `pi_probe_discord/app.py`
-  orchestration layer
+  orchestration
