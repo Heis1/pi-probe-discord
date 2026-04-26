@@ -47,7 +47,7 @@ require_root() {
 require_tools() {
     local missing=()
     local tool
-    for tool in apt-get systemctl python3 curl; do
+    for tool in apt-get systemctl python3 curl dpkg-deb; do
         if ! command -v "$tool" >/dev/null 2>&1; then
             missing+=("$tool")
         fi
@@ -72,6 +72,18 @@ download_url_to_file() {
     local url="$1"
     local destination="$2"
     curl -fL --retry 3 --connect-timeout 15 -o "$destination" "$url"
+}
+
+validate_deb_file() {
+    local file_path="$1"
+    if [[ ! -s "$file_path" ]]; then
+        echo "Downloaded file is empty: $file_path" >&2
+        return 1
+    fi
+    if ! dpkg-deb --info "$file_path" >/dev/null 2>&1; then
+        echo "Downloaded file is not a valid Debian package: $file_path" >&2
+        return 1
+    fi
 }
 
 github_api_get() {
@@ -158,7 +170,11 @@ PY
         fi
     fi
 
-    download_url_to_file "https://github.com/${REPO}/releases/download/${tag}/${asset_name}" "$destination"
+    if ! download_url_to_file "https://github.com/${REPO}/releases/download/${tag}/${asset_name}" "$destination"; then
+        echo "Could not download ${asset_name} from GitHub release ${tag}." >&2
+        echo "If the repo is private, authenticate gh on the Pi or export GITHUB_TOKEN first." >&2
+        return 1
+    fi
 }
 
 resolve_deb_path() {
@@ -173,13 +189,15 @@ resolve_deb_path() {
     local destination="$TMP_DIR/${PACKAGE_NAME}.deb"
     if [[ "$source" =~ ^https?:// ]]; then
         download_url_to_file "$source" "$destination"
+        validate_deb_file "$destination"
         printf '%s\n' "$destination"
         return 0
     fi
 
     local version
-    version="$(resolve_release_version "$source")"
-    download_asset_from_release "$version" "$destination"
+    version="$(resolve_release_version "$source")" || return 1
+    download_asset_from_release "$version" "$destination" || return 1
+    validate_deb_file "$destination"
     printf '%s\n' "$destination"
 }
 
