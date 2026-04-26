@@ -31,7 +31,9 @@ The project is packaged as a Debian `.deb`, can run headless over SSH, and is bu
 - `scripts/release.sh`
   Build, tag, and publish a GitHub release with the `.deb`.
 - `scripts/update-from-release.sh`
-  Pi-side upgrade helper for installing a local or released `.deb`.
+  Source copy of the Pi-side upgrade helper.
+- `pi-probe-discord-update`
+  Installed system command for upgrading from a local or released `.deb`.
 - `debian/`
   Debian packaging files.
 - `DEPLOYMENT.md`
@@ -151,7 +153,7 @@ scripts/release.sh --version 0.2.0 "Add Pi upgrade helper"
 
 ## Pi Upgrade Helper
 
-On the Pi, the upgrade helper can install from:
+On the Pi, the packaged upgrade helper can install from:
 
 - a local `.deb` path
 - a direct release URL
@@ -161,9 +163,9 @@ On the Pi, the upgrade helper can install from:
 Examples:
 
 ```bash
-sudo scripts/update-from-release.sh /home/aron/pi-probe-discord_0.1.1-1_all.deb
-sudo scripts/update-from-release.sh 0.1.1
-sudo scripts/update-from-release.sh latest
+sudo pi-probe-discord-update /home/aron/pi-probe-discord_0.1.1-1_all.deb
+sudo pi-probe-discord-update 0.1.1
+sudo pi-probe-discord-update latest
 ```
 
 If the GitHub repo is private, the Pi needs either:
@@ -174,7 +176,7 @@ If the GitHub repo is private, the Pi needs either:
 If you also want to rerun installer-based config after upgrading:
 
 ```bash
-sudo scripts/update-from-release.sh latest --reconfigure
+sudo pi-probe-discord-update latest --reconfigure
 ```
 
 ## Notes
