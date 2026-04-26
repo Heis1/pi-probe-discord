@@ -1,5 +1,11 @@
 pi-probe-discord (0.1.0-1) unstable; urgency=medium
 
+  * First published release
+
+ -- Codex Builder <noreply@example.invalid>  Sun, 26 Apr 2026 17:34:37 +0930
+
+pi-probe-discord (0.1.0-1) unstable; urgency=medium
+
   * Initial package release.
 
  -- Codex Builder <noreply@example.invalid>  Sat, 26 Apr 2026 16:30:00 +0930
