@@ -166,3 +166,21 @@ sudo /opt/pi-probe-discord/.venv/bin/python /opt/pi-probe-discord/pihole_update_
 - If `matplotlib` is missing, the app still posts an embed without the image.
 - If the speedtest Python package is missing, the app records and reports that failure rather than crashing.
 - If you install via `.deb`, rerun `sudo pi-probe-discord-install` whenever you want to change publish frequency or daily report time. It updates `systemd` timer override files instead of requiring package reinstall.
+
+## Upgrade From A New Release
+
+When a new `.deb` is published from GitHub:
+
+```bash
+scp pi-probe-discord_<version>-1_all.deb aron@raspberrypi:/home/aron/
+ssh aron@raspberrypi
+sudo apt install /home/aron/pi-probe-discord_<version>-1_all.deb
+sudo systemctl daemon-reload
+sudo systemctl restart pi-probe-discord-speedtest.timer pi-probe-discord-full.timer
+```
+
+If the release changed schedule/config behavior, rerun:
+
+```bash
+sudo pi-probe-discord-install
+```

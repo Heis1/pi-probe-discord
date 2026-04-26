@@ -62,6 +62,38 @@ sudo dpkg -i ../pi-probe-discord_0.1.0-1_all.deb
 sudo pi-probe-discord-install
 ```
 
+## Release Workflow
+
+For future Pi updates, use the release script instead of ad hoc manual steps:
+
+```bash
+scripts/release.sh 0.1.1 "Improve Discord chart readability"
+```
+
+That script will:
+
+- verify the git worktree is clean
+- prepend a new `debian/changelog` entry
+- commit the release metadata
+- create git tag `v0.1.1`
+- build the `.deb`
+- create a GitHub release on `Heis1/pi-probe-discord`
+- upload the built `.deb` asset
+
+After that, install the new package on the Pi with:
+
+```bash
+sudo apt install ./pi-probe-discord_0.1.1-1_all.deb
+```
+
+If you want to change schedule values after upgrading:
+
+```bash
+sudo pi-probe-discord-install
+sudo systemctl daemon-reload
+sudo systemctl restart pi-probe-discord-speedtest.timer pi-probe-discord-full.timer
+```
+
 To change the packaged timer schedule later:
 
 ```bash
