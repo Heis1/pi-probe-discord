@@ -1,0 +1,13 @@
+[Unit]
+Description=Run Pi Probe Discord speed tests periodically
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=1h
+RandomizedDelaySec=5min
+Persistent=true
+Unit=pi-probe-discord-speedtest.service
+
+[Install]
+WantedBy=timers.target
+

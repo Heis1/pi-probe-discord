@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Pi Probe Discord full maintenance report daily
+
+[Timer]
+OnBootSec=20min
+OnCalendar=*-*-* 03:30:00
+RandomizedDelaySec=15min
+Persistent=true
+Unit=pi-probe-discord-full.service
+
+[Install]
+WantedBy=timers.target

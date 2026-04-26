@@ -1,0 +1,14 @@
+pihole-update-discord.env
+speed_chart.png
+pi_probe_discord.db
+__pycache__/
+generated-systemd/
+pi_probe_discord/__pycache__/
+debian/.debhelper/
+debian/debhelper-build-stamp
+debian/files
+debian/pi-probe-discord/
+*.deb
+*.build
+*.buildinfo
+*.changes

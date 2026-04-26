@@ -1,0 +1,55 @@
+{
+  "embeds": [
+    {
+      "title": "\u26a0\ufe0f Pi-hole Report",
+      "description": "**Status:** Warning\nInternet performance degraded. The graph makes the problem area obvious.",
+      "color": 16766720,
+      "fields": [
+        {
+          "name": "Hostname",
+          "value": "`raspberrypi`",
+          "inline": true
+        },
+        {
+          "name": "Date/Time",
+          "value": "2026-04-26 20:15:00 ACST",
+          "inline": true
+        },
+        {
+          "name": "Pi-hole Service",
+          "value": "Running",
+          "inline": true
+        },
+        {
+          "name": "Blocking",
+          "value": "Enabled",
+          "inline": true
+        },
+        {
+          "name": "Gravity Age",
+          "value": "1d old (2026-04-25 03:15:02 ACST)",
+          "inline": true
+        },
+        {
+          "name": "Blocklist",
+          "value": "286412 domains",
+          "inline": true
+        },
+        {
+          "name": "Speed Test",
+          "value": "Download 38.00 Mbps | Upload 6.20 Mbps | Ping 182.00 ms\n- Evening slowdown detected\n- Latency is outside the healthy range",
+          "inline": false
+        },
+        {
+          "name": "Recent Update Summary",
+          "value": "```text\nNo package updates were available.\n```",
+          "inline": false
+        }
+      ],
+      "footer": {
+        "text": "log: /tmp/pihole-update-discord.log"
+      },
+      "timestamp": "2026-04-26T10:45:00Z"
+    }
+  ]
+}

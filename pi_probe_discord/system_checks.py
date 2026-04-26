@@ -1,0 +1,101 @@
+from __future__ import annotations
+
+import shutil
+import sqlite3
+import subprocess
+import time
+from datetime import datetime
+from pathlib import Path
+
+from .models import PiholeResult, UpdateResult
+
+
+def run_command(command: list[str], log_path: Path | None = None) -> subprocess.CompletedProcess[str]:
+    result = subprocess.run(command, text=True, capture_output=True, check=False)
+    if log_path is not None:
+        with log_path.open("a", encoding="utf-8") as handle:
+            handle.write(f"$ {' '.join(command)}\n")
+            if result.stdout:
+                handle.write(result.stdout)
+                if not result.stdout.endswith("\n"):
+                    handle.write("\n")
+            if result.stderr:
+                handle.write(result.stderr)
+                if not result.stderr.endswith("\n"):
+                    handle.write("\n")
+    return result
+
+
+def run_updates(hostname: str, run_at_local: str, log_path: Path) -> UpdateResult:
+    log_path.write_text(f"Running apt update and upgrade on {hostname} at {run_at_local}\n", encoding="utf-8")
+
+    update = run_command(["sudo", "apt-get", "update"], log_path)
+    if update.returncode != 0:
+        return UpdateResult(ok=False, summary="Failed during package index refresh.", error="apt update failed")
+
+    upgrade = run_command(["sudo", "env", "DEBIAN_FRONTEND=noninteractive", "apt-get", "-y", "upgrade"], log_path)
+    if upgrade.returncode != 0:
+        return UpdateResult(ok=False, summary="Failed during package upgrade.", error="apt upgrade failed")
+
+    packages: list[str] = []
+    for line in log_path.read_text(encoding="utf-8").splitlines():
+        if line.startswith("Inst "):
+            parts = line.split()
+            if len(parts) > 1:
+                packages.append(parts[1])
+    packages = sorted(set(packages))
+
+    summary = "No package updates were available."
+    if packages:
+        summary = "\n".join(packages[:20])
+        if len(packages) > 20:
+            summary += f"\n... and {len(packages) - 20} more"
+    return UpdateResult(ok=True, summary=summary, packages=packages)
+
+
+def collect_pihole_info() -> PiholeResult:
+    result = PiholeResult()
+
+    if shutil.which("pihole") is None:
+        result.warnings.append("Pi-hole command unavailable")
+        return result
+
+    if shutil.which("systemctl"):
+        service = run_command(["systemctl", "is-active", "pihole-FTL"])
+        state = service.stdout.strip()
+        result.service_status = {
+            "active": "Running",
+            "inactive": "Stopped",
+            "failed": "Failed",
+            "activating": "Starting",
+            "deactivating": "Stopping",
+        }.get(state, "Unknown")
+
+    status = run_command(["pihole", "status"])
+    if status.returncode == 0:
+        output = status.stdout.lower()
+        if "blocking is enabled" in output:
+            result.blocking_status = "Enabled"
+        elif "blocking is disabled" in output:
+            result.blocking_status = "Disabled"
+    else:
+        result.warnings.append("pihole status failed")
+
+    gravity_db = Path("/etc/pihole/gravity.db")
+    if gravity_db.exists():
+        modified = gravity_db.stat().st_mtime
+        age_days = int(time.time() - modified) // 86400
+        modified_text = datetime.fromtimestamp(modified).astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
+        result.gravity_age = f"{age_days}d old ({modified_text})"
+
+        try:
+            with sqlite3.connect(gravity_db) as conn:
+                row = conn.execute("SELECT COUNT(*) FROM gravity;").fetchone()
+            if row and isinstance(row[0], int):
+                result.blocklist_count = f"{row[0]} domains"
+        except sqlite3.Error:
+            result.warnings.append("Could not read gravity.db")
+    else:
+        result.warnings.append("gravity.db unavailable")
+    return result
+

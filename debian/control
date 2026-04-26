@@ -1,0 +1,20 @@
+Source: pi-probe-discord
+Section: net
+Priority: optional
+Maintainer: Codex Builder <noreply@example.invalid>
+Build-Depends: debhelper-compat (= 13)
+Standards-Version: 4.7.0
+Rules-Requires-Root: no
+
+Package: pi-probe-discord
+Architecture: all
+Depends:
+ ${misc:Depends},
+ python3,
+ python3-requests,
+ python3-matplotlib,
+ speedtest-cli
+Description: Raspberry Pi and Pi-hole Discord reporting probe
+ Headless Raspberry Pi reporting application that collects Pi-hole status,
+ update results, and periodic speed tests, stores historical data in SQLite,
+ and posts Discord embeds and charts for easy monitoring.

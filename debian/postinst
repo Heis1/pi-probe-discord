@@ -1,0 +1,16 @@
+#!/bin/sh
+set -e
+
+mkdir -p /etc/pi-probe-discord
+mkdir -p /var/lib/pi-probe-discord
+
+if [ ! -f /etc/pi-probe-discord/pihole-update-discord.env ]; then
+    install -m 600 /usr/share/pi-probe-discord/pihole-update-discord.env.example /etc/pi-probe-discord/pihole-update-discord.env
+fi
+
+chown root:root /etc/pi-probe-discord/pihole-update-discord.env || true
+
+echo "pi-probe-discord installed."
+echo "Next step: run sudo pi-probe-discord-install to set your Discord webhook and cleanup old cron jobs."
+
+exit 0

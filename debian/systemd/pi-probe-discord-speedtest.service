@@ -1,0 +1,9 @@
+[Unit]
+Description=Pi Probe Discord periodic speed test
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/pi-probe-discord
+ExecStart=/usr/bin/pi-probe-discord speedtest-only

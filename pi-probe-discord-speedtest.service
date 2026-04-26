@@ -1,0 +1,9 @@
+[Unit]
+Description=Pi Probe Discord periodic speed test
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/pi-probe-discord
+ExecStart=/opt/pi-probe-discord/.venv/bin/python /opt/pi-probe-discord/pihole_update_report.py speedtest-only

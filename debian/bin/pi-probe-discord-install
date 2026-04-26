@@ -1,0 +1,7 @@
+#!/bin/sh
+exec /usr/bin/python3 /opt/pi-probe-discord/install.py \
+  --package-mode \
+  --skip-systemd-generation \
+  --output-dir /etc/pi-probe-discord \
+  --service-command /usr/bin/pi-probe-discord \
+  "$@"
