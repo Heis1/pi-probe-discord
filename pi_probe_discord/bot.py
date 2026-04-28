@@ -8,15 +8,24 @@ from dataclasses import dataclass
 import discord
 from discord import app_commands
 
-START_COMMAND = [
+START_SPEEDTEST_COMMAND = [
     "sudo",
     "/bin/systemctl",
     "start",
+    "--no-block",
     "pi-probe-discord-speedtest.service",
+]
+START_FULLREPORT_COMMAND = [
+    "sudo",
+    "/bin/systemctl",
+    "start",
+    "--no-block",
+    "pi-probe-discord-full.service",
 ]
 
 UNAUTHORISED_MESSAGE = "You are not authorised to run this command."
 STARTED_MESSAGE = "Speed test started. Results will post shortly."
+FULLREPORT_STARTED_MESSAGE = "Full report started. Results will post shortly."
 
 
 @dataclass
@@ -77,7 +86,11 @@ class PiProbeDiscordBot(discord.Client):
     async def setup_hook(self) -> None:
         @self.tree.command(name="speedtest", description="Trigger a Pi speed test.")
         async def speedtest(interaction: discord.Interaction) -> None:
-            await self.handle_speedtest(interaction)
+            await self.handle_service_start(interaction, START_SPEEDTEST_COMMAND, STARTED_MESSAGE, "speedtest")
+
+        @self.tree.command(name="fullreport", description="Trigger a full Pi report.")
+        async def fullreport(interaction: discord.Interaction) -> None:
+            await self.handle_service_start(interaction, START_FULLREPORT_COMMAND, FULLREPORT_STARTED_MESSAGE, "fullreport")
 
         if self.config.command_guild_id is not None:
             guild = discord.Object(id=self.config.command_guild_id)
@@ -91,20 +104,26 @@ class PiProbeDiscordBot(discord.Client):
     async def on_ready(self) -> None:
         self.logger.info("Discord bot connected as %s (%s)", self.user, getattr(self.user, "id", "unknown"))
 
-    async def handle_speedtest(self, interaction: discord.Interaction) -> None:
+    async def handle_service_start(
+        self,
+        interaction: discord.Interaction,
+        start_command: list[str],
+        started_message: str,
+        command_name: str,
+    ) -> None:
         user = interaction.user
         username = f"{user} ({user.id})"
 
         if user.id not in self.config.allowed_user_ids:
-            self.logger.warning("Unauthorized /speedtest attempt by %s", username)
+            self.logger.warning("Unauthorized /%s attempt by %s", command_name, username)
             await interaction.response.send_message(UNAUTHORISED_MESSAGE, ephemeral=True)
             return
 
-        self.logger.info("Authorized /speedtest request by %s", username)
+        self.logger.info("Authorized /%s request by %s", command_name, username)
 
         try:
             subprocess.run(
-                START_COMMAND,
+                start_command,
                 check=True,
                 capture_output=True,
                 text=True,
@@ -112,25 +131,26 @@ class PiProbeDiscordBot(discord.Client):
             )
         except subprocess.CalledProcessError as exc:
             self.logger.error(
-                "Failed to start speedtest service for %s: returncode=%s stderr=%s",
+                "Failed to start service for /%s by %s: returncode=%s stderr=%s",
+                command_name,
                 username,
                 exc.returncode,
                 exc.stderr.strip(),
             )
             await interaction.response.send_message(
-                "Speed test could not be started right now.",
+                "Command could not be started right now.",
                 ephemeral=True,
             )
             return
         except subprocess.TimeoutExpired:
-            self.logger.error("Timed out starting speedtest service for %s", username)
+            self.logger.error("Timed out starting service for /%s by %s", command_name, username)
             await interaction.response.send_message(
-                "Speed test could not be started right now.",
+                "Command could not be started right now.",
                 ephemeral=True,
             )
             return
 
-        await interaction.response.send_message(STARTED_MESSAGE)
+        await interaction.response.send_message(started_message)
 
 
 def main() -> int:
