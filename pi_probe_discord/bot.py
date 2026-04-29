@@ -94,12 +94,14 @@ class PiProbeDiscordBot(discord.Client):
 
         if self.config.command_guild_id is not None:
             guild = discord.Object(id=self.config.command_guild_id)
+            self.tree.clear_commands(guild=None)
+            await self.tree.sync()
             self.tree.copy_global_to(guild=guild)
             await self.tree.sync(guild=guild)
-            self.logger.info("Synced /speedtest to guild %s", self.config.command_guild_id)
+            self.logger.info("Synced /speedtest and /fullreport to guild %s", self.config.command_guild_id)
         else:
             await self.tree.sync()
-            self.logger.info("Synced /speedtest globally")
+            self.logger.info("Synced /speedtest and /fullreport globally")
 
     async def on_ready(self) -> None:
         self.logger.info("Discord bot connected as %s (%s)", self.user, getattr(self.user, "id", "unknown"))

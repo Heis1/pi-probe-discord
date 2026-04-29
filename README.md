@@ -25,9 +25,11 @@ The project is packaged as a Debian `.deb`, can run headless over SSH, and is bu
 The repo also includes a small Discord slash-command bot for one narrow job:
 
 - `/speedtest`
+- `/fullreport`
 - only for configured Discord user IDs
-- starts exactly one systemd unit:
+- starts fixed systemd units only:
   - `pi-probe-discord-speedtest.service`
+  - `pi-probe-discord-full.service`
 
 It does not run arbitrary shell commands.
 
@@ -145,7 +147,10 @@ sudo visudo -f /etc/sudoers.d/pi-probe-discord-bot
 Add exactly:
 
 ```text
+aron ALL=(root) NOPASSWD: /bin/systemctl start --no-block pi-probe-discord-speedtest.service
 aron ALL=(root) NOPASSWD: /bin/systemctl start pi-probe-discord-speedtest.service
+aron ALL=(root) NOPASSWD: /bin/systemctl start --no-block pi-probe-discord-full.service
+aron ALL=(root) NOPASSWD: /bin/systemctl start pi-probe-discord-full.service
 ```
 
 Then enable the bot:
