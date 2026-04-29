@@ -1,3 +1,9 @@
+pi-probe-discord (0.1.9-1) unstable; urgency=medium
+
+  * Fix Pi-hole update detection by parsing pihole -v output
+
+ -- Codex Builder <noreply@example.invalid>  Thu, 30 Apr 2026 00:09:36 +0930
+
 pi-probe-discord (0.1.8-1) unstable; urgency=medium
 
   * Fix guild command sync order so /speedtest and /fullreport remain visible
