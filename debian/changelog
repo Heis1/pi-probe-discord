@@ -1,3 +1,9 @@
+pi-probe-discord (0.1.7-1) unstable; urgency=medium
+
+  * Fix duplicate Discord slash commands and document /fullreport setup
+
+ -- Codex Builder <noreply@example.invalid>  Wed, 29 Apr 2026 23:59:39 +0930
+
 pi-probe-discord (0.1.6-1) unstable; urgency=medium
 
   * Add Pi-hole component update-availability reporting to full report
