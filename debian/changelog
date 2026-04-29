@@ -1,3 +1,9 @@
+pi-probe-discord (0.1.10-1) unstable; urgency=medium
+
+  * Fix Pi-hole Latest-format update detection and chart summary text overlap
+
+ -- Codex Builder <noreply@example.invalid>  Thu, 30 Apr 2026 00:15:10 +0930
+
 pi-probe-discord (0.1.9-1) unstable; urgency=medium
 
   * Fix Pi-hole update detection by parsing pihole -v output
