@@ -10,6 +10,14 @@ from pathlib import Path
 from .models import PiholeResult, UpdateResult
 
 
+def _extract_pihole_update_status(output: str) -> str:
+    lines = [line.strip() for line in output.splitlines() if line.strip()]
+    update_lines = [line for line in lines if "update available" in line.lower()]
+    if not update_lines:
+        return "Up to date"
+    return " | ".join(update_lines[:5])
+
+
 def run_command(command: list[str], log_path: Path | None = None) -> subprocess.CompletedProcess[str]:
     result = subprocess.run(command, text=True, capture_output=True, check=False)
     if log_path is not None:
@@ -73,6 +81,7 @@ def collect_pihole_info() -> PiholeResult:
 
     status = run_command(["pihole", "status"])
     if status.returncode == 0:
+        result.update_status = _extract_pihole_update_status(status.stdout)
         output = status.stdout.lower()
         if "blocking is enabled" in output:
             result.blocking_status = "Enabled"
@@ -98,4 +107,3 @@ def collect_pihole_info() -> PiholeResult:
     else:
         result.warnings.append("gravity.db unavailable")
     return result
-

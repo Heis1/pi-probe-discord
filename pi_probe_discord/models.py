@@ -32,6 +32,7 @@ class PiholeResult:
     blocking_status: str = "Unknown"
     gravity_age: str = "Unavailable"
     blocklist_count: str = "Unavailable"
+    update_status: str = "Unknown"
     warnings: list[str] = field(default_factory=list)
 
 
@@ -64,4 +65,3 @@ class RunRecord:
     upload_mbps: float | None
     ping_ms: float | None
     speed_warnings: str
-

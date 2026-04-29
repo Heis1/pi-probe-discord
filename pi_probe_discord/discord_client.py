@@ -68,7 +68,15 @@ def build_embed(
                 "fields": [
                     {"name": "What This Means", "value": assessment.headline[:1024], "inline": False},
                     {"name": "Now", "value": speed_value[:1024], "inline": False},
-                    {"name": "Pi-hole", "value": f"Service: {pihole_result.service_status}\nBlocking: {pihole_result.blocking_status}", "inline": True},
+                    {
+                        "name": "Pi-hole",
+                        "value": (
+                            f"Service: {pihole_result.service_status}\n"
+                            f"Blocking: {pihole_result.blocking_status}\n"
+                            f"Updates: {pihole_result.update_status}"
+                        ),
+                        "inline": True,
+                    },
                     {"name": "Host", "value": f"`{hostname}`\n{run_at_local}", "inline": True},
                     {"name": "Why It Was Flagged", "value": assessment.detail[:1024], "inline": True},
                     {"name": "Gravity / Blocklist", "value": f"{pihole_result.gravity_age}\n{pihole_result.blocklist_count}", "inline": False},
