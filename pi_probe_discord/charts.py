@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
+import socket
 from typing import Any
 
 from .models import SpeedResult
@@ -20,6 +22,19 @@ except ImportError:
     mticker = None
 
 
+@dataclass
+class MetricStats:
+    latest: float | None
+    avg_24h: float | None
+    avg_7d: float | None
+    min_24h: float | None
+    max_24h: float | None
+    min_7d: float | None
+    max_7d: float | None
+    samples_24h: int
+    samples_7d: int
+
+
 def _history_points_for_window(history: dict[str, list[dict[str, Any]]], metric: str, cutoff: datetime) -> list[tuple[datetime, float]]:
     points: list[tuple[datetime, float]] = []
     for point in history.get(metric, []):
@@ -35,6 +50,77 @@ def _history_points_for_window(history: dict[str, list[dict[str, Any]]], metric:
             points.append((point_time, float(value_raw)))
     points.sort(key=lambda item: item[0])
     return points
+
+
+def _average(values: list[float]) -> float | None:
+    if not values:
+        return None
+    return sum(values) / len(values)
+
+
+def _min_max(values: list[float]) -> tuple[float | None, float | None]:
+    if not values:
+        return None, None
+    return min(values), max(values)
+
+
+def calculate_metric_stats(points: list[tuple[datetime, float]], now: datetime) -> MetricStats:
+    values_7d = [value for _, value in points]
+    values_24h = [value for moment, value in points if moment >= now - timedelta(hours=24)]
+    min_24h, max_24h = _min_max(values_24h)
+    min_7d, max_7d = _min_max(values_7d)
+    return MetricStats(
+        latest=values_7d[-1] if values_7d else None,
+        avg_24h=_average(values_24h),
+        avg_7d=_average(values_7d),
+        min_24h=min_24h,
+        max_24h=max_24h,
+        min_7d=min_7d,
+        max_7d=max_7d,
+        samples_24h=len(values_24h),
+        samples_7d=len(values_7d),
+    )
+
+
+def _comparison_text(metric: str, latest: float | None, avg_24h: float | None) -> tuple[str, str]:
+    if latest is None or avg_24h is None or avg_24h <= 0:
+        return "Not enough data", "#93a0b3"
+
+    delta = (latest - avg_24h) / avg_24h * 100.0
+    abs_delta = abs(delta)
+    metric_is_ping = metric == "ping"
+
+    if abs_delta <= 15.0:
+        return "Normal", "#34d399"
+
+    if metric_is_ping:
+        if delta >= 30.0:
+            return f"Degraded — {delta:.0f}% above 24h avg", "#ff6b6b"
+        if delta >= 15.0:
+            return f"Elevated — {delta:.0f}% above 24h avg", "#fbbf24"
+        return f"Improved — {abs_delta:.0f}% below 24h avg", "#34d399"
+
+    if delta <= -30.0:
+        return f"Degraded — {abs_delta:.0f}% below 24h avg", "#ff6b6b"
+    if delta <= -15.0:
+        return f"Below average — {abs_delta:.0f}% below 24h avg", "#fbbf24"
+    return f"Above average — {delta:.0f}% above 24h avg", "#34d399"
+
+
+def _fmt_value(value: float | None, suffix: str, precision: int = 1) -> str:
+    if value is None:
+        return "not enough data"
+    if precision == 0:
+        return f"{value:.0f} {suffix}"
+    return f"{value:.{precision}f} {suffix}"
+
+
+def _fmt_range(low: float | None, high: float | None, suffix: str, precision: int = 1) -> str:
+    if low is None or high is None:
+        return "not enough data"
+    if precision == 0:
+        return f"{low:.0f}-{high:.0f} {suffix}"
+    return f"{low:.{precision}f}-{high:.{precision}f} {suffix}"
 
 
 def _problem_ranges(
@@ -66,308 +152,263 @@ def _problem_ranges(
     return ranges
 
 
-def _distinct_local_days(*series: list[tuple[datetime, float]]) -> set[datetime.date]:
-    days = set()
-    for points in series:
-        for moment, _ in points:
-            days.add(moment.date())
-    return days
-
-
-def _configure_y_axis(ax: Any, *series: list[tuple[datetime, float]]) -> None:
-    values: list[float] = []
-    for points in series:
-        values.extend(value for _, value in points)
-    if not values:
-        return
-
-    minimum = min(values)
-    maximum = max(values)
-    span = max(maximum - minimum, 8.0)
-    lower = max(0.0, minimum - span * 0.18)
-    upper = maximum + span * 0.18
-    ax.set_ylim(lower, upper)
-    ax.yaxis.set_major_locator(mticker.MaxNLocator(nbins=6, min_n_ticks=4))
-
-
-def _sample_mode_labels(*series: list[tuple[datetime, float]]) -> list[str]:
-    seen: list[str] = []
-    for points in series:
-        for moment, _ in points:
-            label = moment.strftime("%H:%M")
-            if label not in seen:
-                seen.append(label)
-    return seen
-
-
-def _render_sparse_state(ax: Any, count: int) -> None:
-    ax.text(
-        0.985,
-        1.13,
-        f"{count} checks so far today",
-        transform=ax.transAxes,
-        color="#93a0b3",
-        fontsize=10,
-        ha="right",
-        va="center",
-    )
-
-
-def _render_series_key(ax: Any) -> None:
-    items = [("Download", "#39a0ff"), ("Upload", "#34d399"), ("Ping", "#ff8a3d")]
-    x = 0.0
-    for label, color in items:
-        ax.text(
-            x,
-            1.11,
-            f"● {label}",
-            transform=ax.transAxes,
-            color=color,
-            fontsize=11.5,
-            fontweight="bold",
-            ha="left",
-            va="center",
-        )
-        x += 0.15
-
-
-def _render_weekly_building_state(ax: Any, covered_days: int) -> None:
-    ax.text(
-        0.5,
-        0.64,
-        "Weekly view is still filling in",
-        ha="center",
-        va="center",
-        transform=ax.transAxes,
-        color="#f4f7fb",
-        fontsize=20,
-        fontweight="bold",
-    )
-    ax.text(
-        0.5,
-        0.47,
-        f"Only {covered_days} of the last 7 local days has usable history so far.",
-        ha="center",
-        va="center",
-        transform=ax.transAxes,
-        color="#c8d0dd",
-        fontsize=13.5,
-    )
-    ax.text(
-        0.5,
-        0.30,
-        "Leave the timer running and this panel will turn into a proper weekly trend automatically.",
-        ha="center",
-        va="center",
-        transform=ax.transAxes,
-        color="#93a0b3",
-        fontsize=11,
-    )
-
-
-def _plot_window(
-    ax: Any,
-    history: dict[str, list[dict[str, Any]]],
-    since: datetime,
-    until: datetime,
-    title: str,
-    formatter: str,
-    problem_download_threshold: float,
-    problem_ping_threshold: float,
-    daily_ticks: bool = False,
-    min_days_required: int = 1,
-) -> bool:
-    download_points = _history_points_for_window(history, "download", since)
-    upload_points = _history_points_for_window(history, "upload", since)
-    ping_points = _history_points_for_window(history, "ping", since)
-    has_data = bool(download_points or upload_points or ping_points)
-
+def _render_no_data(ax: Any, title: str) -> None:
     ax.set_facecolor("#11161f")
-    ax.set_title(title, loc="left", color="#f4f7fb", fontsize=18, fontweight="bold", pad=18)
+    ax.set_title(title, loc="left", color="#f4f7fb", fontsize=15, fontweight="bold", pad=16)
+    ax.text(0.5, 0.5, "Not enough data", ha="center", va="center", transform=ax.transAxes, color="#93a0b3", fontsize=12)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    for spine in ax.spines.values():
+        spine.set_color("#344055")
 
-    if not has_data:
-        ax.text(0.5, 0.5, "No data in this period", ha="center", va="center", transform=ax.transAxes, color="#93a0b3")
-        ax.set_xticks([])
-        ax.set_yticks([])
-        return False
 
-    covered_days = _distinct_local_days(download_points, upload_points, ping_points)
-    if daily_ticks and len(covered_days) < min_days_required:
-        _render_weekly_building_state(ax, len(covered_days))
-        ax.set_xticks([])
-        ax.set_yticks([])
-        for spine in ax.spines.values():
-            spine.set_color("#344055")
-        return False
-
+def _configure_axis(ax: Any, y_label: str) -> None:
+    ax.set_facecolor("#11161f")
     ax.grid(color="#232c3b", alpha=1.0, linewidth=0.8)
     ax.set_axisbelow(True)
     for spine in ax.spines.values():
         spine.set_color("#344055")
-    ax.tick_params(colors="#aeb7c5", labelsize=12)
-    ax.set_ylabel("Mbps / ms", color="#aeb7c5", fontsize=12)
-    ax.margins(x=0.02, y=0.16)
-    _render_series_key(ax)
+    ax.tick_params(colors="#aeb7c5", labelsize=10)
+    ax.set_ylabel(y_label, color="#aeb7c5", fontsize=10)
+    ax.yaxis.set_major_locator(mticker.MaxNLocator(nbins=6, min_n_ticks=4))
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M", tz=None))
 
-    sparse_recent = not daily_ticks and len(_distinct_local_days(download_points, upload_points, ping_points)) <= 1 and max(
-        len(download_points), len(upload_points), len(ping_points)
-    ) < 8
 
-    if sparse_recent:
-        title = "Recent Checks"
-        ax.set_title(title, loc="left", color="#f4f7fb", fontsize=20, fontweight="bold", pad=20)
-        labels = _sample_mode_labels(download_points, upload_points, ping_points)
-        count = len(labels)
-        xs = list(range(count))
-
-        down_map = {moment.strftime("%H:%M"): value for moment, value in download_points}
-        up_map = {moment.strftime("%H:%M"): value for moment, value in upload_points}
-        ping_map = {moment.strftime("%H:%M"): value for moment, value in ping_points}
-
-        down_values = [down_map[label] for label in labels if label in down_map]
-        up_values = [up_map[label] for label in labels if label in up_map]
-        ping_values = [ping_map[label] for label in labels if label in ping_map]
-
-        ordered_down = [down_map.get(label, down_values[-1] if down_values else 0.0) for label in labels]
-        ordered_up = [up_map.get(label, up_values[-1] if up_values else 0.0) for label in labels]
-        ordered_ping = [ping_map.get(label, ping_values[-1] if ping_values else 0.0) for label in labels]
-
-        if ordered_down:
-            ax.plot(xs, ordered_down, color="#39a0ff", marker="o", linewidth=3.0, markersize=5, label="Download")
-        if ordered_up:
-            ax.plot(xs, ordered_up, color="#34d399", marker="o", linewidth=3.0, markersize=5, label="Upload")
-        if ordered_ping:
-            ax.plot(xs, ordered_ping, color="#ff8a3d", marker="o", linewidth=3.0, markersize=5, label="Ping")
-
-        ax.set_xlim(-0.1, max(count - 0.9, 0.9))
-        ax.set_xticks(xs)
-        ax.set_xticklabels(labels, color="#aeb7c5", fontsize=12)
-        _configure_y_axis(
-            ax,
-            [(datetime.now(), value) for value in ordered_down],
-            [(datetime.now(), value) for value in ordered_up],
-            [(datetime.now(), value) for value in ordered_ping],
-        )
-        _render_sparse_state(ax, count)
-    else:
-        for start, end in _problem_ranges(download_points, ping_points, problem_download_threshold, problem_ping_threshold):
-            ax.axvspan(start, end + timedelta(minutes=1), color="#8f2333", alpha=0.22)
-
-        if download_points:
-            ax.plot([p[0] for p in download_points], [p[1] for p in download_points], color="#39a0ff", marker="o", linewidth=3.0, markersize=4, label="Download")
-        if upload_points:
-            ax.plot([p[0] for p in upload_points], [p[1] for p in upload_points], color="#34d399", marker="o", linewidth=3.0, markersize=4, label="Upload")
-        if ping_points:
-            ax.plot([p[0] for p in ping_points], [p[1] for p in ping_points], color="#ff8a3d", marker="o", linewidth=3.0, markersize=4, label="Ping")
-
-        _configure_y_axis(ax, download_points, upload_points, ping_points)
-        ax.xaxis.set_major_formatter(mdates.DateFormatter(formatter, tz=since.tzinfo))
-        if daily_ticks:
-            ax.xaxis.set_major_locator(mdates.DayLocator())
-            start_day = since.replace(hour=0, minute=0, second=0, microsecond=0)
-            end_day = (until + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-            ax.set_xlim(start_day, end_day)
-        else:
-            ax.xaxis.set_major_locator(mdates.HourLocator(byhour=[0, 6, 12, 18], tz=since.tzinfo))
+def _set_time_axis(ax: Any, since: datetime, until: datetime, day_mode: bool, earliest: datetime | None) -> None:
+    if day_mode:
+        if earliest is None:
             ax.set_xlim(since, until)
-
-    if daily_ticks:
+            return
+        data_start = max(since, earliest - timedelta(hours=4))
+        ax.set_xlim(data_start, until)
         ax.xaxis.set_major_locator(mdates.DayLocator())
-        start_day = since.replace(hour=0, minute=0, second=0, microsecond=0)
-        end_day = (until + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-        ax.set_xlim(start_day, end_day)
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%a", tz=None))
+    else:
+        ax.set_xlim(since, until)
+        ax.xaxis.set_major_locator(mdates.HourLocator(byhour=[0, 6, 12, 18], tz=since.tzinfo))
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M", tz=since.tzinfo))
+
+
+def _plot_speed_chart(
+    ax: Any,
+    title: str,
+    download_points: list[tuple[datetime, float]],
+    upload_points: list[tuple[datetime, float]],
+    since: datetime,
+    until: datetime,
+    avg_download: float | None,
+    avg_upload: float | None,
+    problem_ranges: list[tuple[datetime, datetime]],
+    day_mode: bool,
+    earliest: datetime | None,
+) -> bool:
+    if not download_points and not upload_points:
+        _render_no_data(ax, title)
+        return False
+
+    _configure_axis(ax, "Mbps")
+    ax.set_title(title, loc="left", color="#f4f7fb", fontsize=15, fontweight="bold", pad=16)
+    if download_points:
+        ax.plot([p[0] for p in download_points], [p[1] for p in download_points], color="#39a0ff", marker="o", linewidth=2.4, markersize=3.4, label="Download")
+    if upload_points:
+        ax.plot([p[0] for p in upload_points], [p[1] for p in upload_points], color="#34d399", marker="o", linewidth=2.4, markersize=3.4, label="Upload")
+
+    if avg_download is not None:
+        ax.axhline(avg_download, color="#39a0ff", linestyle="--", linewidth=1.2, alpha=0.7, label="Download avg")
+    if avg_upload is not None:
+        ax.axhline(avg_upload, color="#34d399", linestyle="--", linewidth=1.2, alpha=0.7, label="Upload avg")
+
+    for index, (start, end) in enumerate(problem_ranges):
+        label = "Degraded window" if index == 0 else None
+        ax.axvspan(start, end + timedelta(minutes=1), color="#8f2333", alpha=0.18, label=label)
+
+    _set_time_axis(ax, since, until, day_mode, earliest)
+    ax.legend(loc="upper right", frameon=False, fontsize=9, ncol=3, labelcolor="#c8d0dd")
     return True
+
+
+def _plot_ping_chart(
+    ax: Any,
+    title: str,
+    ping_points: list[tuple[datetime, float]],
+    since: datetime,
+    until: datetime,
+    avg_ping: float | None,
+    problem_ranges: list[tuple[datetime, datetime]],
+    day_mode: bool,
+    earliest: datetime | None,
+) -> bool:
+    if not ping_points:
+        _render_no_data(ax, title)
+        return False
+
+    _configure_axis(ax, "ms")
+    ax.set_title(title, loc="left", color="#f4f7fb", fontsize=15, fontweight="bold", pad=16)
+    ax.plot([p[0] for p in ping_points], [p[1] for p in ping_points], color="#ff8a3d", marker="o", linewidth=2.4, markersize=3.4, label="Ping")
+    if avg_ping is not None:
+        ax.axhline(avg_ping, color="#ff8a3d", linestyle="--", linewidth=1.2, alpha=0.7, label="Ping avg")
+    for index, (start, end) in enumerate(problem_ranges):
+        label = "Degraded window" if index == 0 else None
+        ax.axvspan(start, end + timedelta(minutes=1), color="#8f2333", alpha=0.18, label=label)
+
+    _set_time_axis(ax, since, until, day_mode, earliest)
+    ax.legend(loc="upper right", frameon=False, fontsize=9, ncol=3, labelcolor="#c8d0dd")
+    return True
+
+
+def _render_summary_card(
+    ax: Any,
+    assessment: Any,
+    now: datetime,
+    down: MetricStats,
+    up: MetricStats,
+    ping: MetricStats,
+) -> None:
+    ax.set_facecolor("#151a22")
+    ax.set_xticks([])
+    ax.set_yticks([])
+    for spine in ax.spines.values():
+        spine.set_color(assessment.color_hex)
+        spine.set_linewidth(2.0)
+
+    latest_summary = f"{_fmt_value(down.latest, 'Mbps')} ↓   {_fmt_value(up.latest, 'Mbps')} ↑   {_fmt_value(ping.latest, 'ms', 0)}"
+    avg_summary = f"24h avg: {_fmt_value(down.avg_24h, 'Mbps')} ↓ | {_fmt_value(up.avg_24h, 'Mbps')} ↑ | {_fmt_value(ping.avg_24h, 'ms', 0)}"
+
+    ax.text(0.03, 0.68, assessment.label, transform=ax.transAxes, color=assessment.color_hex, fontsize=20, fontweight="bold", va="center")
+    ax.text(0.03, 0.30, avg_summary, transform=ax.transAxes, color="#b6c0d0", fontsize=11, va="center")
+    ax.text(0.50, 0.68, latest_summary, transform=ax.transAxes, color="#e7edf7", fontsize=16, fontweight="bold", ha="center", va="center")
+    ax.text(0.50, 0.30, assessment.headline, transform=ax.transAxes, color="#b6c0d0", fontsize=10.5, ha="center", va="center")
+    ax.text(0.97, 0.68, now.strftime("%H:%M"), transform=ax.transAxes, color="#d9e0ec", fontsize=17, fontweight="bold", ha="right", va="center")
+    ax.text(0.97, 0.30, now.strftime("%a %d %b %Z"), transform=ax.transAxes, color="#9ca8bc", fontsize=10.5, ha="right", va="center")
+
+
+def _render_metric_card(ax: Any, title: str, stats: MetricStats, unit: str, metric_key: str) -> None:
+    ax.set_facecolor("#151a22")
+    ax.set_xticks([])
+    ax.set_yticks([])
+    for spine in ax.spines.values():
+        spine.set_color("#212938")
+        spine.set_linewidth(1.4)
+
+    precision = 0 if unit == "ms" else 1
+    latest = _fmt_value(stats.latest, unit, precision)
+    comparison, accent = _comparison_text(metric_key, stats.latest, stats.avg_24h)
+    avg_24h = _fmt_value(stats.avg_24h, unit, precision)
+    avg_7d = _fmt_value(stats.avg_7d, unit, precision)
+    range_24h = _fmt_range(stats.min_24h, stats.max_24h, unit, precision)
+    range_7d = _fmt_range(stats.min_7d, stats.max_7d, unit, precision)
+
+    ax.text(0.05, 0.83, title, transform=ax.transAxes, color="#95a1b5", fontsize=12.5, va="center")
+    ax.text(0.05, 0.63, latest, transform=ax.transAxes, color="#f4f7fb", fontsize=19, fontweight="bold", va="center")
+    ax.text(0.05, 0.44, comparison, transform=ax.transAxes, color=accent, fontsize=10.8, fontweight="bold", va="center")
+    ax.text(0.05, 0.25, f"24h avg: {avg_24h} | 7d avg: {avg_7d}", transform=ax.transAxes, color="#b3bdd0", fontsize=9.7, va="center")
+    ax.text(0.05, 0.10, f"24h range: {range_24h} | 7d range: {range_7d}", transform=ax.transAxes, color="#8f9bb0", fontsize=9.1, va="center")
 
 
 def generate_chart(history: dict[str, list[dict[str, Any]]], now: datetime, chart_path: str, speed_result: SpeedResult) -> tuple[bool, str]:
     if plt is None or mdates is None:
         return False, "matplotlib not installed"
 
-    fig = plt.figure(figsize=(15.2, 12.2), facecolor="#0f141d")
-    gs = fig.add_gridspec(4, 3, height_ratios=[1.45, 1.25, 2.55, 2.35], hspace=0.62, wspace=0.24)
+    fig = plt.figure(figsize=(15.6, 14.2), facecolor="#0f141d")
+    gs = fig.add_gridspec(6, 3, height_ratios=[1.2, 1.45, 2.0, 1.8, 2.0, 1.8], hspace=0.62, wspace=0.24)
 
-    history_download = _history_points_for_window(history, "download", now - timedelta(days=365))
-    history_upload = _history_points_for_window(history, "upload", now - timedelta(days=365))
-    history_ping = _history_points_for_window(history, "ping", now - timedelta(days=365))
-    current_download = history_download[-1][1] if history_download else None
-    current_upload = history_upload[-1][1] if history_upload else None
-    current_ping = history_ping[-1][1] if history_ping else None
+    history_download = _history_points_for_window(history, "download", now - timedelta(days=7))
+    history_upload = _history_points_for_window(history, "upload", now - timedelta(days=7))
+    history_ping = _history_points_for_window(history, "ping", now - timedelta(days=7))
     assessment = assess_internet_health(history, now, speed_result)
 
+    down_stats = calculate_metric_stats(history_download, now)
+    up_stats = calculate_metric_stats(history_upload, now)
+    ping_stats = calculate_metric_stats(history_ping, now)
+
     status_ax = fig.add_subplot(gs[0, :])
-    status_ax.set_facecolor("#151a22")
-    status_ax.set_xticks([])
-    status_ax.set_yticks([])
-    for spine in status_ax.spines.values():
-        spine.set_color(assessment.color_hex)
-        spine.set_linewidth(2.2)
-    status_ax.text(0.03, 0.68, assessment.label, transform=status_ax.transAxes, color=assessment.color_hex, fontsize=26, fontweight="bold", va="center")
-    status_ax.text(0.03, 0.36, assessment.headline, transform=status_ax.transAxes, color="#e5ebf4", fontsize=14.5, va="center")
-    status_ax.text(0.97, 0.66, now.strftime("%H:%M"), transform=status_ax.transAxes, color="#c4ccd8", fontsize=20, ha="right", fontweight="bold", va="center")
-    status_ax.text(0.97, 0.36, now.strftime("%a %d %b %Z"), transform=status_ax.transAxes, color="#8d98ab", fontsize=12, ha="right", va="center")
+    _render_summary_card(status_ax, assessment, now, down_stats, up_stats, ping_stats)
 
-    card_titles = ["Download", "Upload", "Ping"]
-    card_values = [
-        (
-            f"{current_download:.1f} Mbps" if current_download is not None else "n/a",
-            "#ff6b6b" if assessment.download_state == "Very slow" else "#fbbf24" if assessment.download_state == "Slower than normal" else "#34d399",
-            assessment.download_state,
-        ),
-        (
-            f"{current_upload:.1f} Mbps" if current_upload is not None else "n/a",
-            "#fbbf24" if assessment.upload_state == "Low" else "#34d399",
-            assessment.upload_state,
-        ),
-        (
-            f"{current_ping:.0f} ms" if current_ping is not None else "n/a",
-            "#ff6b6b" if assessment.ping_state == "Very high" else "#fbbf24" if assessment.ping_state == "Higher than normal" else "#34d399",
-            assessment.ping_state,
-        ),
-    ]
+    _render_metric_card(fig.add_subplot(gs[1, 0]), "Download", down_stats, "Mbps", "download")
+    _render_metric_card(fig.add_subplot(gs[1, 1]), "Upload", up_stats, "Mbps", "upload")
+    _render_metric_card(fig.add_subplot(gs[1, 2]), "Ping", ping_stats, "ms", "ping")
 
-    for index in range(3):
-        ax = fig.add_subplot(gs[1, index])
-        ax.set_facecolor("#151a22")
-        ax.set_xticks([])
-        ax.set_yticks([])
-        for spine in ax.spines.values():
-            spine.set_color("#212938")
-            spine.set_linewidth(1.4)
-        value, accent, subtitle = card_values[index]
-        ax.text(0.06, 0.75, card_titles[index], transform=ax.transAxes, color="#95a1b5", fontsize=13.5, va="center")
-        ax.text(0.06, 0.50, value, transform=ax.transAxes, color="#f4f7fb", fontsize=25, fontweight="bold", va="center")
-        ax.text(0.06, 0.22, subtitle, transform=ax.transAxes, color=accent, fontsize=13.5, fontweight="bold", va="center")
-        ax.plot([0.93, 0.93], [0.18, 0.82], transform=ax.transAxes, color=accent, linewidth=5.5, solid_capstyle="round")
+    since_24h = now - timedelta(hours=24)
+    d24 = [point for point in history_download if point[0] >= since_24h]
+    u24 = [point for point in history_upload if point[0] >= since_24h]
+    p24 = [point for point in history_ping if point[0] >= since_24h]
+    ranges_24h = _problem_ranges(d24, p24, assessment.problem_download_threshold, assessment.problem_ping_threshold)
+    earliest_24h = min([points[0][0] for points in [d24, u24, p24] if points], default=None)
 
-    ax24 = fig.add_subplot(gs[2, :])
-    ax7 = fig.add_subplot(gs[3, :])
-    has_day = _plot_window(
-        ax24,
-        history,
-        now - timedelta(hours=24),
+    ax24_speed = fig.add_subplot(gs[2, :])
+    has24_speed = _plot_speed_chart(
+        ax24_speed,
+        "Last 24 Hours — Download/Upload",
+        d24,
+        u24,
+        since_24h,
         now,
-        "Last 24 Hours",
-        "%H:%M",
-        assessment.problem_download_threshold,
-        assessment.problem_ping_threshold,
-        daily_ticks=False,
+        down_stats.avg_24h,
+        up_stats.avg_24h,
+        ranges_24h,
+        day_mode=False,
+        earliest=earliest_24h,
     )
-    has_week = _plot_window(
-        ax7,
-        history,
-        now - timedelta(days=7),
+    ax24_ping = fig.add_subplot(gs[3, :])
+    has24_ping = _plot_ping_chart(
+        ax24_ping,
+        "Last 24 Hours — Ping",
+        p24,
+        since_24h,
         now,
-        "Last 7 Days",
-        "%a",
-        assessment.problem_download_threshold,
-        assessment.problem_ping_threshold,
-        daily_ticks=True,
-        min_days_required=2,
+        ping_stats.avg_24h,
+        ranges_24h,
+        day_mode=False,
+        earliest=earliest_24h,
     )
 
-    fig.text(0.055, 0.975, "Internet Health Snapshot", color="#f4f7fb", fontsize=24, fontweight="bold", ha="left", va="top")
+    since_7d = now - timedelta(days=7)
+    ranges_7d = _problem_ranges(history_download, history_ping, assessment.problem_download_threshold, assessment.problem_ping_threshold)
+    earliest_7d = min([points[0][0] for points in [history_download, history_upload, history_ping] if points], default=None)
+    available_note = None
+    if earliest_7d is not None and earliest_7d > since_7d + timedelta(hours=3):
+        available_note = f"Data available from {earliest_7d.strftime('%d %b %H:%M')}"
 
-    if not has_day and not has_week:
+    ax7_speed = fig.add_subplot(gs[4, :])
+    has7_speed = _plot_speed_chart(
+        ax7_speed,
+        "Last 7 Days — Download/Upload",
+        history_download,
+        history_upload,
+        since_7d,
+        now,
+        down_stats.avg_7d,
+        up_stats.avg_7d,
+        ranges_7d,
+        day_mode=True,
+        earliest=earliest_7d,
+    )
+    ax7_ping = fig.add_subplot(gs[5, :])
+    has7_ping = _plot_ping_chart(
+        ax7_ping,
+        "Last 7 Days — Ping",
+        history_ping,
+        since_7d,
+        now,
+        ping_stats.avg_7d,
+        ranges_7d,
+        day_mode=True,
+        earliest=earliest_7d,
+    )
+
+    fig.text(0.055, 0.975, "Internet Health Snapshot", color="#f4f7fb", fontsize=22, fontweight="bold", ha="left", va="top")
+    fig.text(0.055, 0.952, "Dashed lines show period averages. Red shaded windows mark degraded measurements.", color="#9ca8bc", fontsize=10, ha="left", va="top")
+    if available_note:
+        fig.text(0.945, 0.952, available_note, color="#9ca8bc", fontsize=10, ha="right", va="top")
+
+    footer = (
+        f"{socket.gethostname()} · generated {now.strftime('%H:%M %Z')} · "
+        f"24h samples: D{down_stats.samples_24h}/U{up_stats.samples_24h}/P{ping_stats.samples_24h} · "
+        f"7d samples: D{down_stats.samples_7d}/U{up_stats.samples_7d}/P{ping_stats.samples_7d}"
+    )
+    fig.text(0.055, 0.017, footer, color="#8f9bb0", fontsize=9.8, ha="left", va="bottom")
+
+    if not any([has24_speed, has24_ping, has7_speed, has7_ping]):
         plt.close(fig)
         return False, "No speed data available yet"
 
