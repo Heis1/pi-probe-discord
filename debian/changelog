@@ -1,3 +1,9 @@
+pi-probe-discord (0.1.6-1) unstable; urgency=medium
+
+  * Add Pi-hole component update-availability reporting to full report
+
+ -- Codex Builder <noreply@example.invalid>  Wed, 29 Apr 2026 23:56:49 +0930
+
 pi-probe-discord (0.1.5-1) unstable; urgency=medium
 
   * Simplify dashboard layout and add full-report GitHub update availability check
