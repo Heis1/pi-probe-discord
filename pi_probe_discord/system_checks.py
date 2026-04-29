@@ -80,8 +80,12 @@ def collect_pihole_info() -> PiholeResult:
         }.get(state, "Unknown")
 
     status = run_command(["pihole", "status"])
+    version_info = run_command(["pihole", "-v"])
     if status.returncode == 0:
-        result.update_status = _extract_pihole_update_status(status.stdout)
+        merged_output = status.stdout
+        if version_info.returncode == 0:
+            merged_output = f"{status.stdout}\n{version_info.stdout}"
+        result.update_status = _extract_pihole_update_status(merged_output)
         output = status.stdout.lower()
         if "blocking is enabled" in output:
             result.blocking_status = "Enabled"
@@ -89,6 +93,8 @@ def collect_pihole_info() -> PiholeResult:
             result.blocking_status = "Disabled"
     else:
         result.warnings.append("pihole status failed")
+        if version_info.returncode == 0:
+            result.update_status = _extract_pihole_update_status(version_info.stdout)
 
     gravity_db = Path("/etc/pihole/gravity.db")
     if gravity_db.exists():
