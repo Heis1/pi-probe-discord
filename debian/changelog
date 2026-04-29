@@ -1,3 +1,9 @@
+pi-probe-discord (0.1.5-1) unstable; urgency=medium
+
+  * Simplify dashboard layout and add full-report GitHub update availability check
+
+ -- Codex Builder <noreply@example.invalid>  Wed, 29 Apr 2026 23:48:42 +0930
+
 pi-probe-discord (0.1.4-1) unstable; urgency=medium
 
   * Improve Discord dashboard layout with richer metrics and trend context
