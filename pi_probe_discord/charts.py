@@ -223,7 +223,7 @@ def _plot_speed_chart(
         ax.axvspan(start, end + timedelta(minutes=1), color="#8f2333", alpha=0.18, label=label)
 
     _set_time_axis(ax, since, until, day_mode, earliest)
-    ax.legend(loc="upper right", frameon=False, fontsize=9, ncol=3, labelcolor="#c8d0dd")
+    ax.legend(loc="upper right", frameon=False, fontsize=8.5, ncol=3, labelcolor="#c8d0dd")
     return True
 
 
@@ -252,7 +252,65 @@ def _plot_ping_chart(
         ax.axvspan(start, end + timedelta(minutes=1), color="#8f2333", alpha=0.18, label=label)
 
     _set_time_axis(ax, since, until, day_mode, earliest)
-    ax.legend(loc="upper right", frameon=False, fontsize=9, ncol=3, labelcolor="#c8d0dd")
+    ax.legend(loc="upper right", frameon=False, fontsize=8.5, ncol=3, labelcolor="#c8d0dd")
+    return True
+
+
+def _plot_combined_chart(
+    ax: Any,
+    title: str,
+    download_points: list[tuple[datetime, float]],
+    upload_points: list[tuple[datetime, float]],
+    ping_points: list[tuple[datetime, float]],
+    since: datetime,
+    until: datetime,
+    avg_download: float | None,
+    avg_upload: float | None,
+    avg_ping: float | None,
+    problem_ranges: list[tuple[datetime, datetime]],
+    day_mode: bool,
+    earliest: datetime | None,
+) -> bool:
+    if not download_points and not upload_points and not ping_points:
+        _render_no_data(ax, title)
+        return False
+
+    _configure_axis(ax, "Mbps")
+    ax.set_title(title, loc="left", color="#f4f7fb", fontsize=15, fontweight="bold", pad=16)
+    ax2 = ax.twinx()
+    ax2.set_ylabel("ms", color="#aeb7c5", fontsize=10)
+    ax2.tick_params(colors="#aeb7c5", labelsize=10)
+    for spine in ax2.spines.values():
+        spine.set_color("#344055")
+    ax2.yaxis.set_major_locator(mticker.MaxNLocator(nbins=6, min_n_ticks=4))
+
+    lines = []
+    labels = []
+    if download_points:
+        line = ax.plot([p[0] for p in download_points], [p[1] for p in download_points], color="#39a0ff", linewidth=2.2, label="Download")[0]
+        lines.append(line)
+        labels.append("Download")
+    if upload_points:
+        line = ax.plot([p[0] for p in upload_points], [p[1] for p in upload_points], color="#34d399", linewidth=2.2, label="Upload")[0]
+        lines.append(line)
+        labels.append("Upload")
+    if ping_points:
+        line = ax2.plot([p[0] for p in ping_points], [p[1] for p in ping_points], color="#ff8a3d", linewidth=2.0, label="Ping")[0]
+        lines.append(line)
+        labels.append("Ping")
+
+    if avg_download is not None:
+        ax.axhline(avg_download, color="#39a0ff", linestyle="--", linewidth=1.0, alpha=0.6)
+    if avg_upload is not None:
+        ax.axhline(avg_upload, color="#34d399", linestyle="--", linewidth=1.0, alpha=0.6)
+    if avg_ping is not None:
+        ax2.axhline(avg_ping, color="#ff8a3d", linestyle="--", linewidth=1.0, alpha=0.6)
+
+    for start, end in problem_ranges:
+        ax.axvspan(start, end + timedelta(minutes=1), color="#8f2333", alpha=0.14)
+
+    _set_time_axis(ax, since, until, day_mode, earliest)
+    ax.legend(lines, labels, loc="upper right", frameon=False, fontsize=8.5, ncol=3, labelcolor="#c8d0dd")
     return True
 
 
@@ -300,17 +358,17 @@ def _render_metric_card(ax: Any, title: str, stats: MetricStats, unit: str, metr
 
     ax.text(0.05, 0.83, title, transform=ax.transAxes, color="#95a1b5", fontsize=12.5, va="center")
     ax.text(0.05, 0.63, latest, transform=ax.transAxes, color="#f4f7fb", fontsize=19, fontweight="bold", va="center")
-    ax.text(0.05, 0.44, comparison, transform=ax.transAxes, color=accent, fontsize=10.8, fontweight="bold", va="center")
-    ax.text(0.05, 0.25, f"24h avg: {avg_24h} | 7d avg: {avg_7d}", transform=ax.transAxes, color="#b3bdd0", fontsize=9.7, va="center")
-    ax.text(0.05, 0.10, f"24h range: {range_24h} | 7d range: {range_7d}", transform=ax.transAxes, color="#8f9bb0", fontsize=9.1, va="center")
+    ax.text(0.05, 0.44, comparison, transform=ax.transAxes, color=accent, fontsize=10.1, fontweight="bold", va="center")
+    ax.text(0.05, 0.24, f"24h avg {avg_24h} · 7d avg {avg_7d}", transform=ax.transAxes, color="#b3bdd0", fontsize=9.2, va="center")
+    ax.text(0.05, 0.09, f"24h {range_24h} · 7d {range_7d}", transform=ax.transAxes, color="#8f9bb0", fontsize=8.8, va="center")
 
 
 def generate_chart(history: dict[str, list[dict[str, Any]]], now: datetime, chart_path: str, speed_result: SpeedResult) -> tuple[bool, str]:
     if plt is None or mdates is None:
         return False, "matplotlib not installed"
 
-    fig = plt.figure(figsize=(15.6, 14.2), facecolor="#0f141d")
-    gs = fig.add_gridspec(6, 3, height_ratios=[1.2, 1.45, 2.0, 1.8, 2.0, 1.8], hspace=0.62, wspace=0.24)
+    fig = plt.figure(figsize=(15.6, 10.8), facecolor="#0f141d")
+    gs = fig.add_gridspec(4, 3, height_ratios=[1.2, 1.45, 2.35, 2.35], hspace=0.54, wspace=0.24)
 
     history_download = _history_points_for_window(history, "download", now - timedelta(days=7))
     history_upload = _history_points_for_window(history, "upload", now - timedelta(days=7))
@@ -335,27 +393,17 @@ def generate_chart(history: dict[str, list[dict[str, Any]]], now: datetime, char
     ranges_24h = _problem_ranges(d24, p24, assessment.problem_download_threshold, assessment.problem_ping_threshold)
     earliest_24h = min([points[0][0] for points in [d24, u24, p24] if points], default=None)
 
-    ax24_speed = fig.add_subplot(gs[2, :])
-    has24_speed = _plot_speed_chart(
-        ax24_speed,
-        "Last 24 Hours — Download/Upload",
+    ax24 = fig.add_subplot(gs[2, :])
+    has24 = _plot_combined_chart(
+        ax24,
+        "Last 24 Hours",
         d24,
         u24,
+        p24,
         since_24h,
         now,
         down_stats.avg_24h,
         up_stats.avg_24h,
-        ranges_24h,
-        day_mode=False,
-        earliest=earliest_24h,
-    )
-    ax24_ping = fig.add_subplot(gs[3, :])
-    has24_ping = _plot_ping_chart(
-        ax24_ping,
-        "Last 24 Hours — Ping",
-        p24,
-        since_24h,
-        now,
         ping_stats.avg_24h,
         ranges_24h,
         day_mode=False,
@@ -369,27 +417,17 @@ def generate_chart(history: dict[str, list[dict[str, Any]]], now: datetime, char
     if earliest_7d is not None and earliest_7d > since_7d + timedelta(hours=3):
         available_note = f"Data available from {earliest_7d.strftime('%d %b %H:%M')}"
 
-    ax7_speed = fig.add_subplot(gs[4, :])
-    has7_speed = _plot_speed_chart(
-        ax7_speed,
-        "Last 7 Days — Download/Upload",
+    ax7 = fig.add_subplot(gs[3, :])
+    has7 = _plot_combined_chart(
+        ax7,
+        "Last 7 Days",
         history_download,
         history_upload,
+        history_ping,
         since_7d,
         now,
         down_stats.avg_7d,
         up_stats.avg_7d,
-        ranges_7d,
-        day_mode=True,
-        earliest=earliest_7d,
-    )
-    ax7_ping = fig.add_subplot(gs[5, :])
-    has7_ping = _plot_ping_chart(
-        ax7_ping,
-        "Last 7 Days — Ping",
-        history_ping,
-        since_7d,
-        now,
         ping_stats.avg_7d,
         ranges_7d,
         day_mode=True,
@@ -408,7 +446,7 @@ def generate_chart(history: dict[str, list[dict[str, Any]]], now: datetime, char
     )
     fig.text(0.055, 0.017, footer, color="#8f9bb0", fontsize=9.8, ha="left", va="bottom")
 
-    if not any([has24_speed, has24_ping, has7_speed, has7_ping]):
+    if not any([has24, has7]):
         plt.close(fig)
         return False, "No speed data available yet"
 

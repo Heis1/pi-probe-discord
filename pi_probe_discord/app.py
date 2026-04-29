@@ -13,6 +13,7 @@ from .models import PiholeResult, RunRecord, SpeedResult, UpdateResult
 from .speedtest_runner import run_speedtest_measurement
 from .storage import build_report, init_database, load_history_from_db, save_run_record
 from .system_checks import collect_pihole_info, run_updates
+from .version_check import version_status_line
 
 
 def build_run_record(
@@ -70,7 +71,8 @@ def run_mode(mode: str) -> int:
     else:
         history = load_history_from_db(config, run_at)
 
-    payload = build_embed(config, hostname, run_at_local, history, update_result, pihole_result, speed_result)
+    version_line = version_status_line(timeout=config.request_timeout) if mode == "full" else None
+    payload = build_embed(config, hostname, run_at_local, history, update_result, pihole_result, speed_result, version_line)
     try:
         if speed_result.chart_generated and Path(config.chart_file).exists():
             post_webhook_file(config, payload, config.chart_file)

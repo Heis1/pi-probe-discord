@@ -19,6 +19,7 @@ def build_embed(
     update_result: UpdateResult,
     pihole_result: PiholeResult,
     speed_result: SpeedResult,
+    probe_version_line: str | None = None,
 ) -> dict[str, Any]:
     warnings: list[str] = []
     warnings.extend(pihole_result.warnings)
@@ -71,6 +72,7 @@ def build_embed(
                     {"name": "Host", "value": f"`{hostname}`\n{run_at_local}", "inline": True},
                     {"name": "Why It Was Flagged", "value": assessment.detail[:1024], "inline": True},
                     {"name": "Gravity / Blocklist", "value": f"{pihole_result.gravity_age}\n{pihole_result.blocklist_count}", "inline": False},
+                    {"name": "Probe Version", "value": (probe_version_line or "Version check not run")[:1024], "inline": False},
                     {"name": "Recent Update Summary", "value": f"```text\n{update_result.summary[:900]}\n```", "inline": False},
                 ],
                 "footer": {"text": f"log: {config.log_file}"},
