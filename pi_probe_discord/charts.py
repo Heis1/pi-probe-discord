@@ -335,7 +335,10 @@ def _render_summary_card(
     ax.text(0.03, 0.68, assessment.label, transform=ax.transAxes, color=assessment.color_hex, fontsize=20, fontweight="bold", va="center")
     ax.text(0.03, 0.30, avg_summary, transform=ax.transAxes, color="#b6c0d0", fontsize=11, va="center")
     ax.text(0.50, 0.68, latest_summary, transform=ax.transAxes, color="#e7edf7", fontsize=16, fontweight="bold", ha="center", va="center")
-    ax.text(0.50, 0.30, assessment.headline, transform=ax.transAxes, color="#b6c0d0", fontsize=10.5, ha="center", va="center")
+    headline = assessment.headline
+    if len(headline) > 92:
+        headline = headline[:89].rstrip() + "..."
+    ax.text(0.03, 0.08, headline, transform=ax.transAxes, color="#9ca8bc", fontsize=9.4, ha="left", va="bottom")
     ax.text(0.97, 0.68, now.strftime("%H:%M"), transform=ax.transAxes, color="#d9e0ec", fontsize=17, fontweight="bold", ha="right", va="center")
     ax.text(0.97, 0.30, now.strftime("%a %d %b %Z"), transform=ax.transAxes, color="#9ca8bc", fontsize=10.5, ha="right", va="center")
 

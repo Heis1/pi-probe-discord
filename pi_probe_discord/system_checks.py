@@ -4,6 +4,7 @@ import shutil
 import sqlite3
 import subprocess
 import time
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -13,9 +14,24 @@ from .models import PiholeResult, UpdateResult
 def _extract_pihole_update_status(output: str) -> str:
     lines = [line.strip() for line in output.splitlines() if line.strip()]
     update_lines = [line for line in lines if "update available" in line.lower()]
-    if not update_lines:
-        return "Up to date"
-    return " | ".join(update_lines[:5])
+    if update_lines:
+        return " | ".join(update_lines[:5])
+
+    latest_lines = [line for line in lines if "latest:" in line.lower() and "version is" in line.lower()]
+    parsed_updates: list[str] = []
+    for line in latest_lines:
+        match = re.search(r"^(.*?)\s+version\s+is\s+([^\s]+)\s+\(Latest:\s*([^)]+)\)", line, flags=re.IGNORECASE)
+        if not match:
+            continue
+        component = match.group(1).strip().replace(" ", "")
+        current = match.group(2).strip()
+        latest = match.group(3).strip()
+        if current.lstrip("vV") != latest.lstrip("vV"):
+            parsed_updates.append(f"{component} {current}->{latest}")
+
+    if parsed_updates:
+        return " | ".join(parsed_updates[:5])
+    return "Up to date"
 
 
 def run_command(command: list[str], log_path: Path | None = None) -> subprocess.CompletedProcess[str]:
