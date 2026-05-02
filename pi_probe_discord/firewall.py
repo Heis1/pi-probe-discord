@@ -88,7 +88,7 @@ def parse_ufw_status_verbose(output: str) -> UfwStatus:
     for line in lines:
         low = line.lower()
         if low.startswith("default:"):
-            default_match = re.search(r"\(incoming\)\s*,\s*([a-z]+)\s*\(outgoing\)", low)
+            default_match = re.search(r"([a-z]+)\s*\(incoming\)\s*,\s*([a-z]+)\s*\(outgoing\)", low)
             if default_match:
                 default_incoming = default_match.group(1)
                 default_outgoing = default_match.group(2)
@@ -177,7 +177,7 @@ def _read_log_lines(paths: list[str], window_hours: int) -> tuple[list[str], str
         except OSError as exc:
             return [], path, str(exc)
 
-    journal_cmd = JOURNALCTL_COMMAND[:-2] + ["--since", f"-{window_hours} hours", "--no-pager"]
+    journal_cmd = ["journalctl", "-k", "--since", f"-{window_hours} hours", "--no-pager"]
     result = run_fixed_command(journal_cmd)
     if result.returncode == 0:
         return result.stdout.splitlines(), "journalctl -k", None
