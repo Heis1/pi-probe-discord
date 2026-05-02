@@ -14,6 +14,14 @@ DEFAULT_DATA_DIR = Path("/var/lib/pi-probe-discord")
 DEFAULT_CONFIG_FILE = DEFAULT_CONFIG_DIR / "pihole-update-discord.env"
 DEFAULT_DB_PATH = DEFAULT_DATA_DIR / "pi_probe_discord.db"
 DEFAULT_CHART_PATH = DEFAULT_DATA_DIR / "speed_chart.png"
+DEFAULT_FIREWALL_LOG_PATHS = ["/var/log/ufw.log", "/var/log/kern.log", "/var/log/syslog"]
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def load_dotenv_style(path: Path) -> None:
@@ -67,4 +75,23 @@ def load_config(base_dir: Path | None = None, require_webhook: bool = True) -> A
         max_text_field_length=int(os.environ.get("MAX_TEXT_FIELD_LENGTH", "1200")),
         speedtest_schedule_minutes=int(os.environ.get("SPEEDTEST_SCHEDULE_MINUTES", str(DEFAULT_SPEEDTEST_MINUTES))),
         full_report_schedule=os.environ.get("FULL_REPORT_SCHEDULE", DEFAULT_FULL_REPORT_SCHEDULE),
+        firewall_enabled=_env_bool("PI_PROBE_FIREWALL_ENABLED", True),
+        firewall_window_hours=max(1, int(os.environ.get("PI_PROBE_FIREWALL_WINDOW_HOURS", "24"))),
+        firewall_top_n=max(1, int(os.environ.get("PI_PROBE_FIREWALL_TOP_N", "5"))),
+        firewall_noisy_source_threshold=max(1, int(os.environ.get("PI_PROBE_FIREWALL_NOISY_SOURCE_THRESHOLD", "10"))),
+        firewall_include_allow=_env_bool("PI_PROBE_FIREWALL_INCLUDE_ALLOW", False),
+        firewall_log_paths=[
+            item.strip()
+            for item in os.environ.get("PI_PROBE_FIREWALL_LOG_PATHS", ",".join(DEFAULT_FIREWALL_LOG_PATHS)).split(",")
+            if item.strip()
+        ],
+        firewall_alert_enabled=_env_bool("PI_PROBE_FIREWALL_ALERT_ENABLED", True),
+        firewall_alert_min_blocks=max(1, int(os.environ.get("PI_PROBE_FIREWALL_ALERT_MIN_BLOCKS", "80"))),
+        firewall_alert_min_ssh_attempts=max(1, int(os.environ.get("PI_PROBE_FIREWALL_ALERT_MIN_SSH_ATTEMPTS", "20"))),
+        firewall_alert_min_noisy_sources=max(1, int(os.environ.get("PI_PROBE_FIREWALL_ALERT_MIN_NOISY_SOURCES", "2"))),
+        firewall_alert_cooldown_minutes=max(1, int(os.environ.get("PI_PROBE_FIREWALL_ALERT_COOLDOWN_MINUTES", "60"))),
+        firewall_alert_state_file=os.environ.get(
+            "PI_PROBE_FIREWALL_ALERT_STATE_FILE",
+            str(DEFAULT_DATA_DIR / "firewall_alert_state.json"),
+        ),
     )

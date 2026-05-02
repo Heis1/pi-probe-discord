@@ -19,6 +19,7 @@ The project is packaged as a Debian `.deb`, can run headless over SSH, and is bu
 - Pi-hole blocking enabled or disabled
 - gravity age and blocklist size when available
 - apt update and upgrade summary
+- UFW firewall snapshot and recent blocked traffic summary
 
 ## Discord Bot
 
@@ -26,10 +27,12 @@ The repo also includes a small Discord slash-command bot for one narrow job:
 
 - `/speedtest`
 - `/fullreport`
+- `/firewall`
 - only for configured Discord user IDs
 - starts fixed systemd units only:
   - `pi-probe-discord-speedtest.service`
   - `pi-probe-discord-full.service`
+  - fixed `ufw status verbose` and log reads for firewall snapshot
 
 It does not run arbitrary shell commands.
 
@@ -69,6 +72,7 @@ python3 pihole_update_report.py speedtest-only
 python3 pihole_update_report.py full
 python3 pihole_update_report.py update-only
 python3 pihole_update_report.py report 7
+python3 pihole_update_report.py firewall
 ```
 
 Normal deployment uses `systemd` timers:
@@ -151,6 +155,9 @@ aron ALL=(root) NOPASSWD: /bin/systemctl start --no-block pi-probe-discord-speed
 aron ALL=(root) NOPASSWD: /bin/systemctl start pi-probe-discord-speedtest.service
 aron ALL=(root) NOPASSWD: /bin/systemctl start --no-block pi-probe-discord-full.service
 aron ALL=(root) NOPASSWD: /bin/systemctl start pi-probe-discord-full.service
+aron ALL=(root) NOPASSWD: /usr/sbin/ufw status verbose
+# Optional if logs are only in journald:
+aron ALL=(root) NOPASSWD: /usr/bin/journalctl -k --since -24 hours --no-pager
 ```
 
 Then enable the bot:
@@ -165,6 +172,46 @@ Check logs:
 ```bash
 journalctl -u pi-probe-discord-bot.service -n 100 --no-pager
 ```
+
+## Firewall Reporting
+
+Enable UFW logging:
+
+```bash
+sudo ufw logging on
+```
+
+Check status:
+
+```bash
+sudo ufw status verbose
+```
+
+Run a manual firewall snapshot:
+
+```bash
+pi-probe-discord-firewall --window-hours 24
+pi-probe-discord-firewall --json
+```
+
+Relevant config keys in `pihole-update-discord.env`:
+
+- `PI_PROBE_FIREWALL_ENABLED=true`
+- `PI_PROBE_FIREWALL_WINDOW_HOURS=24`
+- `PI_PROBE_FIREWALL_TOP_N=5`
+- `PI_PROBE_FIREWALL_NOISY_SOURCE_THRESHOLD=10`
+- `PI_PROBE_FIREWALL_INCLUDE_ALLOW=false`
+- `PI_PROBE_FIREWALL_LOG_PATHS=/var/log/ufw.log,/var/log/kern.log,/var/log/syslog`
+- `PI_PROBE_FIREWALL_ALERT_ENABLED=true`
+- `PI_PROBE_FIREWALL_ALERT_MIN_BLOCKS=80`
+- `PI_PROBE_FIREWALL_ALERT_MIN_SSH_ATTEMPTS=20`
+- `PI_PROBE_FIREWALL_ALERT_MIN_NOISY_SOURCES=2`
+- `PI_PROBE_FIREWALL_ALERT_COOLDOWN_MINUTES=60`
+- `PI_PROBE_FIREWALL_ALERT_STATE_FILE=/var/lib/pi-probe-discord/firewall_alert_state.json`
+
+If no entries are found, this does not necessarily mean UFW is broken. Logging may be disabled, quiet, permission-limited, or handled by journald.
+
+When firewall alerting is enabled, `full` runs will post a separate red "Firewall Attack Alert" embed if one or more thresholds are exceeded. Cooldown suppresses repeated alerts for the configured number of minutes.
 
 ## Build The Debian Package
 

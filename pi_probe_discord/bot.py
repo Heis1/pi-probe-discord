@@ -8,6 +8,8 @@ from dataclasses import dataclass
 import discord
 from discord import app_commands
 
+from .app import render_firewall_report
+
 START_SPEEDTEST_COMMAND = [
     "sudo",
     "/bin/systemctl",
@@ -92,6 +94,10 @@ class PiProbeDiscordBot(discord.Client):
         async def fullreport(interaction: discord.Interaction) -> None:
             await self.handle_service_start(interaction, START_FULLREPORT_COMMAND, FULLREPORT_STARTED_MESSAGE, "fullreport")
 
+        @self.tree.command(name="firewall", description="Show current firewall snapshot.")
+        async def firewall(interaction: discord.Interaction) -> None:
+            await self.handle_firewall_report(interaction)
+
         if self.config.command_guild_id is not None:
             guild = discord.Object(id=self.config.command_guild_id)
             self.tree.clear_commands(guild=guild)
@@ -99,10 +105,10 @@ class PiProbeDiscordBot(discord.Client):
             await self.tree.sync(guild=guild)
             self.tree.clear_commands(guild=None)
             await self.tree.sync()
-            self.logger.info("Synced /speedtest and /fullreport to guild %s", self.config.command_guild_id)
+            self.logger.info("Synced /speedtest, /fullreport, and /firewall to guild %s", self.config.command_guild_id)
         else:
             await self.tree.sync()
-            self.logger.info("Synced /speedtest and /fullreport globally")
+            self.logger.info("Synced /speedtest, /fullreport, and /firewall globally")
 
     async def on_ready(self) -> None:
         self.logger.info("Discord bot connected as %s (%s)", self.user, getattr(self.user, "id", "unknown"))
@@ -154,6 +160,26 @@ class PiProbeDiscordBot(discord.Client):
             return
 
         await interaction.response.send_message(started_message)
+
+    async def handle_firewall_report(self, interaction: discord.Interaction) -> None:
+        user = interaction.user
+        username = f"{user} ({user.id})"
+        if user.id not in self.config.allowed_user_ids:
+            self.logger.warning("Unauthorized /firewall attempt by %s", username)
+            await interaction.response.send_message(UNAUTHORISED_MESSAGE, ephemeral=True)
+            return
+
+        self.logger.info("Authorized /firewall request by %s", username)
+        try:
+            report = render_firewall_report()
+        except Exception as exc:  # pragma: no cover
+            self.logger.error("Failed to render firewall report for %s: %s", username, exc)
+            await interaction.response.send_message("Firewall report is unavailable right now.", ephemeral=True)
+            return
+
+        if len(report) > 1900:
+            report = report[:1900] + "\n..."
+        await interaction.response.send_message(f"```text\n{report}\n```")
 
 
 def main() -> int:

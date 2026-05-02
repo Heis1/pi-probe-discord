@@ -16,6 +16,18 @@ class AppConfig:
     max_text_field_length: int
     speedtest_schedule_minutes: int
     full_report_schedule: str
+    firewall_enabled: bool
+    firewall_window_hours: int
+    firewall_top_n: int
+    firewall_noisy_source_threshold: int
+    firewall_include_allow: bool
+    firewall_log_paths: list[str]
+    firewall_alert_enabled: bool
+    firewall_alert_min_blocks: int
+    firewall_alert_min_ssh_attempts: int
+    firewall_alert_min_noisy_sources: int
+    firewall_alert_cooldown_minutes: int
+    firewall_alert_state_file: str
 
 
 @dataclass

@@ -3,4 +3,10 @@
 #
 # Replace "aron" if the bot runs under a different Linux user.
 
+aron ALL=(root) NOPASSWD: /bin/systemctl start --no-block pi-probe-discord-speedtest.service
 aron ALL=(root) NOPASSWD: /bin/systemctl start pi-probe-discord-speedtest.service
+aron ALL=(root) NOPASSWD: /bin/systemctl start --no-block pi-probe-discord-full.service
+aron ALL=(root) NOPASSWD: /bin/systemctl start pi-probe-discord-full.service
+aron ALL=(root) NOPASSWD: /usr/sbin/ufw status verbose
+# Optional if logs are only available via journald:
+aron ALL=(root) NOPASSWD: /usr/bin/journalctl -k --since -24 hours --no-pager
