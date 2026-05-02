@@ -1,3 +1,9 @@
+pi-probe-discord (0.1.11-1) unstable; urgency=medium
+
+  * Add firewall snapshots and attack alert thresholds
+
+ -- Codex Builder <noreply@example.invalid>  Sun, 03 May 2026 01:04:40 +0930
+
 pi-probe-discord (0.1.10-1) unstable; urgency=medium
 
   * Fix Pi-hole Latest-format update detection and chart summary text overlap
