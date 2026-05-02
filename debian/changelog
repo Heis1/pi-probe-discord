@@ -1,3 +1,9 @@
+pi-probe-discord (0.1.12-1) unstable; urgency=medium
+
+  * Fix firewall parser defaults and journald window command
+
+ -- Codex Builder <noreply@example.invalid>  Sun, 03 May 2026 01:16:02 +0930
+
 pi-probe-discord (0.1.11-1) unstable; urgency=medium
 
   * Add firewall snapshots and attack alert thresholds
