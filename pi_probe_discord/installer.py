@@ -45,14 +45,8 @@ WantedBy=timers.target
 
 
 TIMER_OVERRIDE_TEMPLATE = """[Timer]
-OnBootSec=
-OnActiveSec=
-OnUnitActiveSec=
-OnCalendar=
-RandomizedDelaySec=
 OnBootSec={on_boot}
-OnActiveSec={on_active}
-{schedule_line}
+{on_active_line}{schedule_line}
 RandomizedDelaySec={random_delay}
 """
 
@@ -307,8 +301,8 @@ def run_install(argv: list[str]) -> int:
         speedtest_override_target.write_text(
             TIMER_OVERRIDE_TEMPLATE.format(
                 on_boot="10min",
-                on_active=f"{speedtest_minutes}min",
-                schedule_line=f"OnUnitActiveSec={speedtest_minutes}min",
+                on_active_line=f"OnActiveSec={speedtest_minutes}min\n",
+                schedule_line=f"OnUnitActiveSec={speedtest_minutes}min\n",
                 random_delay="5min",
             ),
             encoding="utf-8",
@@ -316,8 +310,8 @@ def run_install(argv: list[str]) -> int:
         full_override_target.write_text(
             TIMER_OVERRIDE_TEMPLATE.format(
                 on_boot="20min",
-                on_active="",
-                schedule_line=f"OnCalendar=*-*-* {hh}:{mm}:00",
+                on_active_line="",
+                schedule_line=f"OnCalendar=*-*-* {hh}:{mm}:00\n",
                 random_delay="15min",
             ),
             encoding="utf-8",
