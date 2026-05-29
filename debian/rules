@@ -39,6 +39,7 @@ override_dh_auto_install:
 	install -m 0644 debian/systemd/pi-probe-discord-full.service debian/pi-probe-discord/lib/systemd/system/pi-probe-discord-full.service
 	install -m 0644 debian/systemd/pi-probe-discord-full.timer debian/pi-probe-discord/lib/systemd/system/pi-probe-discord-full.timer
 	install -m 0644 debian/systemd/pi-probe-discord-bot.service debian/pi-probe-discord/lib/systemd/system/pi-probe-discord-bot.service
+	install -m 0644 debian/systemd/pi-probe-discord-snmp-listener.service debian/pi-probe-discord/lib/systemd/system/pi-probe-discord-snmp-listener.service
 
 override_dh_installsystemd:
 	dh_installsystemd --no-enable --no-start
