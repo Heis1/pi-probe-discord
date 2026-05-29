@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 
 from .app import render_firewall_report, render_report, render_router_report, run_mode, run_router_listener
+from .doctor import run_doctor
 from .installer import run_install
 
 
@@ -23,9 +24,11 @@ def parse_mode(argv: list[str]) -> tuple[str, int | None]:
         return "firewall", None
     if len(argv) >= 2 and argv[1] == "router":
         return "router", None
+    if len(argv) >= 2 and argv[1] == "doctor":
+        return "doctor", None
     if len(argv) >= 2:
         raise ValueError(
-            "Usage: pihole_update_report.py [full|speedtest-only|update-only|install|firewall|router|router-listener] | report [days]"
+            "Usage: pihole_update_report.py [full|speedtest-only|update-only|install|firewall|router|router-listener|doctor] | report [days]"
         )
     return "full", None
 
@@ -108,6 +111,10 @@ def main(argv: list[str] | None = None) -> int:
         except RuntimeError as exc:
             print(str(exc), file=sys.stderr)
             return 1
+    if mode == "doctor":
+        code, output = run_doctor()
+        print(output)
+        return code
 
     try:
         return run_mode(mode)

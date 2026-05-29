@@ -12,5 +12,14 @@ chown root:root /etc/pi-probe-discord/pihole-update-discord.env || true
 
 echo "pi-probe-discord installed."
 echo "Next step: run sudo pi-probe-discord-install to set your Discord webhook and cleanup old cron jobs."
+echo ""
+echo "Health check hint:"
+echo "  sudo pi-probe-discord doctor"
+echo ""
+echo "If Discord bot commands fail, ensure sudoers includes:"
+echo "  /usr/bin/pi-probe-discord firewall"
+echo "  /usr/bin/pi-probe-discord router"
+echo "See template:"
+echo "  /usr/share/pi-probe-discord/pi-probe-discord-bot.sudoers.example"
 
 exit 0

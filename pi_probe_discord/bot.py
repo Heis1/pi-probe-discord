@@ -4,6 +4,7 @@ import logging
 import os
 import subprocess
 from dataclasses import dataclass
+from pathlib import Path
 
 import discord
 from discord import app_commands
@@ -94,6 +95,7 @@ class PiProbeDiscordBot(discord.Client):
         self.tree = app_commands.CommandTree(self)
 
     async def setup_hook(self) -> None:
+        self._startup_self_check()
         @self.tree.command(name="speedtest", description="Trigger a Pi speed test.")
         async def speedtest(interaction: discord.Interaction) -> None:
             await self.handle_service_start(interaction, START_SPEEDTEST_COMMAND, STARTED_MESSAGE, "speedtest")
@@ -121,6 +123,24 @@ class PiProbeDiscordBot(discord.Client):
         else:
             await self.tree.sync()
             self.logger.info("Synced /speedtest, /fullreport, /firewall, and /router globally")
+
+    def _startup_self_check(self) -> None:
+        config_path = Path("/etc/pi-probe-discord/pihole-update-discord.env")
+        if not config_path.exists():
+            self.logger.error("Bot self-check failed: missing %s", config_path)
+        elif not os.access(config_path, os.R_OK):
+            self.logger.error("Bot self-check failed: cannot read %s", config_path)
+
+        required_sudo_cmds = [
+            ["/bin/systemctl", "start", "--no-block", "pi-probe-discord-speedtest.service"],
+            ["/bin/systemctl", "start", "--no-block", "pi-probe-discord-full.service"],
+            ["/usr/bin/pi-probe-discord", "firewall"],
+            ["/usr/bin/pi-probe-discord", "router"],
+        ]
+        for cmd in required_sudo_cmds:
+            result = subprocess.run(["sudo", "-n", "-l", *cmd], capture_output=True, text=True, check=False)
+            if result.returncode != 0:
+                self.logger.error("Bot self-check failed: sudo rule missing for `%s`", " ".join(cmd))
 
     async def on_ready(self) -> None:
         self.logger.info("Discord bot connected as %s (%s)", self.user, getattr(self.user, "id", "unknown"))

@@ -77,6 +77,7 @@ python3 pihole_update_report.py report 7
 python3 pihole_update_report.py firewall
 python3 pihole_update_report.py router
 python3 pihole_update_report.py router-listener
+python3 pihole_update_report.py doctor
 ```
 
 Normal deployment uses `systemd` timers:
@@ -177,6 +178,12 @@ Check logs:
 
 ```bash
 journalctl -u pi-probe-discord-bot.service -n 100 --no-pager
+```
+
+Run a one-shot health check:
+
+```bash
+pi-probe-discord doctor
 ```
 
 ## Firewall Reporting

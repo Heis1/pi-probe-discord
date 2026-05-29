@@ -1,3 +1,11 @@
+pi-probe-discord (0.1.19-1) unstable; urgency=medium
+
+  * Add doctor command for config/DB/service/sudoers diagnostics
+  * Add bot startup self-check for config readability and required sudo rules
+  * Add post-install guidance for bot command prerequisites
+
+ -- Codex Builder <noreply@example.invalid>  Fri, 29 May 2026 19:20:30 +0930
+
 pi-probe-discord (0.1.18-1) unstable; urgency=medium
 
   * Make /firewall and /router bot commands use sudo CLI execution
