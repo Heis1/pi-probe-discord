@@ -126,22 +126,25 @@ def load_history_from_db(config: AppConfig, now: datetime) -> dict[str, list[dic
 def build_report(config: AppConfig, days: int) -> str:
     cutoff = (datetime.now().astimezone() - timedelta(days=days)).isoformat()
 
-    with sqlite3.connect(config.db_path) as conn:
-        rows = conn.execute(
-            """
-            SELECT
-                COUNT(*),
-                SUM(CASE WHEN update_ok = 1 THEN 1 ELSE 0 END),
-                SUM(CASE WHEN speed_ok = 1 THEN 1 ELSE 0 END),
-                AVG(download_mbps),
-                AVG(upload_mbps),
-                AVG(ping_ms),
-                MAX(recorded_at)
-            FROM probe_runs
-            WHERE recorded_at >= ?
-            """,
-            (cutoff,),
-        ).fetchone()
+    try:
+        with sqlite3.connect(config.db_path) as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    COUNT(*),
+                    SUM(CASE WHEN update_ok = 1 THEN 1 ELSE 0 END),
+                    SUM(CASE WHEN speed_ok = 1 THEN 1 ELSE 0 END),
+                    AVG(download_mbps),
+                    AVG(upload_mbps),
+                    AVG(ping_ms),
+                    MAX(recorded_at)
+                FROM probe_runs
+                WHERE recorded_at >= ?
+                """,
+                (cutoff,),
+            ).fetchone()
+    except sqlite3.OperationalError:
+        return f"No stored probe data for the last {days} day(s)."
 
     if not rows or not rows[0]:
         return f"No stored probe data for the last {days} day(s)."

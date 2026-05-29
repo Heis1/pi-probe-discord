@@ -238,7 +238,6 @@ def run_mode(mode: str) -> int:
 
 def render_report(days: int) -> str:
     config = load_config(require_webhook=False)
-    init_database(config)
     return build_report(config, days)
 
 
@@ -260,7 +259,6 @@ def render_firewall_report(window_hours: int | None = None, as_json: bool = Fals
 
 def render_router_report(window_hours: int | None = None, as_json: bool = False) -> str:
     config = load_config(require_webhook=False)
-    init_database(config)
     now = datetime.now().astimezone()
     router_source = (
         f"udp://{config.router_snmp_bind_host}:{config.router_snmp_bind_port}"

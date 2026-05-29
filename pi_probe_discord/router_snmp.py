@@ -162,16 +162,20 @@ def load_router_snapshot(
         return snapshot
 
     cutoff = (now - timedelta(hours=window_hours)).isoformat()
-    with sqlite3.connect(db_path) as conn:
-        rows = conn.execute(
-            """
-            SELECT source_ip, trap_oid, summary
-            FROM router_snmp_events
-            WHERE recorded_at >= ?
-            ORDER BY recorded_at DESC
-            """,
-            (cutoff,),
-        ).fetchall()
+    try:
+        with sqlite3.connect(db_path) as conn:
+            rows = conn.execute(
+                """
+                SELECT source_ip, trap_oid, summary
+                FROM router_snmp_events
+                WHERE recorded_at >= ?
+                ORDER BY recorded_at DESC
+                """,
+                (cutoff,),
+            ).fetchall()
+    except sqlite3.OperationalError:
+        snapshot.notes.append("Router SNMP table not initialized yet.")
+        return snapshot
 
     snapshot.recent_events = len(rows)
     src_counter: Counter[str] = Counter()
