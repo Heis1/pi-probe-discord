@@ -15,6 +15,7 @@ DEFAULT_CONFIG_FILE = DEFAULT_CONFIG_DIR / "pihole-update-discord.env"
 DEFAULT_DB_PATH = DEFAULT_DATA_DIR / "pi_probe_discord.db"
 DEFAULT_CHART_PATH = DEFAULT_DATA_DIR / "speed_chart.png"
 DEFAULT_FIREWALL_LOG_PATHS = ["/var/log/ufw.log", "/var/log/kern.log", "/var/log/syslog"]
+DEFAULT_ROUTER_SNMP_LOG_PATH = "/var/log/snmptrapd.log"
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -22,6 +23,20 @@ def _env_bool(name: str, default: bool) -> bool:
     if value is None:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_severity_map(name: str) -> dict[str, str]:
+    raw = os.environ.get(name, "")
+    parsed: dict[str, str] = {}
+    for item in raw.split(","):
+        pair = item.strip()
+        if not pair or "=" not in pair:
+            continue
+        key, value = pair.split("=", 1)
+        sev = value.strip().lower()
+        if sev in {"critical", "warning", "info"}:
+            parsed[key.strip().lower()] = sev
+    return parsed
 
 
 def load_dotenv_style(path: Path) -> None:
@@ -94,4 +109,16 @@ def load_config(base_dir: Path | None = None, require_webhook: bool = True) -> A
             "PI_PROBE_FIREWALL_ALERT_STATE_FILE",
             str(DEFAULT_DATA_DIR / "firewall_alert_state.json"),
         ),
+        router_snmp_enabled=_env_bool("PI_PROBE_ROUTER_SNMP_ENABLED", False),
+        router_snmp_log_path=os.environ.get("PI_PROBE_ROUTER_SNMP_LOG_PATH", DEFAULT_ROUTER_SNMP_LOG_PATH),
+        router_snmp_state_file=os.environ.get(
+            "PI_PROBE_ROUTER_SNMP_STATE_FILE",
+            str(DEFAULT_DATA_DIR / "router_snmp_ingest_state.json"),
+        ),
+        router_snmp_window_hours=max(1, int(os.environ.get("PI_PROBE_ROUTER_SNMP_WINDOW_HOURS", "24"))),
+        router_snmp_top_n=max(1, int(os.environ.get("PI_PROBE_ROUTER_SNMP_TOP_N", "5"))),
+        router_snmp_listener_enabled=_env_bool("PI_PROBE_ROUTER_SNMP_LISTENER_ENABLED", False),
+        router_snmp_bind_host=os.environ.get("PI_PROBE_ROUTER_SNMP_BIND_HOST", "0.0.0.0"),
+        router_snmp_bind_port=max(1, int(os.environ.get("PI_PROBE_ROUTER_SNMP_BIND_PORT", "9162"))),
+        router_snmp_oid_severity_map=_env_severity_map("PI_PROBE_ROUTER_SNMP_OID_SEVERITY_MAP"),
     )

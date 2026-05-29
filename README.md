@@ -20,6 +20,7 @@ The project is packaged as a Debian `.deb`, can run headless over SSH, and is bu
 - gravity age and blocklist size when available
 - apt update and upgrade summary
 - UFW firewall snapshot and recent blocked traffic summary
+- router SNMP trap summary (when enabled)
 
 ## Discord Bot
 
@@ -73,6 +74,8 @@ python3 pihole_update_report.py full
 python3 pihole_update_report.py update-only
 python3 pihole_update_report.py report 7
 python3 pihole_update_report.py firewall
+python3 pihole_update_report.py router
+python3 pihole_update_report.py router-listener
 ```
 
 Normal deployment uses `systemd` timers:
@@ -208,10 +211,47 @@ Relevant config keys in `pihole-update-discord.env`:
 - `PI_PROBE_FIREWALL_ALERT_MIN_NOISY_SOURCES=2`
 - `PI_PROBE_FIREWALL_ALERT_COOLDOWN_MINUTES=60`
 - `PI_PROBE_FIREWALL_ALERT_STATE_FILE=/var/lib/pi-probe-discord/firewall_alert_state.json`
+- `PI_PROBE_ROUTER_SNMP_ENABLED=false`
+- `PI_PROBE_ROUTER_SNMP_LOG_PATH=/var/log/snmptrapd.log`
+- `PI_PROBE_ROUTER_SNMP_STATE_FILE=/var/lib/pi-probe-discord/router_snmp_ingest_state.json`
+- `PI_PROBE_ROUTER_SNMP_WINDOW_HOURS=24`
+- `PI_PROBE_ROUTER_SNMP_TOP_N=5`
+- `PI_PROBE_ROUTER_SNMP_LISTENER_ENABLED=false`
+- `PI_PROBE_ROUTER_SNMP_BIND_HOST=0.0.0.0`
+- `PI_PROBE_ROUTER_SNMP_BIND_PORT=9162`
+- `PI_PROBE_ROUTER_SNMP_OID_SEVERITY_MAP=SNMPv2-MIB::authenticationFailure=critical,IF-MIB::linkDown=warning`
 
 If no entries are found, this does not necessarily mean UFW is broken. Logging may be disabled, quiet, permission-limited, or handled by journald.
 
 When firewall alerting is enabled, `full` runs will post a separate red "Firewall Attack Alert" embed if one or more thresholds are exceeded. Cooldown suppresses repeated alerts for the configured number of minutes.
+
+## Router SNMP Summary
+
+If your router can forward SNMP traps to a manager, you can have this app ingest those events and include a router section in the full Discord dashboard.
+
+Setup pattern:
+
+1. Run `snmptrapd` on the Pi so trap events are written to a log file.
+2. Point the router trap destination at the Pi IP and UDP/162.
+3. Enable these config keys:
+   - `PI_PROBE_ROUTER_SNMP_ENABLED=true`
+   - `PI_PROBE_ROUTER_SNMP_LOG_PATH=/var/log/snmptrapd.log` (or your actual trap log file)
+4. Keep using normal `full` runs/timer; each run ingests new trap log lines, stores them in SQLite, and posts summary fields:
+   - new events since last ingest
+   - total events in the configured window
+   - top source IPs
+   - top trap OIDs
+
+Native listener mode (in-app):
+
+1. Set `PI_PROBE_ROUTER_SNMP_LISTENER_ENABLED=true`.
+2. Set `PI_PROBE_ROUTER_SNMP_BIND_HOST` and `PI_PROBE_ROUTER_SNMP_BIND_PORT` (default `9162` avoids privileged port requirements).
+3. Start the listener service:
+   - `sudo systemctl enable --now pi-probe-discord-snmp-listener.service`
+4. Point the router trap destination to that host:port.
+5. Run `pi-probe-discord router` to inspect local summary output.
+
+Note: native listener mode stores raw UDP payload text and attempts lightweight OID extraction for summary/severity; for full trap decoding, keep using `snmptrapd` log ingestion.
 
 ## Build The Debian Package
 

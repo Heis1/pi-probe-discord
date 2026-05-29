@@ -17,6 +17,13 @@ from .firewall import (
     format_firewall_snapshot_text,
 )
 from .models import PiholeResult, RunRecord, SpeedResult, UpdateResult
+from .router_snmp import (
+    format_router_snapshot_json,
+    format_router_snapshot_text,
+    ingest_router_snmp_events,
+    load_router_snapshot,
+    run_router_snmp_listener,
+)
 from .speedtest_runner import run_speedtest_measurement
 from .storage import build_report, init_database, load_history_from_db, save_run_record
 from .system_checks import collect_pihole_info, run_updates
@@ -146,6 +153,7 @@ def run_mode(mode: str) -> int:
 
     version_line = version_status_line(timeout=config.request_timeout) if mode == "full" else None
     firewall_snapshot = None
+    router_snapshot = None
     if mode == "full" and config.firewall_enabled:
         firewall_snapshot = collect_firewall_snapshot(
             FirewallConfig(
@@ -175,6 +183,31 @@ def run_mode(mode: str) -> int:
                         _write_last_firewall_alert_sent_at(state_file, run_at)
                     except requests.RequestException as exc:
                         raise RuntimeError(f"Discord firewall alert POST failed: {exc}") from exc
+    if mode == "full" and (config.router_snmp_enabled or config.router_snmp_listener_enabled):
+        ingested_events = 0
+        ingest_note = "Router listener mode active; ingest is direct to database."
+        if config.router_snmp_enabled:
+            ingested_events, ingest_note = ingest_router_snmp_events(
+                config.db_path,
+                config.router_snmp_log_path,
+                config.router_snmp_state_file,
+                run_at,
+            )
+        router_snapshot = load_router_snapshot(
+            config.db_path,
+            enabled=True,
+            ingest_source=(
+                f"udp://{config.router_snmp_bind_host}:{config.router_snmp_bind_port}"
+                if config.router_snmp_listener_enabled and not config.router_snmp_enabled
+                else config.router_snmp_log_path
+            ),
+            window_hours=config.router_snmp_window_hours,
+            top_n=config.router_snmp_top_n,
+            now=run_at,
+            ingested_events=ingested_events,
+            note=ingest_note,
+            oid_severity_map=config.router_snmp_oid_severity_map,
+        )
 
     payload = build_embed(
         config,
@@ -186,6 +219,7 @@ def run_mode(mode: str) -> int:
         speed_result,
         version_line,
         firewall_snapshot,
+        router_snapshot,
     )
     try:
         if speed_result.chart_generated and Path(config.chart_file).exists():
@@ -218,3 +252,34 @@ def render_firewall_report(window_hours: int | None = None, as_json: bool = Fals
     if as_json:
         return format_firewall_snapshot_json(snapshot)
     return format_firewall_snapshot_text(snapshot, detailed=True)
+
+
+def render_router_report(window_hours: int | None = None, as_json: bool = False) -> str:
+    config = load_config(require_webhook=False)
+    init_database(config)
+    now = datetime.now().astimezone()
+    snapshot = load_router_snapshot(
+        config.db_path,
+        enabled=(config.router_snmp_enabled or config.router_snmp_listener_enabled),
+        ingest_source=(
+            f"udp://{config.router_snmp_bind_host}:{config.router_snmp_bind_port}"
+            if config.router_snmp_listener_enabled and not config.router_snmp_enabled
+            else config.router_snmp_log_path
+        ),
+        window_hours=window_hours or config.router_snmp_window_hours,
+        top_n=config.router_snmp_top_n,
+        now=now,
+        oid_severity_map=config.router_snmp_oid_severity_map,
+    )
+    if as_json:
+        return format_router_snapshot_json(snapshot)
+    return format_router_snapshot_text(snapshot)
+
+
+def run_router_listener() -> int:
+    config = load_config(require_webhook=False)
+    init_database(config)
+    if not config.router_snmp_listener_enabled:
+        raise RuntimeError("Router SNMP listener is disabled. Set PI_PROBE_ROUTER_SNMP_LISTENER_ENABLED=true.")
+    run_router_snmp_listener(config.db_path, config.router_snmp_bind_host, config.router_snmp_bind_port)
+    return 0

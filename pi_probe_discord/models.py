@@ -28,6 +28,15 @@ class AppConfig:
     firewall_alert_min_noisy_sources: int
     firewall_alert_cooldown_minutes: int
     firewall_alert_state_file: str
+    router_snmp_enabled: bool
+    router_snmp_log_path: str
+    router_snmp_state_file: str
+    router_snmp_window_hours: int
+    router_snmp_top_n: int
+    router_snmp_listener_enabled: bool
+    router_snmp_bind_host: str
+    router_snmp_bind_port: int
+    router_snmp_oid_severity_map: dict[str, str]
 
 
 @dataclass
@@ -77,3 +86,18 @@ class RunRecord:
     upload_mbps: float | None
     ping_ms: float | None
     speed_warnings: str
+
+
+@dataclass
+class RouterSnapshot:
+    enabled: bool
+    ingest_source: str
+    ingested_events: int
+    window_hours: int
+    recent_events: int
+    link_down_events: int
+    auth_fail_events: int
+    severity_counts: dict[str, int] = field(default_factory=dict)
+    top_sources: list[tuple[str, int]] = field(default_factory=list)
+    top_trap_oids: list[tuple[str, int]] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)

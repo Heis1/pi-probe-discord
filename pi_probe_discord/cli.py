@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sys
 
-from .app import render_firewall_report, render_report, run_mode
+from .app import render_firewall_report, render_report, render_router_report, run_mode, run_router_listener
 from .installer import run_install
 
 
@@ -17,12 +17,16 @@ def parse_mode(argv: list[str]) -> tuple[str, int | None]:
             except ValueError as exc:
                 raise ValueError("Usage: pihole_update_report.py report [days]") from exc
         return "report", days
-    if len(argv) >= 2 and argv[1] in {"full", "speedtest-only", "update-only"}:
+    if len(argv) >= 2 and argv[1] in {"full", "speedtest-only", "update-only", "router-listener"}:
         return argv[1], None
     if len(argv) >= 2 and argv[1] == "firewall":
         return "firewall", None
+    if len(argv) >= 2 and argv[1] == "router":
+        return "router", None
     if len(argv) >= 2:
-        raise ValueError("Usage: pihole_update_report.py [full|speedtest-only|update-only|install|firewall] | report [days]")
+        raise ValueError(
+            "Usage: pihole_update_report.py [full|speedtest-only|update-only|install|firewall|router|router-listener] | report [days]"
+        )
     return "full", None
 
 
@@ -63,8 +67,47 @@ def main(argv: list[str] | None = None) -> int:
                 print("Usage: pihole_update_report.py firewall [--window-hours N] [--json]", file=sys.stderr)
                 return 1
             idx += 1
-        print(render_firewall_report(window_hours=window_hours, as_json=as_json))
+        try:
+            print(render_firewall_report(window_hours=window_hours, as_json=as_json))
+        except RuntimeError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
         return 0
+    if mode == "router":
+        window_hours = None
+        as_json = False
+        args_tail = args[2:]
+        idx = 0
+        while idx < len(args_tail):
+            token = args_tail[idx]
+            if token == "--json":
+                as_json = True
+            elif token == "--window-hours":
+                if idx + 1 >= len(args_tail):
+                    print("--window-hours requires a value", file=sys.stderr)
+                    return 1
+                idx += 1
+                try:
+                    window_hours = max(1, int(args_tail[idx]))
+                except ValueError:
+                    print("--window-hours must be an integer", file=sys.stderr)
+                    return 1
+            else:
+                print("Usage: pihole_update_report.py router [--window-hours N] [--json]", file=sys.stderr)
+                return 1
+            idx += 1
+        try:
+            print(render_router_report(window_hours=window_hours, as_json=as_json))
+        except RuntimeError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        return 0
+    if mode == "router-listener":
+        try:
+            return run_router_listener()
+        except RuntimeError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
 
     try:
         return run_mode(mode)

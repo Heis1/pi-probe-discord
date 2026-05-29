@@ -7,7 +7,7 @@ from typing import Any
 
 import requests
 
-from .models import AppConfig, PiholeResult, SpeedResult, UpdateResult
+from .models import AppConfig, PiholeResult, RouterSnapshot, SpeedResult, UpdateResult
 from .firewall import FirewallSnapshot
 from .status import assess_internet_health
 
@@ -22,6 +22,7 @@ def build_embed(
     speed_result: SpeedResult,
     probe_version_line: str | None = None,
     firewall_snapshot: FirewallSnapshot | None = None,
+    router_snapshot: RouterSnapshot | None = None,
 ) -> dict[str, Any]:
     warnings: list[str] = []
     warnings.extend(pihole_result.warnings)
@@ -94,6 +95,41 @@ def build_embed(
                 {"name": "Firewall Snapshot / Top sources", "value": top_sources[:1024], "inline": False},
                 {"name": "Firewall Snapshot / Top ports", "value": top_ports[:1024], "inline": False},
                 {"name": "Firewall Snapshot / Notes", "value": note[:1024], "inline": False},
+            ]
+        )
+
+    if router_snapshot is not None and router_snapshot.enabled:
+        top_sources = ", ".join(f"{src} ({count})" for src, count in router_snapshot.top_sources[:3]) or "None"
+        top_oids = ", ".join(f"{oid} ({count})" for oid, count in router_snapshot.top_trap_oids[:3]) or "None"
+        note = router_snapshot.notes[0] if router_snapshot.notes else "SNMP trap ingest is active."
+        fields.extend(
+            [
+                {
+                    "name": "Router SNMP / Last ingest",
+                    "value": f"{router_snapshot.ingested_events} new events",
+                    "inline": True,
+                },
+                {
+                    "name": "Router SNMP / Window events",
+                    "value": f"{router_snapshot.recent_events} in {router_snapshot.window_hours}h",
+                    "inline": True,
+                },
+                {
+                    "name": "Router SNMP / LinkDown + AuthFail",
+                    "value": f"{router_snapshot.link_down_events} + {router_snapshot.auth_fail_events}",
+                    "inline": True,
+                },
+                {
+                    "name": "Router SNMP / Severity",
+                    "value": ", ".join(
+                        f"{name}:{count}" for name, count in sorted(router_snapshot.severity_counts.items())
+                    )[:1024]
+                    or "none",
+                    "inline": False,
+                },
+                {"name": "Router SNMP / Top sources", "value": top_sources[:1024], "inline": False},
+                {"name": "Router SNMP / Top trap OIDs", "value": top_oids[:1024], "inline": False},
+                {"name": "Router SNMP / Notes", "value": note[:1024], "inline": False},
             ]
         )
 

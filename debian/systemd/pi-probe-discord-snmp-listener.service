@@ -1,0 +1,11 @@
+[Unit]
+Description=Pi Probe Discord SNMP UDP listener
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/pi-probe-discord
+ExecStart=/usr/bin/pi-probe-discord router-listener
+Restart=always
+RestartSec=2

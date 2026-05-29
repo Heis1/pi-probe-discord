@@ -44,7 +44,22 @@ def init_database(config: AppConfig) -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS router_snmp_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                recorded_at TEXT NOT NULL,
+                source_ip TEXT NOT NULL,
+                trap_oid TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                raw_line TEXT NOT NULL
+            )
+            """
+        )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_probe_runs_recorded_at ON probe_runs(recorded_at)")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_router_snmp_events_recorded_at ON router_snmp_events(recorded_at)"
+        )
 
 
 def save_run_record(config: AppConfig, record: RunRecord) -> None:
@@ -79,6 +94,7 @@ def save_run_record(config: AppConfig, record: RunRecord) -> None:
         )
         cutoff = (record.recorded_at - timedelta(days=config.history_retention_days)).isoformat()
         conn.execute("DELETE FROM probe_runs WHERE recorded_at < ?", (cutoff,))
+        conn.execute("DELETE FROM router_snmp_events WHERE recorded_at < ?", (cutoff,))
         conn.execute("PRAGMA incremental_vacuum")
 
 
@@ -143,4 +159,3 @@ def build_report(config: AppConfig, days: int) -> str:
         f"Latest run: {latest}",
     ]
     return "\n".join(lines)
-
