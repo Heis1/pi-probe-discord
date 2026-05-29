@@ -8,14 +8,22 @@ from dataclasses import dataclass
 import discord
 from discord import app_commands
 
-from .app import render_firewall_report, render_router_report
-
 START_SPEEDTEST_COMMAND = [
     "sudo",
     "/bin/systemctl",
     "start",
     "--no-block",
     "pi-probe-discord-speedtest.service",
+]
+FIREWALL_REPORT_COMMAND = [
+    "sudo",
+    "/usr/bin/pi-probe-discord",
+    "firewall",
+]
+ROUTER_REPORT_COMMAND = [
+    "sudo",
+    "/usr/bin/pi-probe-discord",
+    "router",
 ]
 START_FULLREPORT_COMMAND = [
     "sudo",
@@ -174,16 +182,28 @@ class PiProbeDiscordBot(discord.Client):
             return
 
         self.logger.info("Authorized /firewall request by %s", username)
+        await interaction.response.defer(thinking=False)
         try:
-            report = render_firewall_report()
-        except Exception as exc:  # pragma: no cover
-            self.logger.error("Failed to render firewall report for %s: %s", username, exc)
-            await interaction.response.send_message("Firewall report is unavailable right now.", ephemeral=True)
+            completed = subprocess.run(
+                FIREWALL_REPORT_COMMAND,
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=25,
+            )
+            report = completed.stdout.strip() or "No firewall report output."
+        except subprocess.CalledProcessError as exc:
+            self.logger.error("Failed to render firewall report for %s: returncode=%s stderr=%s", username, exc.returncode, exc.stderr.strip())
+            await interaction.followup.send("Firewall report is unavailable right now.", ephemeral=True)
+            return
+        except subprocess.TimeoutExpired:
+            self.logger.error("Timed out rendering firewall report for %s", username)
+            await interaction.followup.send("Firewall report timed out.", ephemeral=True)
             return
 
         if len(report) > 1900:
             report = report[:1900] + "\n..."
-        await interaction.response.send_message(f"```text\n{report}\n```")
+        await interaction.followup.send(f"```text\n{report}\n```")
 
     async def handle_router_report(self, interaction: discord.Interaction) -> None:
         user = interaction.user
@@ -194,16 +214,28 @@ class PiProbeDiscordBot(discord.Client):
             return
 
         self.logger.info("Authorized /router request by %s", username)
+        await interaction.response.defer(thinking=False)
         try:
-            report = render_router_report()
-        except Exception as exc:  # pragma: no cover
-            self.logger.error("Failed to render router report for %s: %s", username, exc)
-            await interaction.response.send_message("Router report is unavailable right now.", ephemeral=True)
+            completed = subprocess.run(
+                ROUTER_REPORT_COMMAND,
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=25,
+            )
+            report = completed.stdout.strip() or "No router report output."
+        except subprocess.CalledProcessError as exc:
+            self.logger.error("Failed to render router report for %s: returncode=%s stderr=%s", username, exc.returncode, exc.stderr.strip())
+            await interaction.followup.send("Router report is unavailable right now.", ephemeral=True)
+            return
+        except subprocess.TimeoutExpired:
+            self.logger.error("Timed out rendering router report for %s", username)
+            await interaction.followup.send("Router report timed out.", ephemeral=True)
             return
 
         if len(report) > 1900:
             report = report[:1900] + "\n..."
-        await interaction.response.send_message(f"```text\n{report}\n```")
+        await interaction.followup.send(f"```text\n{report}\n```")
 
 
 def main() -> int:

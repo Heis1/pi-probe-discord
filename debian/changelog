@@ -1,3 +1,11 @@
+pi-probe-discord (0.1.18-1) unstable; urgency=medium
+
+  * Make /firewall and /router bot commands use sudo CLI execution
+  * Defer slash-command responses to avoid Discord interaction timeouts
+  * Update bot sudoers guidance for router/firewall commands
+
+ -- Codex Builder <noreply@example.invalid>  Fri, 29 May 2026 19:14:20 +0930
+
 pi-probe-discord (0.1.17-1) unstable; urgency=medium
 
   * Make report/router read paths avoid DB initialization writes
