@@ -1,3 +1,10 @@
+pi-probe-discord (0.1.15-1) unstable; urgency=medium
+
+  * Improve router SNMP listener mode source labeling and note handling
+  * Decode common numeric SNMP trap OIDs to named trap labels
+
+ -- Codex Builder <noreply@example.invalid>  Fri, 29 May 2026 17:32:00 +0930
+
 pi-probe-discord (0.1.14-1) unstable; urgency=medium
 
   * Include SNMP listener systemd service in Debian package

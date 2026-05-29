@@ -154,6 +154,13 @@ def run_mode(mode: str) -> int:
     version_line = version_status_line(timeout=config.request_timeout) if mode == "full" else None
     firewall_snapshot = None
     router_snapshot = None
+    router_source = (
+        f"udp://{config.router_snmp_bind_host}:{config.router_snmp_bind_port}"
+        if config.router_snmp_listener_enabled
+        else config.router_snmp_log_path
+    )
+    if config.router_snmp_enabled and config.router_snmp_listener_enabled:
+        router_source = f"{router_source} + {config.router_snmp_log_path}"
     if mode == "full" and config.firewall_enabled:
         firewall_snapshot = collect_firewall_snapshot(
             FirewallConfig(
@@ -185,27 +192,24 @@ def run_mode(mode: str) -> int:
                         raise RuntimeError(f"Discord firewall alert POST failed: {exc}") from exc
     if mode == "full" and (config.router_snmp_enabled or config.router_snmp_listener_enabled):
         ingested_events = 0
-        ingest_note = "Router listener mode active; ingest is direct to database."
+        ingest_note = "Router listener mode active; ingest is direct to database." if config.router_snmp_listener_enabled else ""
         if config.router_snmp_enabled:
             ingested_events, ingest_note = ingest_router_snmp_events(
                 config.db_path,
                 config.router_snmp_log_path,
                 config.router_snmp_state_file,
                 run_at,
+                suppress_missing_note=config.router_snmp_listener_enabled,
             )
         router_snapshot = load_router_snapshot(
             config.db_path,
             enabled=True,
-            ingest_source=(
-                f"udp://{config.router_snmp_bind_host}:{config.router_snmp_bind_port}"
-                if config.router_snmp_listener_enabled and not config.router_snmp_enabled
-                else config.router_snmp_log_path
-            ),
+            ingest_source=router_source,
             window_hours=config.router_snmp_window_hours,
             top_n=config.router_snmp_top_n,
             now=run_at,
             ingested_events=ingested_events,
-            note=ingest_note,
+            note=ingest_note or None,
             oid_severity_map=config.router_snmp_oid_severity_map,
         )
 
@@ -258,14 +262,17 @@ def render_router_report(window_hours: int | None = None, as_json: bool = False)
     config = load_config(require_webhook=False)
     init_database(config)
     now = datetime.now().astimezone()
+    router_source = (
+        f"udp://{config.router_snmp_bind_host}:{config.router_snmp_bind_port}"
+        if config.router_snmp_listener_enabled
+        else config.router_snmp_log_path
+    )
+    if config.router_snmp_enabled and config.router_snmp_listener_enabled:
+        router_source = f"{router_source} + {config.router_snmp_log_path}"
     snapshot = load_router_snapshot(
         config.db_path,
         enabled=(config.router_snmp_enabled or config.router_snmp_listener_enabled),
-        ingest_source=(
-            f"udp://{config.router_snmp_bind_host}:{config.router_snmp_bind_port}"
-            if config.router_snmp_listener_enabled and not config.router_snmp_enabled
-            else config.router_snmp_log_path
-        ),
+        ingest_source=router_source,
         window_hours=window_hours or config.router_snmp_window_hours,
         top_n=config.router_snmp_top_n,
         now=now,
