@@ -29,6 +29,7 @@ The repo also includes a small Discord slash-command bot for one narrow job:
 - `/speedtest`
 - `/fullreport`
 - `/firewall`
+- `/router`
 - only for configured Discord user IDs
 - starts fixed systemd units only:
   - `pi-probe-discord-speedtest.service`

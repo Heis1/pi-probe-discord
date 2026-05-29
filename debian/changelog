@@ -1,3 +1,10 @@
+pi-probe-discord (0.1.16-1) unstable; urgency=medium
+
+  * Add /router Discord slash command for SNMP router snapshot
+  * Improve dashboard chart card labels and status-banner text layout
+
+ -- Codex Builder <noreply@example.invalid>  Fri, 29 May 2026 18:53:30 +0930
+
 pi-probe-discord (0.1.15-1) unstable; urgency=medium
 
   * Improve router SNMP listener mode source labeling and note handling

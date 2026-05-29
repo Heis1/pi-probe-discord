@@ -331,10 +331,16 @@ def _render_summary_card(
 
     latest_summary = f"{_fmt_value(down.latest, 'Mbps')} ↓   {_fmt_value(up.latest, 'Mbps')} ↑   {_fmt_value(ping.latest, 'ms', 0)}"
     avg_summary = f"24h avg: {_fmt_value(down.avg_24h, 'Mbps')} ↓ | {_fmt_value(up.avg_24h, 'Mbps')} ↑ | {_fmt_value(ping.avg_24h, 'ms', 0)}"
+    label_text = assessment.label
+    label_font_size = 20
+    if len(label_text) > 22:
+        label_font_size = 16
+    if len(label_text) > 30:
+        label_text = label_text[:27].rstrip() + "..."
 
-    ax.text(0.03, 0.68, assessment.label, transform=ax.transAxes, color=assessment.color_hex, fontsize=20, fontweight="bold", va="center")
+    ax.text(0.03, 0.68, label_text, transform=ax.transAxes, color=assessment.color_hex, fontsize=label_font_size, fontweight="bold", va="center")
     ax.text(0.03, 0.30, avg_summary, transform=ax.transAxes, color="#b6c0d0", fontsize=11, va="center")
-    ax.text(0.50, 0.68, latest_summary, transform=ax.transAxes, color="#e7edf7", fontsize=16, fontweight="bold", ha="center", va="center")
+    ax.text(0.58, 0.68, latest_summary, transform=ax.transAxes, color="#e7edf7", fontsize=14.5, fontweight="bold", ha="center", va="center")
     headline = assessment.headline
     if len(headline) > 92:
         headline = headline[:89].rstrip() + "..."
@@ -363,7 +369,15 @@ def _render_metric_card(ax: Any, title: str, stats: MetricStats, unit: str, metr
     ax.text(0.05, 0.63, latest, transform=ax.transAxes, color="#f4f7fb", fontsize=19, fontweight="bold", va="center")
     ax.text(0.05, 0.44, comparison, transform=ax.transAxes, color=accent, fontsize=10.1, fontweight="bold", va="center")
     ax.text(0.05, 0.24, f"24h avg {avg_24h} · 7d avg {avg_7d}", transform=ax.transAxes, color="#b3bdd0", fontsize=9.2, va="center")
-    ax.text(0.05, 0.09, f"24h {range_24h} · 7d {range_7d}", transform=ax.transAxes, color="#8f9bb0", fontsize=8.8, va="center")
+    ax.text(
+        0.05,
+        0.09,
+        f"24h range {range_24h} · 7d range {range_7d}",
+        transform=ax.transAxes,
+        color="#8f9bb0",
+        fontsize=8.8,
+        va="center",
+    )
 
 
 def generate_chart(history: dict[str, list[dict[str, Any]]], now: datetime, chart_path: str, speed_result: SpeedResult) -> tuple[bool, str]:
