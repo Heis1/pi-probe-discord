@@ -224,7 +224,7 @@ def build_payload():
                 "description": "**Status:** Warning\nInternet performance degraded. The graph makes the problem area obvious.",
                 "color": 16766720,
                 "fields": [
-                    {"name": "Hostname", "value": "`raspberrypi`", "inline": True},
+                    {"name": "Hostname", "value": "`probe-host`", "inline": True},
                     {"name": "Date/Time", "value": "2026-04-26 20:15:00 ACST", "inline": True},
                     {"name": "Pi-hole Service", "value": "Running", "inline": True},
                     {"name": "Blocking", "value": "Enabled", "inline": True},

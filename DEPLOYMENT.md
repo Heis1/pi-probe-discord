@@ -207,7 +207,7 @@ sudo visudo -f /etc/sudoers.d/pi-probe-discord-bot
 Add:
 
 ```text
-aron ALL=(root) NOPASSWD: /bin/systemctl start pi-probe-discord-speedtest.service
+probeuser ALL=(root) NOPASSWD: /bin/systemctl start pi-probe-discord-speedtest.service
 ```
 
 Nothing else should be granted.
@@ -238,9 +238,9 @@ journalctl -u pi-probe-discord-bot.service -n 100 --no-pager
 When a new `.deb` is published from GitHub:
 
 ```bash
-scp pi-probe-discord_<version>-1_all.deb aron@raspberrypi:/home/aron/
-ssh aron@raspberrypi
-sudo apt install /home/aron/pi-probe-discord_<version>-1_all.deb
+scp pi-probe-discord_<version>-1_all.deb probeuser@probe-host:/home/probeuser/
+ssh probeuser@probe-host
+sudo apt install /home/probeuser/pi-probe-discord_<version>-1_all.deb
 sudo systemctl daemon-reload
 sudo systemctl restart pi-probe-discord-speedtest.timer pi-probe-discord-full.timer
 ```
@@ -248,7 +248,7 @@ sudo systemctl restart pi-probe-discord-speedtest.timer pi-probe-discord-full.ti
 Or use the repo helper directly on the Pi:
 
 ```bash
-sudo pi-probe-discord-update /home/aron/pi-probe-discord_<version>-1_all.deb
+sudo pi-probe-discord-update /home/probeuser/pi-probe-discord_<version>-1_all.deb
 sudo pi-probe-discord-update latest
 ```
 

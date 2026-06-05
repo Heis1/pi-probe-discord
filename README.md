@@ -13,8 +13,8 @@ The project is packaged as a Debian `.deb`, can run headless over SSH, and is bu
 ## What It Reports
 
 - download, upload, and ping
-- chart image for recent history
-- verdict based on recent local baseline, not fixed generic thresholds
+- chart image for 24h, 7d, and 30d history
+- verdict based on recent local baseline, with same-time-of-day comparison preferred when enough history exists
 - Pi-hole service state
 - Pi-hole blocking enabled or disabled
 - gravity age and blocklist size when available
@@ -156,15 +156,15 @@ sudo visudo -f /etc/sudoers.d/pi-probe-discord-bot
 Add exactly:
 
 ```text
-aron ALL=(root) NOPASSWD: /bin/systemctl start --no-block pi-probe-discord-speedtest.service
-aron ALL=(root) NOPASSWD: /bin/systemctl start pi-probe-discord-speedtest.service
-aron ALL=(root) NOPASSWD: /bin/systemctl start --no-block pi-probe-discord-full.service
-aron ALL=(root) NOPASSWD: /bin/systemctl start pi-probe-discord-full.service
-aron ALL=(root) NOPASSWD: /usr/bin/pi-probe-discord firewall
-aron ALL=(root) NOPASSWD: /usr/bin/pi-probe-discord router
-aron ALL=(root) NOPASSWD: /usr/sbin/ufw status verbose
+probeuser ALL=(root) NOPASSWD: /bin/systemctl start --no-block pi-probe-discord-speedtest.service
+probeuser ALL=(root) NOPASSWD: /bin/systemctl start pi-probe-discord-speedtest.service
+probeuser ALL=(root) NOPASSWD: /bin/systemctl start --no-block pi-probe-discord-full.service
+probeuser ALL=(root) NOPASSWD: /bin/systemctl start pi-probe-discord-full.service
+probeuser ALL=(root) NOPASSWD: /usr/bin/pi-probe-discord firewall
+probeuser ALL=(root) NOPASSWD: /usr/bin/pi-probe-discord router
+probeuser ALL=(root) NOPASSWD: /usr/sbin/ufw status verbose
 # Optional if logs are only in journald:
-aron ALL=(root) NOPASSWD: /usr/bin/journalctl -k --since -24 hours --no-pager
+probeuser ALL=(root) NOPASSWD: /usr/bin/journalctl -k --since -24 hours --no-pager
 ```
 
 Then enable the bot:
@@ -281,7 +281,7 @@ That produces a package like:
 If you already have the `.deb` on the Pi:
 
 ```bash
-sudo apt install /home/aron/pi-probe-discord_0.1.0-1_all.deb
+sudo apt install /home/probeuser/pi-probe-discord_0.1.0-1_all.deb
 sudo systemctl daemon-reload
 sudo systemctl restart pi-probe-discord-speedtest.timer pi-probe-discord-full.timer
 ```
@@ -328,7 +328,7 @@ On the Pi, the packaged upgrade helper can install from:
 Examples:
 
 ```bash
-sudo pi-probe-discord-update /home/aron/pi-probe-discord_0.1.1-1_all.deb
+sudo pi-probe-discord-update /home/probeuser/pi-probe-discord_0.1.1-1_all.deb
 sudo pi-probe-discord-update 0.1.1
 sudo pi-probe-discord-update latest
 ```

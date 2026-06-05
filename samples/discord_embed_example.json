@@ -7,7 +7,7 @@
       "fields": [
         {
           "name": "Hostname",
-          "value": "`raspberrypi`",
+          "value": "`probe-host`",
           "inline": true
         },
         {

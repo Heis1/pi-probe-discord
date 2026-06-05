@@ -6,6 +6,7 @@ from pathlib import Path
 import socket
 from typing import Any
 
+from .baselines import average, build_same_time_baseline_series, calculate_same_time_baseline, history_points_for_window, min_max
 from .models import SpeedResult
 from .status import assess_internet_health
 
@@ -27,6 +28,10 @@ class MetricStats:
     latest: float | None
     avg_24h: float | None
     avg_7d: float | None
+    same_time_avg: float | None
+    same_time_low: float | None
+    same_time_high: float | None
+    same_time_samples: int
     min_24h: float | None
     max_24h: float | None
     min_7d: float | None
@@ -34,45 +39,20 @@ class MetricStats:
     samples_24h: int
     samples_7d: int
 
-
-def _history_points_for_window(history: dict[str, list[dict[str, Any]]], metric: str, cutoff: datetime) -> list[tuple[datetime, float]]:
-    points: list[tuple[datetime, float]] = []
-    for point in history.get(metric, []):
-        timestamp_raw = point.get("x")
-        value_raw = point.get("y")
-        if not isinstance(timestamp_raw, str) or not isinstance(value_raw, (int, float)):
-            continue
-        try:
-            point_time = datetime.fromisoformat(timestamp_raw)
-        except ValueError:
-            continue
-        if point_time >= cutoff:
-            points.append((point_time, float(value_raw)))
-    points.sort(key=lambda item: item[0])
-    return points
-
-
-def _average(values: list[float]) -> float | None:
-    if not values:
-        return None
-    return sum(values) / len(values)
-
-
-def _min_max(values: list[float]) -> tuple[float | None, float | None]:
-    if not values:
-        return None, None
-    return min(values), max(values)
-
-
 def calculate_metric_stats(points: list[tuple[datetime, float]], now: datetime) -> MetricStats:
     values_7d = [value for _, value in points]
     values_24h = [value for moment, value in points if moment >= now - timedelta(hours=24)]
-    min_24h, max_24h = _min_max(values_24h)
-    min_7d, max_7d = _min_max(values_7d)
+    same_time_baseline = calculate_same_time_baseline(points, now)
+    min_24h, max_24h = min_max(values_24h)
+    min_7d, max_7d = min_max(values_7d)
     return MetricStats(
         latest=values_7d[-1] if values_7d else None,
-        avg_24h=_average(values_24h),
-        avg_7d=_average(values_7d),
+        avg_24h=average(values_24h),
+        avg_7d=average(values_7d),
+        same_time_avg=same_time_baseline.avg,
+        same_time_low=same_time_baseline.low,
+        same_time_high=same_time_baseline.high,
+        same_time_samples=same_time_baseline.sample_count,
         min_24h=min_24h,
         max_24h=max_24h,
         min_7d=min_7d,
@@ -82,29 +62,29 @@ def calculate_metric_stats(points: list[tuple[datetime, float]], now: datetime) 
     )
 
 
-def _comparison_text(metric: str, latest: float | None, avg_24h: float | None) -> tuple[str, str]:
-    if latest is None or avg_24h is None or avg_24h <= 0:
+def _comparison_text(metric: str, latest: float | None, baseline: float | None) -> tuple[str, str]:
+    if latest is None or baseline is None or baseline <= 0:
         return "Not enough data", "#93a0b3"
 
-    delta = (latest - avg_24h) / avg_24h * 100.0
+    delta = (latest - baseline) / baseline * 100.0
     abs_delta = abs(delta)
     metric_is_ping = metric == "ping"
 
     if abs_delta <= 15.0:
-        return "Normal", "#34d399"
+        return "In line with usual slot", "#34d399"
 
     if metric_is_ping:
         if delta >= 30.0:
-            return f"Degraded — {delta:.0f}% above 24h avg", "#ff6b6b"
+            return f"Degraded - {delta:.0f}% above slot avg", "#ff6b6b"
         if delta >= 15.0:
-            return f"Elevated — {delta:.0f}% above 24h avg", "#fbbf24"
-        return f"Improved — {abs_delta:.0f}% below 24h avg", "#34d399"
+            return f"Elevated - {delta:.0f}% above slot avg", "#fbbf24"
+        return f"Improved - {abs_delta:.0f}% below slot avg", "#34d399"
 
     if delta <= -30.0:
-        return f"Degraded — {abs_delta:.0f}% below 24h avg", "#ff6b6b"
+        return f"Degraded - {abs_delta:.0f}% below slot avg", "#ff6b6b"
     if delta <= -15.0:
-        return f"Below average — {abs_delta:.0f}% below 24h avg", "#fbbf24"
-    return f"Above average — {delta:.0f}% above 24h avg", "#34d399"
+        return f"Below usual - {abs_delta:.0f}% below slot avg", "#fbbf24"
+    return f"Above usual - {delta:.0f}% above slot avg", "#34d399"
 
 
 def _fmt_value(value: float | None, suffix: str, precision: int = 1) -> str:
@@ -267,6 +247,9 @@ def _plot_combined_chart(
     avg_download: float | None,
     avg_upload: float | None,
     avg_ping: float | None,
+    baseline_download: list[tuple[datetime, float]],
+    baseline_upload: list[tuple[datetime, float]],
+    baseline_ping: list[tuple[datetime, float]],
     problem_ranges: list[tuple[datetime, datetime]],
     day_mode: bool,
     earliest: datetime | None,
@@ -290,21 +273,50 @@ def _plot_combined_chart(
         line = ax.plot([p[0] for p in download_points], [p[1] for p in download_points], color="#39a0ff", linewidth=2.2, label="Download")[0]
         lines.append(line)
         labels.append("Download")
+    if baseline_download:
+        line = ax.plot(
+            [p[0] for p in baseline_download],
+            [p[1] for p in baseline_download],
+            color="#7fc0ff",
+            linestyle=(0, (4, 3)),
+            linewidth=1.6,
+            alpha=0.95,
+            label="Download slot avg",
+        )[0]
+        lines.append(line)
+        labels.append("Download slot avg")
     if upload_points:
         line = ax.plot([p[0] for p in upload_points], [p[1] for p in upload_points], color="#34d399", linewidth=2.2, label="Upload")[0]
         lines.append(line)
         labels.append("Upload")
+    if baseline_upload:
+        line = ax.plot(
+            [p[0] for p in baseline_upload],
+            [p[1] for p in baseline_upload],
+            color="#86ebc7",
+            linestyle=(0, (4, 3)),
+            linewidth=1.5,
+            alpha=0.95,
+            label="Upload slot avg",
+        )[0]
+        lines.append(line)
+        labels.append("Upload slot avg")
     if ping_points:
         line = ax2.plot([p[0] for p in ping_points], [p[1] for p in ping_points], color="#ff8a3d", linewidth=2.0, label="Ping")[0]
         lines.append(line)
         labels.append("Ping")
-
-    if avg_download is not None:
-        ax.axhline(avg_download, color="#39a0ff", linestyle="--", linewidth=1.0, alpha=0.6)
-    if avg_upload is not None:
-        ax.axhline(avg_upload, color="#34d399", linestyle="--", linewidth=1.0, alpha=0.6)
-    if avg_ping is not None:
-        ax2.axhline(avg_ping, color="#ff8a3d", linestyle="--", linewidth=1.0, alpha=0.6)
+    if baseline_ping:
+        line = ax2.plot(
+            [p[0] for p in baseline_ping],
+            [p[1] for p in baseline_ping],
+            color="#ffc08f",
+            linestyle=(0, (4, 3)),
+            linewidth=1.4,
+            alpha=0.95,
+            label="Ping slot avg",
+        )[0]
+        lines.append(line)
+        labels.append("Ping slot avg")
 
     for start, end in problem_ranges:
         ax.axvspan(start, end + timedelta(minutes=1), color="#8f2333", alpha=0.14)
@@ -330,7 +342,12 @@ def _render_summary_card(
         spine.set_linewidth(2.0)
 
     latest_summary = f"{_fmt_value(down.latest, 'Mbps')} ↓   {_fmt_value(up.latest, 'Mbps')} ↑   {_fmt_value(ping.latest, 'ms', 0)}"
-    avg_summary = f"24h avg: {_fmt_value(down.avg_24h, 'Mbps')} ↓ | {_fmt_value(up.avg_24h, 'Mbps')} ↑ | {_fmt_value(ping.avg_24h, 'ms', 0)}"
+    avg_summary = (
+        f"Same-time avg: {_fmt_value(down.same_time_avg, 'Mbps')} ↓ | "
+        f"{_fmt_value(up.same_time_avg, 'Mbps')} ↑ | "
+        f"{_fmt_value(ping.same_time_avg, 'ms', 0)}"
+    )
+    fallback_summary = f"24h avg: {_fmt_value(down.avg_24h, 'Mbps')} ↓ | {_fmt_value(up.avg_24h, 'Mbps')} ↑ | {_fmt_value(ping.avg_24h, 'ms', 0)}"
     label_text = assessment.label
     label_font_size = 20
     if len(label_text) > 22:
@@ -339,7 +356,8 @@ def _render_summary_card(
         label_text = label_text[:27].rstrip() + "..."
 
     ax.text(0.03, 0.68, label_text, transform=ax.transAxes, color=assessment.color_hex, fontsize=label_font_size, fontweight="bold", va="center")
-    ax.text(0.03, 0.30, avg_summary, transform=ax.transAxes, color="#b6c0d0", fontsize=11, va="center")
+    ax.text(0.03, 0.34, avg_summary, transform=ax.transAxes, color="#b6c0d0", fontsize=10.8, va="center")
+    ax.text(0.03, 0.18, fallback_summary, transform=ax.transAxes, color="#8996ab", fontsize=9.3, va="center")
     ax.text(0.58, 0.68, latest_summary, transform=ax.transAxes, color="#e7edf7", fontsize=14.5, fontweight="bold", ha="center", va="center")
     headline = assessment.headline
     if len(headline) > 92:
@@ -359,23 +377,26 @@ def _render_metric_card(ax: Any, title: str, stats: MetricStats, unit: str, metr
 
     precision = 0 if unit == "ms" else 1
     latest = _fmt_value(stats.latest, unit, precision)
-    comparison, accent = _comparison_text(metric_key, stats.latest, stats.avg_24h)
+    baseline_value = stats.same_time_avg or stats.avg_24h
+    comparison, accent = _comparison_text(metric_key, stats.latest, baseline_value)
     avg_24h = _fmt_value(stats.avg_24h, unit, precision)
     avg_7d = _fmt_value(stats.avg_7d, unit, precision)
+    same_time_avg = _fmt_value(stats.same_time_avg, unit, precision)
+    same_time_range = _fmt_range(stats.same_time_low, stats.same_time_high, unit, precision)
     range_24h = _fmt_range(stats.min_24h, stats.max_24h, unit, precision)
     range_7d = _fmt_range(stats.min_7d, stats.max_7d, unit, precision)
 
     ax.text(0.05, 0.83, title, transform=ax.transAxes, color="#95a1b5", fontsize=12.5, va="center")
     ax.text(0.05, 0.63, latest, transform=ax.transAxes, color="#f4f7fb", fontsize=19, fontweight="bold", va="center")
     ax.text(0.05, 0.44, comparison, transform=ax.transAxes, color=accent, fontsize=10.1, fontweight="bold", va="center")
-    ax.text(0.05, 0.24, f"24h avg {avg_24h} · 7d avg {avg_7d}", transform=ax.transAxes, color="#b3bdd0", fontsize=9.2, va="center")
+    ax.text(0.05, 0.24, f"slot avg {same_time_avg} · 24h avg {avg_24h}", transform=ax.transAxes, color="#b3bdd0", fontsize=8.9, va="center")
     ax.text(
         0.05,
         0.09,
-        f"24h range {range_24h} · 7d range {range_7d}",
+        f"slot range {same_time_range} · 7d avg {avg_7d} · 24h range {range_24h} · {stats.same_time_samples} prior days",
         transform=ax.transAxes,
         color="#8f9bb0",
-        fontsize=8.8,
+        fontsize=8.1,
         va="center",
     )
 
@@ -384,17 +405,20 @@ def generate_chart(history: dict[str, list[dict[str, Any]]], now: datetime, char
     if plt is None or mdates is None:
         return False, "matplotlib not installed"
 
-    fig = plt.figure(figsize=(15.6, 10.8), facecolor="#0f141d")
-    gs = fig.add_gridspec(4, 3, height_ratios=[1.2, 1.45, 2.35, 2.35], hspace=0.54, wspace=0.24)
+    fig = plt.figure(figsize=(15.6, 13.2), facecolor="#0f141d")
+    gs = fig.add_gridspec(5, 3, height_ratios=[1.2, 1.45, 2.15, 2.15, 2.15], hspace=0.46, wspace=0.24)
 
-    history_download = _history_points_for_window(history, "download", now - timedelta(days=7))
-    history_upload = _history_points_for_window(history, "upload", now - timedelta(days=7))
-    history_ping = _history_points_for_window(history, "ping", now - timedelta(days=7))
+    history_download_30d = history_points_for_window(history, "download", now - timedelta(days=30))
+    history_upload_30d = history_points_for_window(history, "upload", now - timedelta(days=30))
+    history_ping_30d = history_points_for_window(history, "ping", now - timedelta(days=30))
+    history_download_7d = [point for point in history_download_30d if point[0] >= now - timedelta(days=7)]
+    history_upload_7d = [point for point in history_upload_30d if point[0] >= now - timedelta(days=7)]
+    history_ping_7d = [point for point in history_ping_30d if point[0] >= now - timedelta(days=7)]
     assessment = assess_internet_health(history, now, speed_result)
 
-    down_stats = calculate_metric_stats(history_download, now)
-    up_stats = calculate_metric_stats(history_upload, now)
-    ping_stats = calculate_metric_stats(history_ping, now)
+    down_stats = calculate_metric_stats(history_download_7d, now)
+    up_stats = calculate_metric_stats(history_upload_7d, now)
+    ping_stats = calculate_metric_stats(history_ping_7d, now)
 
     status_ax = fig.add_subplot(gs[0, :])
     _render_summary_card(status_ax, assessment, now, down_stats, up_stats, ping_stats)
@@ -404,9 +428,12 @@ def generate_chart(history: dict[str, list[dict[str, Any]]], now: datetime, char
     _render_metric_card(fig.add_subplot(gs[1, 2]), "Ping", ping_stats, "ms", "ping")
 
     since_24h = now - timedelta(hours=24)
-    d24 = [point for point in history_download if point[0] >= since_24h]
-    u24 = [point for point in history_upload if point[0] >= since_24h]
-    p24 = [point for point in history_ping if point[0] >= since_24h]
+    d24 = [point for point in history_download_7d if point[0] >= since_24h]
+    u24 = [point for point in history_upload_7d if point[0] >= since_24h]
+    p24 = [point for point in history_ping_7d if point[0] >= since_24h]
+    d24_baseline = build_same_time_baseline_series(history_download_7d, d24)
+    u24_baseline = build_same_time_baseline_series(history_upload_7d, u24)
+    p24_baseline = build_same_time_baseline_series(history_ping_7d, p24)
     ranges_24h = _problem_ranges(d24, p24, assessment.problem_download_threshold, assessment.problem_ping_threshold)
     earliest_24h = min([points[0][0] for points in [d24, u24, p24] if points], default=None)
 
@@ -422,48 +449,81 @@ def generate_chart(history: dict[str, list[dict[str, Any]]], now: datetime, char
         down_stats.avg_24h,
         up_stats.avg_24h,
         ping_stats.avg_24h,
+        d24_baseline,
+        u24_baseline,
+        p24_baseline,
         ranges_24h,
         day_mode=False,
         earliest=earliest_24h,
     )
 
     since_7d = now - timedelta(days=7)
-    ranges_7d = _problem_ranges(history_download, history_ping, assessment.problem_download_threshold, assessment.problem_ping_threshold)
-    earliest_7d = min([points[0][0] for points in [history_download, history_upload, history_ping] if points], default=None)
+    ranges_7d = _problem_ranges(history_download_7d, history_ping_7d, assessment.problem_download_threshold, assessment.problem_ping_threshold)
+    earliest_7d = min([points[0][0] for points in [history_download_7d, history_upload_7d, history_ping_7d] if points], default=None)
+    since_30d = now - timedelta(days=30)
+    ranges_30d = _problem_ranges(history_download_30d, history_ping_30d, assessment.problem_download_threshold, assessment.problem_ping_threshold)
+    earliest_30d = min([points[0][0] for points in [history_download_30d, history_upload_30d, history_ping_30d] if points], default=None)
     available_note = None
-    if earliest_7d is not None and earliest_7d > since_7d + timedelta(hours=3):
-        available_note = f"Data available from {earliest_7d.strftime('%d %b %H:%M')}"
+    if earliest_30d is not None and earliest_30d > since_30d + timedelta(hours=3):
+        available_note = f"Data available from {earliest_30d.strftime('%d %b %H:%M')}"
 
     ax7 = fig.add_subplot(gs[3, :])
     has7 = _plot_combined_chart(
         ax7,
         "Last 7 Days",
-        history_download,
-        history_upload,
-        history_ping,
+        history_download_7d,
+        history_upload_7d,
+        history_ping_7d,
         since_7d,
         now,
         down_stats.avg_7d,
         up_stats.avg_7d,
         ping_stats.avg_7d,
+        [],
+        [],
+        [],
         ranges_7d,
         day_mode=True,
         earliest=earliest_7d,
     )
 
+    avg_download_30d = average([value for _, value in history_download_30d])
+    avg_upload_30d = average([value for _, value in history_upload_30d])
+    avg_ping_30d = average([value for _, value in history_ping_30d])
+    ax30 = fig.add_subplot(gs[4, :])
+    has30 = _plot_combined_chart(
+        ax30,
+        "Last 30 Days",
+        history_download_30d,
+        history_upload_30d,
+        history_ping_30d,
+        since_30d,
+        now,
+        avg_download_30d,
+        avg_upload_30d,
+        avg_ping_30d,
+        [],
+        [],
+        [],
+        ranges_30d,
+        day_mode=True,
+        earliest=earliest_30d,
+    )
+
     fig.text(0.055, 0.975, "Internet Health Snapshot", color="#f4f7fb", fontsize=22, fontweight="bold", ha="left", va="top")
-    fig.text(0.055, 0.952, "Dashed lines show period averages. Red shaded windows mark degraded measurements.", color="#9ca8bc", fontsize=10, ha="left", va="top")
+    fig.text(0.055, 0.952, "Solid lines show current readings. Dashed lines show the usual value for that same time-of-day from prior days. Longer windows focus on trend shape.", color="#9ca8bc", fontsize=10, ha="left", va="top")
     if available_note:
         fig.text(0.945, 0.952, available_note, color="#9ca8bc", fontsize=10, ha="right", va="top")
 
     footer = (
         f"{socket.gethostname()} · generated {now.strftime('%H:%M %Z')} · "
         f"24h samples: D{down_stats.samples_24h}/U{up_stats.samples_24h}/P{ping_stats.samples_24h} · "
-        f"7d samples: D{down_stats.samples_7d}/U{up_stats.samples_7d}/P{ping_stats.samples_7d}"
+        f"7d samples: D{down_stats.samples_7d}/U{up_stats.samples_7d}/P{ping_stats.samples_7d} · "
+        f"30d samples: D{len(history_download_30d)}/U{len(history_upload_30d)}/P{len(history_ping_30d)}"
     )
     fig.text(0.055, 0.017, footer, color="#8f9bb0", fontsize=9.8, ha="left", va="bottom")
 
-    if not any([has24, has7]):
+    if not any([has24, has7, has30]):
         plt.close(fig)
         return False, "No speed data available yet"
 

@@ -5,8 +5,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=aron
-Group=aron
+User=probeuser
+Group=probeuser
 WorkingDirectory=/opt/pi-probe-discord
 EnvironmentFile=/etc/pi-probe-discord/pi-probe-discord-bot.env
 ExecStart=/usr/bin/pi-probe-discord-bot
