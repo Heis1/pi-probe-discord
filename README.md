@@ -147,13 +147,15 @@ Optional:
 - `PI_PROBE_DISCORD_COMMAND_GUILD_ID`
   Use this while testing so slash-command sync is fast.
 
-Install the narrow sudoers rule:
+The packaged bot service runs as root by default, so no bot-specific Linux username is required.
+
+If you customize the service to run as a non-root user, install the narrow sudoers rule:
 
 ```bash
 sudo visudo -f /etc/sudoers.d/pi-probe-discord-bot
 ```
 
-Add exactly:
+Add exactly, replacing `probeuser` with your actual bot service user:
 
 ```text
 probeuser ALL=(root) NOPASSWD: /bin/systemctl start --no-block pi-probe-discord-speedtest.service
