@@ -1,3 +1,9 @@
+pi-probe-discord (0.1.21-1) unstable; urgency=medium
+
+  * Fix packaged bot service user regression
+
+ -- Codex Builder <noreply@example.invalid>  Fri, 05 Jun 2026 22:43:31 +0930
+
 pi-probe-discord (0.1.20-1) unstable; urgency=medium
 
   * Add same-time baseline charts and 30-day history view
