@@ -16,6 +16,9 @@ DEFAULT_DB_PATH = DEFAULT_DATA_DIR / "pi_probe_discord.db"
 DEFAULT_CHART_PATH = DEFAULT_DATA_DIR / "speed_chart.png"
 DEFAULT_FIREWALL_CHART_PATH = DEFAULT_DATA_DIR / "firewall_snapshot.png"
 DEFAULT_INTERACTIVE_DASHBOARD_PATH = DEFAULT_DATA_DIR / "dashboard" / "index.html"
+DEFAULT_ROUTER_EVENTS_CSV = DEFAULT_DATA_DIR / "events" / "router_events.csv"
+DEFAULT_ROUTER_EVENTS_JSON = DEFAULT_DATA_DIR / "events" / "router_events.json"
+DEFAULT_PIHOLE_HOURLY_CSV = DEFAULT_DATA_DIR / "pihole" / "pihole_hourly.csv"
 DEFAULT_FIREWALL_LOG_PATHS = ["/var/log/ufw.log", "/var/log/kern.log", "/var/log/syslog"]
 DEFAULT_ROUTER_SNMP_LOG_PATH = "/var/log/snmptrapd.log"
 
@@ -95,6 +98,18 @@ def load_config(base_dir: Path | None = None, require_webhook: bool = True) -> A
         ),
         interactive_dashboard_host=os.environ.get("PI_PROBE_INTERACTIVE_DASHBOARD_HOST", "0.0.0.0"),
         interactive_dashboard_port=max(1, int(os.environ.get("PI_PROBE_INTERACTIVE_DASHBOARD_PORT", "8088"))),
+        public_dashboard_url=os.environ.get("PI_PROBE_PUBLIC_DASHBOARD_URL", "").strip(),
+        dashboard_link_label=os.environ.get("PI_PROBE_DASHBOARD_LINK_LABEL", "Open Interactive Dashboard").strip()
+        or "Open Interactive Dashboard",
+        outage_download_mbps=float(os.environ.get("PI_PROBE_OUTAGE_DOWNLOAD_MBPS", "50")),
+        degraded_download_mbps=float(os.environ.get("PI_PROBE_DEGRADED_DOWNLOAD_MBPS", "250")),
+        high_ping_ms=float(os.environ.get("PI_PROBE_HIGH_PING_MS", "20")),
+        failed_test_is_outage=_env_bool("PI_PROBE_FAILED_TEST_IS_OUTAGE", True),
+        heatmap_good_mbps=float(os.environ.get("PI_PROBE_HEATMAP_GOOD_MBPS", "320")),
+        heatmap_warn_mbps=float(os.environ.get("PI_PROBE_HEATMAP_WARN_MBPS", "250")),
+        router_events_csv=os.environ.get("PI_PROBE_ROUTER_EVENTS_CSV", str(DEFAULT_ROUTER_EVENTS_CSV)),
+        router_events_json=os.environ.get("PI_PROBE_ROUTER_EVENTS_JSON", str(DEFAULT_ROUTER_EVENTS_JSON)),
+        pihole_hourly_csv=os.environ.get("PI_PROBE_PIHOLE_HOURLY_CSV", str(DEFAULT_PIHOLE_HOURLY_CSV)),
         db_path=os.environ.get("DB_PATH", str(DEFAULT_DB_PATH)),
         history_retention_days=int(os.environ.get("HISTORY_RETENTION_DAYS", "365")),
         request_timeout=int(os.environ.get("REQUEST_TIMEOUT", "30")),

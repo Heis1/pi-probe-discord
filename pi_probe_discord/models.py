@@ -16,6 +16,17 @@ class AppConfig:
     interactive_dashboard_file: str
     interactive_dashboard_host: str
     interactive_dashboard_port: int
+    public_dashboard_url: str
+    dashboard_link_label: str
+    outage_download_mbps: float
+    degraded_download_mbps: float
+    high_ping_ms: float
+    failed_test_is_outage: bool
+    heatmap_good_mbps: float
+    heatmap_warn_mbps: float
+    router_events_csv: str
+    router_events_json: str
+    pihole_hourly_csv: str
     db_path: str
     history_retention_days: int
     request_timeout: int

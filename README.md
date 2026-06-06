@@ -4,17 +4,15 @@
 
 ## What it does
 
-- scheduled speed tests
-- Discord embeds with health verdicts
-- standard 24h/7d/30d chart image
-- optional premium dashboard image for Discord
-- optional interactive HTML dashboard for local or Tailscale access
-- optional visual firewall snapshot for firewall alerts
-- Pi-hole, firewall, router SNMP, and update reporting
+- scheduled speed tests and full reports
+- Discord embeds with health verdicts and PNG snapshots
+- optional premium dashboard PNG for Discord
+- optional interactive HTML dashboard for local, LAN, or Tailscale access
+- optional firewall, Pi-hole, router SNMP, and update reporting
 
 ## Quick start
 
-Install or upgrade the package on the Pi:
+Install or upgrade:
 
 ```bash
 sudo pi-probe-discord-update latest
@@ -48,37 +46,124 @@ pi-probe-discord firewall
 pi-probe-discord router
 pi-probe-discord dashboard-html
 pi-probe-discord dashboard-serve
+pi-probe-discord dashboard-check
 pi-probe-discord doctor
 ```
 
-## Dashboard options
+## Dashboard setup
 
-Set in `/etc/pi-probe-discord/pihole-update-discord.env`:
+Recommended dashboard settings in `/etc/pi-probe-discord/pihole-update-discord.env`:
 
 ```bash
-PI_PROBE_DASHBOARD_STYLE="standard"
-PI_PROBE_FIREWALL_CHART_FILE="/var/lib/pi-probe-discord/firewall_snapshot.png"
-PI_PROBE_INTERACTIVE_DASHBOARD_ENABLED="false"
+PI_PROBE_DASHBOARD_STYLE="premium"
+PI_PROBE_INTERACTIVE_DASHBOARD_ENABLED="true"
 PI_PROBE_INTERACTIVE_DASHBOARD_FILE="/var/lib/pi-probe-discord/dashboard/index.html"
 PI_PROBE_INTERACTIVE_DASHBOARD_HOST="0.0.0.0"
 PI_PROBE_INTERACTIVE_DASHBOARD_PORT="8088"
 ```
 
-Use `PI_PROBE_DASHBOARD_STYLE="premium"` to post the premium dashboard image to Discord.
+Use `8088`. It avoids the usual Pi-hole ports.
 
-Use `PI_PROBE_INTERACTIVE_DASHBOARD_ENABLED="true"` to refresh the HTML dashboard on each successful speed/full run.
-
-Serve the HTML dashboard:
+Generate the HTML once:
 
 ```bash
-pi-probe-discord dashboard-serve
+sudo pi-probe-discord dashboard-html
 ```
 
-Then open:
+Serve the dashboard:
+
+```bash
+sudo pi-probe-discord dashboard-serve
+```
+
+Check the setup:
+
+```bash
+pi-probe-discord dashboard-check
+```
+
+Open it at:
 
 ```text
-http://<pi-or-tailscale-name>:8088/index.html
+http://<pi-or-tailscale-name>:8088/
 ```
+
+The dashboard server also exposes:
+
+- `/healthz`
+- `/status.json`
+
+## Firewall examples
+
+LAN-only example:
+
+```bash
+sudo ufw allow from 192.168.1.0/24 to any port 8088 proto tcp comment 'pi-probe dashboard'
+```
+
+Tailscale example:
+
+```bash
+sudo ufw allow in on tailscale0 to any port 8088 proto tcp comment 'pi-probe dashboard tailscale'
+```
+
+## Discord dashboard link
+
+If the dashboard is reachable from the Discord viewers, set:
+
+```bash
+PI_PROBE_PUBLIC_DASHBOARD_URL="https://example.com/pi-probe/"
+PI_PROBE_DASHBOARD_LINK_LABEL="Open Interactive Dashboard"
+```
+
+When `PI_PROBE_PUBLIC_DASHBOARD_URL` is set, Discord posts keep the PNG image and also add the dashboard link in the embed.
+
+## Optional router event overlay
+
+Optional files:
+
+- `/var/lib/pi-probe-discord/events/router_events.csv`
+- `/var/lib/pi-probe-discord/events/router_events.json`
+
+CSV example:
+
+```csv
+timestamp,event_type,message,severity,source
+2026-06-06T10:00:00,wan_disconnect,Carrier lost,critical,router
+2026-06-06T10:02:00,link_up,WAN recovered,info,router
+```
+
+JSON example:
+
+```json
+[
+  {
+    "timestamp": "2026-06-06T10:00:00",
+    "event_type": "wan_disconnect",
+    "message": "Carrier lost",
+    "severity": "critical",
+    "source": "router"
+  }
+]
+```
+
+If neither file exists, the dashboard still works normally.
+
+## Optional Pi-hole hourly correlation
+
+Optional file:
+
+- `/var/lib/pi-probe-discord/pihole/pihole_hourly.csv`
+
+Example:
+
+```csv
+datetime,dns_queries,blocked_queries,blocked_percent
+2026-06-06T10:00:00,1200,210,17.5
+2026-06-06T11:00:00,1320,240,18.2
+```
+
+If the file is missing, the dashboard hides the correlation chart and shows a clean empty-state message.
 
 ## Discord bot
 
@@ -114,19 +199,14 @@ If you run the bot as a non-root user, use the sudoers template at:
 /usr/share/pi-probe-discord/pi-probe-discord-bot.sudoers.example
 ```
 
-## Speedtest failures
-
-If the Python speedtest client fails, the app now attempts a `speedtest-cli --json` fallback before reporting failure.
-
-If the speed test still cannot complete, Discord should now show a clear `Speed Test Failed` state instead of an `Internet Slower Than Usual` verdict.
-
 ## Important files
 
 - config: `/etc/pi-probe-discord/pihole-update-discord.env`
 - bot config: `/etc/pi-probe-discord/pi-probe-discord-bot.env`
 - data: `/var/lib/pi-probe-discord/pi_probe_discord.db`
-- standard chart image: `/var/lib/pi-probe-discord/speed_chart.png`
-- interactive dashboard default: `/var/lib/pi-probe-discord/dashboard/index.html`
+- chart image: `/var/lib/pi-probe-discord/speed_chart.png`
+- dashboard HTML: `/var/lib/pi-probe-discord/dashboard/index.html`
+- dashboard status: `/var/lib/pi-probe-discord/dashboard/status.json`
 
 ## Upgrade
 
@@ -137,10 +217,8 @@ sudo pi-probe-discord-update latest
 Or a specific version:
 
 ```bash
-sudo pi-probe-discord-update 0.1.22
+sudo pi-probe-discord-update 0.1.26
 ```
-
-The upgrade helper now reloads systemd, restarts timers, and restarts the bot service if it is enabled or active.
 
 ## Troubleshooting
 
@@ -150,13 +228,13 @@ Bot logs:
 journalctl -u pi-probe-discord-bot.service -n 100 --no-pager
 ```
 
-Speed test service logs:
+Speed test logs:
 
 ```bash
 journalctl -u pi-probe-discord-speedtest.service -n 100 --no-pager
 ```
 
-Full report service logs:
+Full report logs:
 
 ```bash
 journalctl -u pi-probe-discord-full.service -n 100 --no-pager
@@ -166,4 +244,4 @@ If chart rendering fails, the app still posts a text embed when it can.
 
 ## More detail
 
-For a fuller Pi setup flow, see [DEPLOYMENT.md](DEPLOYMENT.md).
+For the fuller Pi setup flow, see `DEPLOYMENT.md`.

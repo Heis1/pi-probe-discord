@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import socket
+import subprocess
 from datetime import datetime
 from pathlib import Path
 
@@ -9,7 +10,12 @@ import requests
 
 from .charts import generate_chart
 from .config import load_config
-from .dashboard import generate_interactive_dashboard, generate_premium_dashboard, serve_interactive_dashboard
+from .dashboard import (
+    build_dashboard_summary,
+    generate_interactive_dashboard,
+    generate_premium_dashboard,
+    serve_interactive_dashboard,
+)
 from .discord_client import build_embed, post_webhook_file, post_webhook_json
 from .firewall import (
     FirewallConfig,
@@ -27,7 +33,7 @@ from .router_snmp import (
     run_router_snmp_listener,
 )
 from .speedtest_runner import run_speedtest_measurement
-from .storage import build_report, init_database, load_history_from_db, save_run_record
+from .storage import build_report, init_database, load_history_from_db, load_probe_runs_from_db, save_run_record
 from .system_checks import collect_pihole_info, run_updates
 from .version_check import version_status_line
 
@@ -145,6 +151,7 @@ def run_mode(mode: str) -> int:
     save_run_record(config, build_run_record(run_at, hostname, update_result, pihole_result, speed_result))
 
     history = load_history_from_db(config, run_at)
+    run_rows = load_probe_runs_from_db(config, run_at, days=30)
 
     if mode in {"full", "speedtest-only"} and speed_result.ok:
         chart_generator = generate_premium_dashboard if config.dashboard_style == "premium" else generate_chart
@@ -154,7 +161,13 @@ def run_mode(mode: str) -> int:
             speed_result.warnings.append(chart_message)
 
     if mode in {"full", "speedtest-only"} and config.interactive_dashboard_enabled:
-        dashboard_ok, dashboard_message = generate_interactive_dashboard(history, run_at, config.interactive_dashboard_file)
+        dashboard_ok, dashboard_message = generate_interactive_dashboard(
+            history,
+            run_at,
+            config.interactive_dashboard_file,
+            config=config,
+            run_rows=run_rows,
+        )
         if not dashboard_ok:
             speed_result.warnings.append(dashboard_message)
 
@@ -224,6 +237,7 @@ def run_mode(mode: str) -> int:
             oid_severity_map=config.router_snmp_oid_severity_map,
         )
 
+    dashboard_summary = build_dashboard_summary(history, run_at, config=config, run_rows=run_rows)
     payload = build_embed(
         config,
         hostname,
@@ -232,9 +246,10 @@ def run_mode(mode: str) -> int:
         update_result,
         pihole_result,
         speed_result,
-        version_line,
-        firewall_snapshot,
-        router_snapshot,
+        probe_version_line=version_line,
+        firewall_snapshot=firewall_snapshot,
+        router_snapshot=router_snapshot,
+        dashboard_summary=dashboard_summary,
     )
     try:
         if speed_result.chart_generated and Path(config.chart_file).exists():
@@ -323,8 +338,9 @@ def render_dashboard_html(output_path: str | None = None) -> str:
     config = load_config(require_webhook=False)
     now = datetime.now().astimezone()
     history = load_history_from_db(config, now)
+    run_rows = load_probe_runs_from_db(config, now, days=30)
     target_path = output_path or config.interactive_dashboard_file
-    ok, message = generate_interactive_dashboard(history, now, target_path)
+    ok, message = generate_interactive_dashboard(history, now, target_path, config=config, run_rows=run_rows)
     if not ok:
         raise RuntimeError(message)
     return message
@@ -334,7 +350,14 @@ def run_dashboard_server() -> int:
     config = load_config(require_webhook=False)
     now = datetime.now().astimezone()
     history = load_history_from_db(config, now)
-    ok, message = generate_interactive_dashboard(history, now, config.interactive_dashboard_file)
+    run_rows = load_probe_runs_from_db(config, now, days=30)
+    ok, message = generate_interactive_dashboard(
+        history,
+        now,
+        config.interactive_dashboard_file,
+        config=config,
+        run_rows=run_rows,
+    )
     if not ok:
         raise RuntimeError(message)
     print(message)
@@ -343,3 +366,57 @@ def run_dashboard_server() -> int:
         config.interactive_dashboard_host,
         config.interactive_dashboard_port,
     )
+
+
+def _run_optional_command(command: list[str]) -> tuple[bool, str]:
+    try:
+        completed = subprocess.run(command, capture_output=True, text=True, timeout=6, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return False, ""
+    output = (completed.stdout or completed.stderr or "").strip()
+    return completed.returncode == 0, output
+
+
+def render_dashboard_check() -> str:
+    config = load_config(require_webhook=False)
+    dashboard_path = Path(config.interactive_dashboard_file)
+    exists = dashboard_path.exists()
+    host = config.interactive_dashboard_host
+    port = config.interactive_dashboard_port
+
+    listening = "unknown"
+    ok, ss_output = _run_optional_command(["ss", "-ltn"])
+    if ok:
+        listening = "yes" if f":{port} " in ss_output or f":{port}\n" in ss_output else "no"
+
+    ufw_state = "unknown"
+    ok, ufw_output = _run_optional_command(["ufw", "status"])
+    if ok:
+        lowered = ufw_output.lower()
+        if f"{port}" in ufw_output:
+            ufw_state = "configured rule present"
+        elif "inactive" in lowered:
+            ufw_state = "ufw inactive"
+        else:
+            ufw_state = "no obvious rule found"
+
+    tailscale_url = "unavailable"
+    ok, tailscale_ip = _run_optional_command(["tailscale", "ip", "-4"])
+    if ok and tailscale_ip:
+        ip = tailscale_ip.splitlines()[0].strip()
+        tailscale_url = f"http://{ip}:{port}/"
+
+    public_dashboard = config.public_dashboard_url or "not set"
+    local_host = "127.0.0.1" if host == "0.0.0.0" else host
+    lines = [
+        f"Dashboard HTML exists: {'yes' if exists else 'no'}",
+        f"Dashboard path: {dashboard_path}",
+        f"Configured host: {host}",
+        f"Configured port: {port}",
+        f"Port listening: {listening}",
+        f"UFW status for port: {ufw_state}",
+        f"Suggested local URL: http://{local_host}:{port}/",
+        f"Suggested Tailscale URL: {tailscale_url}",
+        f"Public dashboard URL: {public_dashboard}",
+    ]
+    return "\n".join(lines)

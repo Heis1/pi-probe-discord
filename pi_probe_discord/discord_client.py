@@ -23,6 +23,7 @@ def build_embed(
     probe_version_line: str | None = None,
     firewall_snapshot: FirewallSnapshot | None = None,
     router_snapshot: RouterSnapshot | None = None,
+    dashboard_summary: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     warnings: list[str] = []
     warnings.extend(pihole_result.warnings)
@@ -91,6 +92,46 @@ def build_embed(
         {"name": "Recent Update Summary", "value": f"```text\n{update_result.summary[:900]}\n```", "inline": False},
     ]
 
+    public_url = ""
+    if dashboard_summary:
+        stats = dashboard_summary.get("stats", {})
+        score = dashboard_summary.get("score", {})
+        threshold = stats.get("thresholdMbps", 250)
+        fields.extend(
+            [
+                {
+                    "name": "Dashboard Summary",
+                    "value": (
+                        f"Quality score: {score.get('total', 0):.1f}/100\n"
+                        f"Median download: {stats.get('medianDown', 0):.1f} Mbps\n"
+                        f"Average upload: {stats.get('avgUp', 0):.1f} Mbps\n"
+                        f"Average ping: {stats.get('avgPing', 0):.2f} ms"
+                    )[:1024],
+                    "inline": False,
+                },
+                {
+                    "name": "Reliability Snapshot",
+                    "value": (
+                        f"Reliability floor: {stats.get('p05', 0):.1f} Mbps\n"
+                        f"Tests ≥ {threshold:.0f} Mbps: {stats.get('pctThreshold', 0):.1f}%\n"
+                        f"Outage count: {stats.get('outageCount', 0)}\n"
+                        f"Failed test count: {stats.get('failedCount', 0)}\n"
+                        f"Degraded test count: {stats.get('degradedCount', 0)}"
+                    )[:1024],
+                    "inline": False,
+                },
+            ]
+        )
+        public_url = str(stats.get("publicDashboardUrl") or config.public_dashboard_url or "")
+        if public_url:
+            fields.append(
+                {
+                    "name": config.dashboard_link_label[:256],
+                    "value": public_url[:1024],
+                    "inline": False,
+                }
+            )
+
     if firewall_snapshot is not None:
         status_value = "✅ UFW active" if firewall_snapshot.status.active else "⚪ UFW inactive"
         policy_value = f"{firewall_snapshot.status.default_incoming} in / {firewall_snapshot.status.default_outgoing} out"
@@ -143,17 +184,16 @@ def build_embed(
             ]
         )
 
-    return {
-        "embeds": [
-            {
-                "title": title,
-                "description": description,
-                "color": color,
-                "fields": fields,
-                "footer": {"text": f"log: {config.log_file}"},
-            }
-        ]
+    embed: dict[str, Any] = {
+        "title": title,
+        "description": description,
+        "color": color,
+        "fields": fields,
+        "footer": {"text": f"log: {config.log_file}"},
     }
+    if public_url:
+        embed["url"] = public_url
+    return {"embeds": [embed]}
 
 
 def post_webhook_json(config: AppConfig, payload: dict[str, Any]) -> None:

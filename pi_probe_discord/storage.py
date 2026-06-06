@@ -123,6 +123,36 @@ def load_history_from_db(config: AppConfig, now: datetime) -> dict[str, list[dic
     return history
 
 
+def load_probe_runs_from_db(config: AppConfig, now: datetime, days: int = 30) -> list[dict[str, Any]]:
+    cutoff = (now - timedelta(days=days)).isoformat()
+    with sqlite3.connect(config.db_path) as conn:
+        rows = conn.execute(
+            """
+            SELECT recorded_at, hostname, speed_ok, speed_summary, download_mbps, upload_mbps, ping_ms, speed_warnings
+            FROM probe_runs
+            WHERE recorded_at >= ?
+            ORDER BY recorded_at ASC
+            """,
+            (cutoff,),
+        ).fetchall()
+
+    results: list[dict[str, Any]] = []
+    for recorded_at, hostname, speed_ok, speed_summary, download_mbps, upload_mbps, ping_ms, speed_warnings in rows:
+        results.append(
+            {
+                "recorded_at": recorded_at,
+                "hostname": hostname,
+                "speed_ok": bool(speed_ok),
+                "speed_summary": speed_summary or "",
+                "download_mbps": float(download_mbps) if isinstance(download_mbps, (int, float)) else None,
+                "upload_mbps": float(upload_mbps) if isinstance(upload_mbps, (int, float)) else None,
+                "ping_ms": float(ping_ms) if isinstance(ping_ms, (int, float)) else None,
+                "speed_warnings": speed_warnings or "",
+            }
+        )
+    return results
+
+
 def build_report(config: AppConfig, days: int) -> str:
     cutoff = (datetime.now().astimezone() - timedelta(days=days)).isoformat()
 

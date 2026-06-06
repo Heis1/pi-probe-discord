@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 
 from .app import (
+    render_dashboard_check,
     render_dashboard_html,
     render_firewall_chart,
     render_firewall_report,
@@ -27,7 +28,15 @@ def parse_mode(argv: list[str]) -> tuple[str, int | None]:
             except ValueError as exc:
                 raise ValueError("Usage: pihole_update_report.py report [days]") from exc
         return "report", days
-    if len(argv) >= 2 and argv[1] in {"full", "speedtest-only", "update-only", "router-listener", "dashboard-serve", "firewall-chart"}:
+    if len(argv) >= 2 and argv[1] in {
+        "full",
+        "speedtest-only",
+        "update-only",
+        "router-listener",
+        "dashboard-serve",
+        "firewall-chart",
+        "dashboard-check",
+    }:
         return argv[1], None
     if len(argv) >= 2 and argv[1] == "dashboard-html":
         return "dashboard-html", None
@@ -39,7 +48,7 @@ def parse_mode(argv: list[str]) -> tuple[str, int | None]:
         return "doctor", None
     if len(argv) >= 2:
         raise ValueError(
-            "Usage: pihole_update_report.py [full|speedtest-only|update-only|install|firewall|firewall-chart|router|router-listener|doctor|dashboard-html|dashboard-serve] | report [days]"
+            "Usage: pihole_update_report.py [full|speedtest-only|update-only|install|firewall|firewall-chart|router|router-listener|doctor|dashboard-html|dashboard-serve|dashboard-check] | report [days]"
         )
     return "full", None
 
@@ -144,6 +153,13 @@ def main(argv: list[str] | None = None) -> int:
         except RuntimeError as exc:
             print(str(exc), file=sys.stderr)
             return 1
+    if mode == "dashboard-check":
+        try:
+            print(render_dashboard_check())
+        except RuntimeError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        return 0
     if mode == "doctor":
         code, output = run_doctor()
         print(output)
