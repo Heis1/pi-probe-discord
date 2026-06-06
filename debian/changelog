@@ -1,3 +1,9 @@
+pi-probe-discord (0.1.24-1) unstable; urgency=medium
+
+  * Improve speedtest failure handling and add firewall visual alerts
+
+ -- Codex Builder <noreply@example.invalid>  Sat, 06 Jun 2026 13:38:59 +0930
+
 pi-probe-discord (0.1.23-1) unstable; urgency=medium
 
   * Restart bot on upgrade and simplify install docs
