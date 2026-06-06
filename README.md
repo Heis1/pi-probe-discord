@@ -1,143 +1,72 @@
 # pi-probe-discord
 
-`pi-probe-discord` is a Raspberry Pi monitoring and Discord reporting app for a Pi-hole box or home network node.
+`pi-probe-discord` runs internet checks on a Pi, stores local history in SQLite, and posts results to Discord.
 
-It does three jobs:
+## What it does
 
-- runs scheduled internet speed checks
-- reports Pi-hole and update status to Discord
-- stores local history in SQLite so charts and reports are based on the Pi's own data
-
-The project is packaged as a Debian `.deb`, can run headless over SSH, and is built to be maintained without editing one giant script.
-
-## What It Reports
-
-- download, upload, and ping
-- chart image for 24h, 7d, and 30d history
-- optional premium dashboard image for Discord posts
+- scheduled speed tests
+- Discord embeds with health verdicts
+- standard 24h/7d/30d chart image
+- optional premium dashboard image for Discord
 - optional interactive HTML dashboard for local or Tailscale access
-- verdict based on recent local baseline, with same-time-of-day comparison preferred when enough history exists
-- Pi-hole service state
-- Pi-hole blocking enabled or disabled
-- gravity age and blocklist size when available
-- apt update and upgrade summary
-- UFW firewall snapshot and recent blocked traffic summary
-- router SNMP trap summary (when enabled)
+- Pi-hole, firewall, router SNMP, and update reporting
 
-## Discord Bot
+## Quick start
 
-The repo also includes a small Discord slash-command bot for one narrow job:
-
-- `/speedtest`
-- `/fullreport`
-- `/firewall`
-- `/router`
-- only for configured Discord user IDs
-- starts fixed systemd units only:
-  - `pi-probe-discord-speedtest.service`
-  - `pi-probe-discord-full.service`
-  - fixed `ufw status verbose` and log reads for firewall snapshot
-
-It does not run arbitrary shell commands.
-
-## Project Layout
-
-- `pihole_update_report.py`
-  Thin CLI entrypoint.
-- `pi_probe_discord/`
-  Application package.
-- `install.py`
-  Interactive installer for Pi setup and schedule configuration.
-- `scripts/release.sh`
-  Build, tag, and publish a GitHub release with the `.deb`.
-- `scripts/update-from-release.sh`
-  Source copy of the Pi-side upgrade helper.
-- `pi-probe-discord-update`
-  Installed system command for upgrading from a local or released `.deb`.
-- `pihole_speedtest_bot.py`
-  Discord slash-command bot entrypoint.
-- `pi-probe-discord-bot.service`
-  Example systemd unit for running the bot at boot.
-- `pi-probe-discord-bot.env.example`
-  Bot token and allowed user ID template.
-- `pi-probe-discord-bot.sudoers.example`
-  Narrow sudoers example for the bot.
-- `debian/`
-  Debian packaging files.
-- `DEPLOYMENT.md`
-  Pi installation and upgrade guide.
-
-## How It Runs
-
-The app is split into modes so frequent speed tests do not also run system maintenance:
+Install or upgrade the package on the Pi:
 
 ```bash
-python3 pihole_update_report.py speedtest-only
-python3 pihole_update_report.py full
-python3 pihole_update_report.py update-only
-python3 pihole_update_report.py report 7
-python3 pihole_update_report.py firewall
-python3 pihole_update_report.py router
-python3 pihole_update_report.py router-listener
-python3 pihole_update_report.py dashboard-html
-python3 pihole_update_report.py dashboard-serve
-python3 pihole_update_report.py doctor
+sudo pi-probe-discord-update latest
 ```
 
-Normal deployment uses `systemd` timers:
-
-- `pi-probe-discord-speedtest.timer`
-- `pi-probe-discord-full.timer`
-
-## Data Storage
-
-Runs are stored in SQLite.
-
-- default DB path: `/var/lib/pi-probe-discord/pi_probe_discord.db`
-- default retention: 12 months
-- old rows are pruned automatically
-
-This history drives the Discord chart and the health verdict logic.
-
-## Configuration
-
-The webhook is not committed in the repo.
-
-Expected installed config path:
-
-```text
-/etc/pi-probe-discord/pihole-update-discord.env
-```
-
-Example template:
+Edit config:
 
 ```bash
-cp pihole-update-discord.env.example pihole-update-discord.env
-chmod 600 pihole-update-discord.env
+sudo nano /etc/pi-probe-discord/pihole-update-discord.env
 ```
 
-The installer can also create this file for you.
-
-Dashboard-related config keys:
-
-- `PI_PROBE_DASHBOARD_STYLE=standard|premium`
-- `PI_PROBE_INTERACTIVE_DASHBOARD_ENABLED=true|false`
-- `PI_PROBE_INTERACTIVE_DASHBOARD_FILE=/var/lib/pi-probe-discord/dashboard/index.html`
-- `PI_PROBE_INTERACTIVE_DASHBOARD_HOST=0.0.0.0`
-- `PI_PROBE_INTERACTIVE_DASHBOARD_PORT=8088`
-
-If `PI_PROBE_DASHBOARD_STYLE=premium`, Discord posts use the richer NBN-style dashboard image instead of the standard chart.
-
-If `PI_PROBE_INTERACTIVE_DASHBOARD_ENABLED=true`, each successful `full` or `speedtest-only` run also refreshes the interactive HTML dashboard file.
-
-Generate the HTML dashboard manually:
+Minimum required setting:
 
 ```bash
+WEBHOOK_URL="https://discord.com/api/webhooks/replace/this"
+```
+
+Health check:
+
+```bash
+sudo pi-probe-discord doctor
+```
+
+## Common commands
+
+```bash
+pi-probe-discord full
+pi-probe-discord speedtest-only
+pi-probe-discord report 7
+pi-probe-discord firewall
+pi-probe-discord router
 pi-probe-discord dashboard-html
-pi-probe-discord dashboard-html /tmp/pi-probe-dashboard.html
+pi-probe-discord dashboard-serve
+pi-probe-discord doctor
 ```
 
-Serve it locally or over Tailscale:
+## Dashboard options
+
+Set in `/etc/pi-probe-discord/pihole-update-discord.env`:
+
+```bash
+PI_PROBE_DASHBOARD_STYLE="standard"
+PI_PROBE_INTERACTIVE_DASHBOARD_ENABLED="false"
+PI_PROBE_INTERACTIVE_DASHBOARD_FILE="/var/lib/pi-probe-discord/dashboard/index.html"
+PI_PROBE_INTERACTIVE_DASHBOARD_HOST="0.0.0.0"
+PI_PROBE_INTERACTIVE_DASHBOARD_PORT="8088"
+```
+
+Use `PI_PROBE_DASHBOARD_STYLE="premium"` to post the premium dashboard image to Discord.
+
+Use `PI_PROBE_INTERACTIVE_DASHBOARD_ENABLED="true"` to refresh the HTML dashboard on each successful speed/full run.
+
+Serve the HTML dashboard:
 
 ```bash
 pi-probe-discord dashboard-serve
@@ -149,23 +78,16 @@ Then open:
 http://<pi-or-tailscale-name>:8088/index.html
 ```
 
-## Install On A Pi
+## Discord bot
 
-Use the full guide in [DEPLOYMENT.md](DEPLOYMENT.md).
+The optional bot supports:
 
-Short version:
+- `/speedtest`
+- `/fullreport`
+- `/firewall`
+- `/router`
 
-1. Copy the repo to the Pi.
-2. Install Python and dependencies.
-3. Run `python3 install.py`.
-4. Install the `.deb` or copy the app into `/opt/pi-probe-discord`.
-5. Enable the timers.
-
-Everything can be done over SSH. No Pi desktop session is required.
-
-## Discord Bot Setup
-
-Create the bot config file:
+Bot env file:
 
 ```bash
 sudo cp /usr/share/pi-probe-discord/pi-probe-discord-bot.env.example /etc/pi-probe-discord/pi-probe-discord-bot.env
@@ -177,234 +99,63 @@ Set:
 - `PI_PROBE_DISCORD_BOT_TOKEN`
 - `PI_PROBE_DISCORD_ALLOWED_USER_IDS`
 
-Optional:
-
-- `PI_PROBE_DISCORD_COMMAND_GUILD_ID`
-  Use this while testing so slash-command sync is fast.
-
-The packaged bot service runs as root by default, so no bot-specific Linux username is required.
-
-If you customize the service to run as a non-root user, install the narrow sudoers rule:
+Start the bot:
 
 ```bash
-sudo visudo -f /etc/sudoers.d/pi-probe-discord-bot
+sudo systemctl enable --now pi-probe-discord-bot.service
+journalctl -u pi-probe-discord-bot.service -n 50 --no-pager
 ```
 
-Add exactly, replacing `probeuser` with your actual bot service user:
+If you run the bot as a non-root user, use the sudoers template at:
 
 ```text
-probeuser ALL=(root) NOPASSWD: /bin/systemctl start --no-block pi-probe-discord-speedtest.service
-probeuser ALL=(root) NOPASSWD: /bin/systemctl start pi-probe-discord-speedtest.service
-probeuser ALL=(root) NOPASSWD: /bin/systemctl start --no-block pi-probe-discord-full.service
-probeuser ALL=(root) NOPASSWD: /bin/systemctl start pi-probe-discord-full.service
-probeuser ALL=(root) NOPASSWD: /usr/bin/pi-probe-discord firewall
-probeuser ALL=(root) NOPASSWD: /usr/bin/pi-probe-discord router
-probeuser ALL=(root) NOPASSWD: /usr/sbin/ufw status verbose
-# Optional if logs are only in journald:
-probeuser ALL=(root) NOPASSWD: /usr/bin/journalctl -k --since -24 hours --no-pager
+/usr/share/pi-probe-discord/pi-probe-discord-bot.sudoers.example
 ```
 
-Then enable the bot:
+## Important files
+
+- config: `/etc/pi-probe-discord/pihole-update-discord.env`
+- bot config: `/etc/pi-probe-discord/pi-probe-discord-bot.env`
+- data: `/var/lib/pi-probe-discord/pi_probe_discord.db`
+- standard chart image: `/var/lib/pi-probe-discord/speed_chart.png`
+- interactive dashboard default: `/var/lib/pi-probe-discord/dashboard/index.html`
+
+## Upgrade
 
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now pi-probe-discord-bot.service
+sudo pi-probe-discord-update latest
 ```
 
-Check logs:
+Or a specific version:
+
+```bash
+sudo pi-probe-discord-update 0.1.22
+```
+
+The upgrade helper now reloads systemd, restarts timers, and restarts the bot service if it is enabled or active.
+
+## Troubleshooting
+
+Bot logs:
 
 ```bash
 journalctl -u pi-probe-discord-bot.service -n 100 --no-pager
 ```
 
-Run a one-shot health check:
+Speed test service logs:
 
 ```bash
-pi-probe-discord doctor
+journalctl -u pi-probe-discord-speedtest.service -n 100 --no-pager
 ```
 
-## Firewall Reporting
-
-Enable UFW logging:
+Full report service logs:
 
 ```bash
-sudo ufw logging on
+journalctl -u pi-probe-discord-full.service -n 100 --no-pager
 ```
 
-Check status:
+If chart rendering fails, the app still posts a text embed when it can.
 
-```bash
-sudo ufw status verbose
-```
+## More detail
 
-Run a manual firewall snapshot:
-
-```bash
-pi-probe-discord-firewall --window-hours 24
-pi-probe-discord-firewall --json
-```
-
-Relevant config keys in `pihole-update-discord.env`:
-
-- `PI_PROBE_FIREWALL_ENABLED=true`
-- `PI_PROBE_FIREWALL_WINDOW_HOURS=24`
-- `PI_PROBE_FIREWALL_TOP_N=5`
-- `PI_PROBE_FIREWALL_NOISY_SOURCE_THRESHOLD=10`
-- `PI_PROBE_FIREWALL_INCLUDE_ALLOW=false`
-- `PI_PROBE_FIREWALL_LOG_PATHS=/var/log/ufw.log,/var/log/kern.log,/var/log/syslog`
-- `PI_PROBE_FIREWALL_ALERT_ENABLED=true`
-- `PI_PROBE_FIREWALL_ALERT_MIN_BLOCKS=80`
-- `PI_PROBE_FIREWALL_ALERT_MIN_SSH_ATTEMPTS=20`
-- `PI_PROBE_FIREWALL_ALERT_MIN_NOISY_SOURCES=2`
-- `PI_PROBE_FIREWALL_ALERT_COOLDOWN_MINUTES=60`
-- `PI_PROBE_FIREWALL_ALERT_STATE_FILE=/var/lib/pi-probe-discord/firewall_alert_state.json`
-- `PI_PROBE_ROUTER_SNMP_ENABLED=false`
-- `PI_PROBE_ROUTER_SNMP_LOG_PATH=/var/log/snmptrapd.log`
-- `PI_PROBE_ROUTER_SNMP_STATE_FILE=/var/lib/pi-probe-discord/router_snmp_ingest_state.json`
-- `PI_PROBE_ROUTER_SNMP_WINDOW_HOURS=24`
-- `PI_PROBE_ROUTER_SNMP_TOP_N=5`
-- `PI_PROBE_ROUTER_SNMP_LISTENER_ENABLED=false`
-- `PI_PROBE_ROUTER_SNMP_BIND_HOST=0.0.0.0`
-- `PI_PROBE_ROUTER_SNMP_BIND_PORT=9162`
-- `PI_PROBE_ROUTER_SNMP_OID_SEVERITY_MAP=SNMPv2-MIB::authenticationFailure=critical,IF-MIB::linkDown=warning`
-
-If no entries are found, this does not necessarily mean UFW is broken. Logging may be disabled, quiet, permission-limited, or handled by journald.
-
-When firewall alerting is enabled, `full` runs will post a separate red "Firewall Attack Alert" embed if one or more thresholds are exceeded. Cooldown suppresses repeated alerts for the configured number of minutes.
-
-## Router SNMP Summary
-
-If your router can forward SNMP traps to a manager, you can have this app ingest those events and include a router section in the full Discord dashboard.
-
-Setup pattern:
-
-1. Run `snmptrapd` on the Pi so trap events are written to a log file.
-2. Point the router trap destination at the Pi IP and UDP/162.
-3. Enable these config keys:
-   - `PI_PROBE_ROUTER_SNMP_ENABLED=true`
-   - `PI_PROBE_ROUTER_SNMP_LOG_PATH=/var/log/snmptrapd.log` (or your actual trap log file)
-4. Keep using normal `full` runs/timer; each run ingests new trap log lines, stores them in SQLite, and posts summary fields:
-   - new events since last ingest
-   - total events in the configured window
-   - top source IPs
-   - top trap OIDs
-
-Native listener mode (in-app):
-
-1. Set `PI_PROBE_ROUTER_SNMP_LISTENER_ENABLED=true`.
-2. Set `PI_PROBE_ROUTER_SNMP_BIND_HOST` and `PI_PROBE_ROUTER_SNMP_BIND_PORT` (default `9162` avoids privileged port requirements).
-3. Start the listener service:
-   - `sudo systemctl enable --now pi-probe-discord-snmp-listener.service`
-4. Point the router trap destination to that host:port.
-5. Run `pi-probe-discord router` to inspect local summary output.
-
-Note: native listener mode stores raw UDP payload text and attempts lightweight OID extraction for summary/severity; for full trap decoding, keep using `snmptrapd` log ingestion.
-
-## Build The Debian Package
-
-```bash
-sudo apt-get install -y debhelper
-dpkg-buildpackage -us -uc -b
-```
-
-That produces a package like:
-
-```text
-../pi-probe-discord_0.1.0-1_all.deb
-```
-
-## Install Or Upgrade On The Pi
-
-If you already have the `.deb` on the Pi:
-
-```bash
-sudo apt install /home/probeuser/pi-probe-discord_0.1.0-1_all.deb
-sudo systemctl daemon-reload
-sudo systemctl restart pi-probe-discord-speedtest.timer pi-probe-discord-full.timer
-```
-
-If schedule or installer-managed config needs to be refreshed:
-
-```bash
-sudo pi-probe-discord-install
-```
-
-## Release Workflow
-
-Create a release from the development machine with:
-
-```bash
-scripts/release.sh "Improve Discord chart readability"
-```
-
-That script:
-
-- derives the next patch version from `debian/changelog` by default
-- updates `debian/changelog`
-- commits the release metadata
-- creates the matching git tag
-- builds the `.deb`
-- creates a GitHub release
-- uploads the `.deb` asset
-
-If you need a specific version instead of the automatic patch bump:
-
-```bash
-scripts/release.sh --version 0.2.0 "Add Pi upgrade helper"
-```
-
-## Pi Upgrade Helper
-
-On the Pi, the packaged upgrade helper can install from:
-
-- a local `.deb` path
-- a direct release URL
-- a release version like `0.1.1`
-- `latest`
-
-Examples:
-
-```bash
-sudo pi-probe-discord-update /home/probeuser/pi-probe-discord_0.1.1-1_all.deb
-sudo pi-probe-discord-update 0.1.1
-sudo pi-probe-discord-update latest
-```
-
-If the GitHub repo is private, the Pi needs either:
-
-- authenticated `gh`, or
-- `GITHUB_TOKEN` exported in the shell
-
-If you also want to rerun installer-based config after upgrading:
-
-```bash
-sudo pi-probe-discord-update latest --reconfigure
-```
-
-## Notes
-
-- The app still posts a Discord embed if chart generation is unavailable.
-- `matplotlib` is required for the image chart.
-- Pi-hole details degrade gracefully if Pi-hole commands are unavailable.
-- The repo also includes `pihole-update-discord.sh`, a simpler shell-only reporter for update/Pi-hole reporting.
-
-## Architecture
-
-- `pi_probe_discord/config.py`
-  config loading and validation
-- `pi_probe_discord/storage.py`
-  SQLite persistence and retention
-- `pi_probe_discord/system_checks.py`
-  apt and Pi-hole collection
-- `pi_probe_discord/speedtest_runner.py`
-  speed test execution
-- `pi_probe_discord/status.py`
-  baseline-aware health verdict logic
-- `pi_probe_discord/charts.py`
-  Discord chart rendering
-- `pi_probe_discord/discord_client.py`
-  embed/file posting
-- `pi_probe_discord/installer.py`
-  interactive setup and timer overrides
-- `pi_probe_discord/app.py`
-  orchestration
+For a fuller Pi setup flow, see [DEPLOYMENT.md](DEPLOYMENT.md).

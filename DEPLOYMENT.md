@@ -1,188 +1,65 @@
-# Raspberry Pi Deployment
+# Deployment
 
-This guide installs `pi-probe-discord` onto a Raspberry Pi and enables automatic Discord reporting.
+This is the shortest reliable way to set up `pi-probe-discord` on a Pi.
 
-## What This Installs
+## Fresh install on a Pi
 
-- the Python application under `/opt/pi-probe-discord`
-- a local virtual environment
-- Python dependencies from `requirements.txt`
-- an interactive config file with your Discord webhook
-- `systemd` timers for periodic speed tests and daily full reports
-- optional Discord slash-command bot for triggering a speed test manually
+1. Copy or clone the repo to the Pi.
+2. Install the package or run the installer.
+3. Set the Discord webhook.
+4. Enable the timers.
 
-## 1. Copy The Project To The Pi
+## Package install
 
-From your main computer:
+If you already have a built `.deb`:
 
 ```bash
-scp -r pi-probe-discord pi@your-pi:/home/pi/
-```
-
-Or clone it directly on the Pi if the repo is hosted remotely.
-
-## 2. SSH Into The Pi
-
-```bash
-ssh pi@your-pi
-cd /home/pi/pi-probe-discord
-```
-
-## 3. Install System Packages
-
-```bash
-sudo apt-get update
-sudo apt-get install -y python3 python3-venv python3-pip
-```
-
-If your Pi does not already have Pi-hole tools installed, the app will still run, but the Pi-hole fields will show warnings.
-
-## 4. Create A Virtual Environment
-
-```bash
-python3 -m venv .venv
-. .venv/bin/activate
-pip install --upgrade pip
-pip install -r requirements.txt
-```
-
-## 5. Run The Interactive Installer
-
-```bash
-python3 install.py
-```
-
-It will ask for:
-
-- Discord webhook URL
-- speedtest publish frequency in minutes
-- daily full report time in `HH:MM`
-
-It also checks for:
-
-- overlapping cron jobs in the current user crontab
-- related `systemd` units and timers that may need disabling
-
-It will generate:
-
-- `pihole-update-discord.env`
-- `generated-systemd/pi-probe-discord-speedtest.service`
-- `generated-systemd/pi-probe-discord-speedtest.timer`
-- `generated-systemd/pi-probe-discord-full.service`
-- `generated-systemd/pi-probe-discord-full.timer`
-
-If matching cron jobs are found, the installer can remove them from the current user's crontab before you enable the new timers.
-The generated webhook config file is written with `600` permissions.
-The installer also validates the webhook URL before writing the config.
-
-## 6. Install The App Into `/opt`
-
-```bash
-sudo mkdir -p /opt/pi-probe-discord
-sudo mkdir -p /etc/pi-probe-discord
-sudo mkdir -p /var/lib/pi-probe-discord
-sudo rsync -a --delete /home/pi/pi-probe-discord/ /opt/pi-probe-discord/
-sudo chown -R root:root /opt/pi-probe-discord
-```
-
-## 7. Install Python Dependencies Into The App Venv
-
-```bash
-cd /opt/pi-probe-discord
-sudo python3 -m venv .venv
-sudo /opt/pi-probe-discord/.venv/bin/pip install --upgrade pip
-sudo /opt/pi-probe-discord/.venv/bin/pip install -r /opt/pi-probe-discord/requirements.txt
-```
-
-## 8. Install The Generated Config
-
-```bash
-sudo cp pihole-update-discord.env /etc/pi-probe-discord/pihole-update-discord.env
-sudo chown root:root /etc/pi-probe-discord/pihole-update-discord.env
-sudo chmod 600 /etc/pi-probe-discord/pihole-update-discord.env
-```
-
-## 9. Install The Generated systemd Units
-
-```bash
-sudo cp generated-systemd/*.service /etc/systemd/system/
-sudo cp generated-systemd/*.timer /etc/systemd/system/
+sudo apt install /path/to/pi-probe-discord_<version>-1_all.deb
 sudo systemctl daemon-reload
+sudo systemctl restart pi-probe-discord-speedtest.timer pi-probe-discord-full.timer
+```
+
+If you are pulling from GitHub releases:
+
+```bash
+sudo pi-probe-discord-update latest
+```
+
+## Required config
+
+Edit:
+
+```bash
+sudo nano /etc/pi-probe-discord/pihole-update-discord.env
+```
+
+Set at least:
+
+```bash
+WEBHOOK_URL="https://discord.com/api/webhooks/replace/this"
+```
+
+## Enable timers
+
+```bash
 sudo systemctl enable --now pi-probe-discord-speedtest.timer
 sudo systemctl enable --now pi-probe-discord-full.timer
 ```
 
-The generated service files already point at:
-
-```text
-/opt/pi-probe-discord/.venv/bin/python
-```
-
-The app now defaults to:
-
-```text
-config: /etc/pi-probe-discord/pihole-update-discord.env
-data:   /var/lib/pi-probe-discord/
-```
-
-## 10. Smoke Test The App
-
-Run a one-off speed test report:
+## Manual checks
 
 ```bash
-sudo /opt/pi-probe-discord/.venv/bin/python /opt/pi-probe-discord/pihole_update_report.py speedtest-only
+pi-probe-discord speedtest-only
+pi-probe-discord full
+pi-probe-discord doctor
 ```
 
-Run a full report:
+## Optional bot
 
-```bash
-sudo /opt/pi-probe-discord/.venv/bin/python /opt/pi-probe-discord/pihole_update_report.py full
-```
-
-Check the timers:
-
-```bash
-systemctl list-timers --all | grep pi-probe-discord
-```
-
-## 11. Useful Maintenance Commands
-
-Inspect timer logs:
-
-```bash
-journalctl -u pi-probe-discord-speedtest.service -n 100 --no-pager
-journalctl -u pi-probe-discord-full.service -n 100 --no-pager
-```
-
-Generate a local report from the database:
-
-```bash
-sudo /opt/pi-probe-discord/.venv/bin/python /opt/pi-probe-discord/pihole_update_report.py report 7
-```
-
-## 12. Optional Discord Slash Bot
-
-The project includes a separate Discord bot so an approved user can run:
-
-```text
-/speedtest
-```
-
-That bot only starts this fixed service:
-
-```text
-/bin/systemctl start pi-probe-discord-speedtest.service
-```
-
-It does not run arbitrary commands.
-
-### Bot Config
-
-Create the bot env file:
+Create bot config:
 
 ```bash
 sudo cp /usr/share/pi-probe-discord/pi-probe-discord-bot.env.example /etc/pi-probe-discord/pi-probe-discord-bot.env
-sudo chown root:root /etc/pi-probe-discord/pi-probe-discord-bot.env
 sudo chmod 600 /etc/pi-probe-discord/pi-probe-discord-bot.env
 ```
 
@@ -191,75 +68,61 @@ Set:
 - `PI_PROBE_DISCORD_BOT_TOKEN`
 - `PI_PROBE_DISCORD_ALLOWED_USER_IDS`
 
-Optional:
-
-- `PI_PROBE_DISCORD_COMMAND_GUILD_ID`
-  Use this for faster slash-command sync while testing.
-
-The packaged bot service runs as root by default, so no bot-specific Linux username is required.
-
-### Narrow sudoers Rule
-
-Only needed if you customize the bot service to run as a non-root user.
-
-Install the sudoers file:
+Enable:
 
 ```bash
-sudo visudo -f /etc/sudoers.d/pi-probe-discord-bot
-```
-
-Add, replacing `probeuser` with your actual bot service user:
-
-```text
-probeuser ALL=(root) NOPASSWD: /bin/systemctl start pi-probe-discord-speedtest.service
-```
-
-Nothing else should be granted.
-
-### Start The Bot
-
-```bash
-sudo systemctl daemon-reload
 sudo systemctl enable --now pi-probe-discord-bot.service
 ```
 
-### Check Bot Logs
+Check:
 
 ```bash
+journalctl -u pi-probe-discord-bot.service -n 50 --no-pager
+```
+
+If you run the bot as a non-root user, use:
+
+```text
+/usr/share/pi-probe-discord/pi-probe-discord-bot.sudoers.example
+```
+
+## Optional premium and interactive dashboards
+
+Add to `/etc/pi-probe-discord/pihole-update-discord.env`:
+
+```bash
+PI_PROBE_DASHBOARD_STYLE="premium"
+PI_PROBE_INTERACTIVE_DASHBOARD_ENABLED="true"
+PI_PROBE_INTERACTIVE_DASHBOARD_FILE="/var/lib/pi-probe-discord/dashboard/index.html"
+PI_PROBE_INTERACTIVE_DASHBOARD_HOST="0.0.0.0"
+PI_PROBE_INTERACTIVE_DASHBOARD_PORT="8088"
+```
+
+Serve the HTML dashboard:
+
+```bash
+pi-probe-discord dashboard-serve
+```
+
+Open:
+
+```text
+http://<pi-or-tailscale-name>:8088/index.html
+```
+
+## Upgrade behavior
+
+The package upgrade path now:
+
+- reloads systemd
+- restarts speedtest and full timers
+- restarts the bot service if enabled or active
+- restarts the SNMP listener if enabled or active
+
+## Troubleshooting
+
+```bash
+journalctl -u pi-probe-discord-speedtest.service -n 100 --no-pager
+journalctl -u pi-probe-discord-full.service -n 100 --no-pager
 journalctl -u pi-probe-discord-bot.service -n 100 --no-pager
-```
-
-## Notes
-
-- The database keeps up to 12 months of data by default.
-- The chart is built from SQLite history and posted to Discord when `matplotlib` is installed.
-- If `matplotlib` is missing, the app still posts an embed without the image.
-- If the speedtest Python package is missing, the app records and reports that failure rather than crashing.
-- If you install via `.deb`, rerun `sudo pi-probe-discord-install` whenever you want to change publish frequency or daily report time. It updates `systemd` timer override files instead of requiring package reinstall.
-
-## Upgrade From A New Release
-
-When a new `.deb` is published from GitHub:
-
-```bash
-scp pi-probe-discord_<version>-1_all.deb probeuser@probe-host:/home/probeuser/
-ssh probeuser@probe-host
-sudo apt install /home/probeuser/pi-probe-discord_<version>-1_all.deb
-sudo systemctl daemon-reload
-sudo systemctl restart pi-probe-discord-speedtest.timer pi-probe-discord-full.timer
-```
-
-Or use the repo helper directly on the Pi:
-
-```bash
-sudo pi-probe-discord-update /home/probeuser/pi-probe-discord_<version>-1_all.deb
-sudo pi-probe-discord-update latest
-```
-
-If the GitHub repo is private, `latest` and version-based downloads require either authenticated `gh` on the Pi or `GITHUB_TOKEN` in the shell.
-
-If the release changed schedule/config behavior, rerun:
-
-```bash
-sudo pi-probe-discord-install
 ```

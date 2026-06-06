@@ -8,18 +8,34 @@ if [ ! -f /etc/pi-probe-discord/pihole-update-discord.env ]; then
     install -m 600 /usr/share/pi-probe-discord/pihole-update-discord.env.example /etc/pi-probe-discord/pihole-update-discord.env
 fi
 
+if [ ! -f /etc/pi-probe-discord/pi-probe-discord-bot.env ]; then
+    install -m 600 /usr/share/pi-probe-discord/pi-probe-discord-bot.env.example /etc/pi-probe-discord/pi-probe-discord-bot.env
+fi
+
 chown root:root /etc/pi-probe-discord/pihole-update-discord.env || true
+chown root:root /etc/pi-probe-discord/pi-probe-discord-bot.env || true
+
+restart_if_enabled() {
+    unit="$1"
+    if command -v systemctl >/dev/null 2>&1; then
+        if systemctl is-enabled "$unit" >/dev/null 2>&1 || systemctl is-active "$unit" >/dev/null 2>&1; then
+            systemctl restart "$unit" || true
+        fi
+    fi
+}
+
+if command -v systemctl >/dev/null 2>&1; then
+    systemctl daemon-reload || true
+    restart_if_enabled pi-probe-discord-speedtest.timer
+    restart_if_enabled pi-probe-discord-full.timer
+    restart_if_enabled pi-probe-discord-bot.service
+    restart_if_enabled pi-probe-discord-snmp-listener.service
+fi
 
 echo "pi-probe-discord installed."
-echo "Next step: run sudo pi-probe-discord-install to set your Discord webhook and cleanup old cron jobs."
+echo "Next step: run sudo pi-probe-discord-install if webhook, schedules, or paths need changing."
 echo ""
-echo "Health check hint:"
+echo "Health check:"
 echo "  sudo pi-probe-discord doctor"
-echo ""
-echo "If Discord bot commands fail, ensure sudoers includes:"
-echo "  /usr/bin/pi-probe-discord firewall"
-echo "  /usr/bin/pi-probe-discord router"
-echo "See template:"
-echo "  /usr/share/pi-probe-discord/pi-probe-discord-bot.sudoers.example"
 
 exit 0

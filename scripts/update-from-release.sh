@@ -208,6 +208,16 @@ restart_if_present() {
     fi
 }
 
+restart_if_enabled_or_active() {
+    local unit="$1"
+    if ! systemctl list-unit-files "$unit" >/dev/null 2>&1; then
+        return 0
+    fi
+    if systemctl is-enabled "$unit" >/dev/null 2>&1 || systemctl is-active "$unit" >/dev/null 2>&1; then
+        systemctl restart "$unit"
+    fi
+}
+
 show_installed_version() {
     dpkg-query -W -f='${Version}\n' "$PACKAGE_NAME" 2>/dev/null || true
 }
@@ -255,6 +265,8 @@ main() {
     systemctl daemon-reload
     restart_if_present "pi-probe-discord-speedtest.timer"
     restart_if_present "pi-probe-discord-full.timer"
+    restart_if_enabled_or_active "pi-probe-discord-bot.service"
+    restart_if_enabled_or_active "pi-probe-discord-snmp-listener.service"
 
     if [[ "$RECONFIGURE" -eq 1 ]]; then
         if command -v pi-probe-discord-install >/dev/null 2>&1; then
@@ -267,6 +279,7 @@ main() {
 
     echo "Installed version: $(show_installed_version)"
     systemctl list-timers --all | grep 'pi-probe-discord' || true
+    systemctl status pi-probe-discord-bot.service --no-pager --lines=5 || true
 }
 
 main "$@"
