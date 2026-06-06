@@ -9,6 +9,7 @@ import requests
 
 from .charts import generate_chart
 from .config import load_config
+from .dashboard import generate_interactive_dashboard, generate_premium_dashboard, serve_interactive_dashboard
 from .discord_client import build_embed, post_webhook_file, post_webhook_json
 from .firewall import (
     FirewallConfig,
@@ -142,14 +143,19 @@ def run_mode(mode: str) -> int:
 
     save_run_record(config, build_run_record(run_at, hostname, update_result, pihole_result, speed_result))
 
+    history = load_history_from_db(config, run_at)
+
     if mode in {"full", "speedtest-only"} and speed_result.ok:
-        history = load_history_from_db(config, run_at)
-        chart_ok, chart_message = generate_chart(history, run_at, config.chart_file, speed_result)
+        chart_generator = generate_premium_dashboard if config.dashboard_style == "premium" else generate_chart
+        chart_ok, chart_message = chart_generator(history, run_at, config.chart_file, speed_result)
         speed_result.chart_generated = chart_ok
         if not chart_ok:
             speed_result.warnings.append(chart_message)
-    else:
-        history = load_history_from_db(config, run_at)
+
+    if mode in {"full", "speedtest-only"} and config.interactive_dashboard_enabled:
+        dashboard_ok, dashboard_message = generate_interactive_dashboard(history, run_at, config.interactive_dashboard_file)
+        if not dashboard_ok:
+            speed_result.warnings.append(dashboard_message)
 
     version_line = version_status_line(timeout=config.request_timeout) if mode == "full" else None
     firewall_snapshot = None
@@ -288,3 +294,29 @@ def run_router_listener() -> int:
         raise RuntimeError("Router SNMP listener is disabled. Set PI_PROBE_ROUTER_SNMP_LISTENER_ENABLED=true.")
     run_router_snmp_listener(config.db_path, config.router_snmp_bind_host, config.router_snmp_bind_port)
     return 0
+
+
+def render_dashboard_html(output_path: str | None = None) -> str:
+    config = load_config(require_webhook=False)
+    now = datetime.now().astimezone()
+    history = load_history_from_db(config, now)
+    target_path = output_path or config.interactive_dashboard_file
+    ok, message = generate_interactive_dashboard(history, now, target_path)
+    if not ok:
+        raise RuntimeError(message)
+    return message
+
+
+def run_dashboard_server() -> int:
+    config = load_config(require_webhook=False)
+    now = datetime.now().astimezone()
+    history = load_history_from_db(config, now)
+    ok, message = generate_interactive_dashboard(history, now, config.interactive_dashboard_file)
+    if not ok:
+        raise RuntimeError(message)
+    print(message)
+    return serve_interactive_dashboard(
+        config.interactive_dashboard_file,
+        config.interactive_dashboard_host,
+        config.interactive_dashboard_port,
+    )

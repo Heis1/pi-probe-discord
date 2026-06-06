@@ -2,7 +2,15 @@ from __future__ import annotations
 
 import sys
 
-from .app import render_firewall_report, render_report, render_router_report, run_mode, run_router_listener
+from .app import (
+    render_dashboard_html,
+    render_firewall_report,
+    render_report,
+    render_router_report,
+    run_dashboard_server,
+    run_mode,
+    run_router_listener,
+)
 from .doctor import run_doctor
 from .installer import run_install
 
@@ -18,8 +26,10 @@ def parse_mode(argv: list[str]) -> tuple[str, int | None]:
             except ValueError as exc:
                 raise ValueError("Usage: pihole_update_report.py report [days]") from exc
         return "report", days
-    if len(argv) >= 2 and argv[1] in {"full", "speedtest-only", "update-only", "router-listener"}:
+    if len(argv) >= 2 and argv[1] in {"full", "speedtest-only", "update-only", "router-listener", "dashboard-serve"}:
         return argv[1], None
+    if len(argv) >= 2 and argv[1] == "dashboard-html":
+        return "dashboard-html", None
     if len(argv) >= 2 and argv[1] == "firewall":
         return "firewall", None
     if len(argv) >= 2 and argv[1] == "router":
@@ -28,7 +38,7 @@ def parse_mode(argv: list[str]) -> tuple[str, int | None]:
         return "doctor", None
     if len(argv) >= 2:
         raise ValueError(
-            "Usage: pihole_update_report.py [full|speedtest-only|update-only|install|firewall|router|router-listener|doctor] | report [days]"
+            "Usage: pihole_update_report.py [full|speedtest-only|update-only|install|firewall|router|router-listener|doctor|dashboard-html|dashboard-serve] | report [days]"
         )
     return "full", None
 
@@ -108,6 +118,20 @@ def main(argv: list[str] | None = None) -> int:
     if mode == "router-listener":
         try:
             return run_router_listener()
+        except RuntimeError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+    if mode == "dashboard-html":
+        output_path = args[2] if len(args) >= 3 else None
+        try:
+            print(render_dashboard_html(output_path=output_path))
+        except RuntimeError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        return 0
+    if mode == "dashboard-serve":
+        try:
+            return run_dashboard_server()
         except RuntimeError as exc:
             print(str(exc), file=sys.stderr)
             return 1

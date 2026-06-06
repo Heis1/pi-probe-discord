@@ -14,6 +14,8 @@ The project is packaged as a Debian `.deb`, can run headless over SSH, and is bu
 
 - download, upload, and ping
 - chart image for 24h, 7d, and 30d history
+- optional premium dashboard image for Discord posts
+- optional interactive HTML dashboard for local or Tailscale access
 - verdict based on recent local baseline, with same-time-of-day comparison preferred when enough history exists
 - Pi-hole service state
 - Pi-hole blocking enabled or disabled
@@ -77,6 +79,8 @@ python3 pihole_update_report.py report 7
 python3 pihole_update_report.py firewall
 python3 pihole_update_report.py router
 python3 pihole_update_report.py router-listener
+python3 pihole_update_report.py dashboard-html
+python3 pihole_update_report.py dashboard-serve
 python3 pihole_update_report.py doctor
 ```
 
@@ -113,6 +117,37 @@ chmod 600 pihole-update-discord.env
 ```
 
 The installer can also create this file for you.
+
+Dashboard-related config keys:
+
+- `PI_PROBE_DASHBOARD_STYLE=standard|premium`
+- `PI_PROBE_INTERACTIVE_DASHBOARD_ENABLED=true|false`
+- `PI_PROBE_INTERACTIVE_DASHBOARD_FILE=/var/lib/pi-probe-discord/dashboard/index.html`
+- `PI_PROBE_INTERACTIVE_DASHBOARD_HOST=0.0.0.0`
+- `PI_PROBE_INTERACTIVE_DASHBOARD_PORT=8088`
+
+If `PI_PROBE_DASHBOARD_STYLE=premium`, Discord posts use the richer NBN-style dashboard image instead of the standard chart.
+
+If `PI_PROBE_INTERACTIVE_DASHBOARD_ENABLED=true`, each successful `full` or `speedtest-only` run also refreshes the interactive HTML dashboard file.
+
+Generate the HTML dashboard manually:
+
+```bash
+pi-probe-discord dashboard-html
+pi-probe-discord dashboard-html /tmp/pi-probe-dashboard.html
+```
+
+Serve it locally or over Tailscale:
+
+```bash
+pi-probe-discord dashboard-serve
+```
+
+Then open:
+
+```text
+http://<pi-or-tailscale-name>:8088/index.html
+```
 
 ## Install On A Pi
 

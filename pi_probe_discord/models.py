@@ -10,6 +10,11 @@ class AppConfig:
     config_file: str
     log_file: str
     chart_file: str
+    dashboard_style: str
+    interactive_dashboard_enabled: bool
+    interactive_dashboard_file: str
+    interactive_dashboard_host: str
+    interactive_dashboard_port: int
     db_path: str
     history_retention_days: int
     request_timeout: int
