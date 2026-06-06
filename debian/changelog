@@ -1,3 +1,9 @@
+pi-probe-discord (0.1.23-1) unstable; urgency=medium
+
+  * Restart bot on upgrade and simplify install docs
+
+ -- Codex Builder <noreply@example.invalid>  Sat, 06 Jun 2026 13:30:16 +0930
+
 pi-probe-discord (0.1.22-1) unstable; urgency=medium
 
   * Add premium Discord dashboard and interactive HTML dashboard
