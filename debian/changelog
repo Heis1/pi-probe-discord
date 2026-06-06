@@ -1,3 +1,9 @@
+pi-probe-discord (0.1.26-1) unstable; urgency=medium
+
+  * Refine dashboard and firewall chart layouts
+
+ -- Codex Builder <noreply@example.invalid>  Sat, 06 Jun 2026 14:38:47 +0930
+
 pi-probe-discord (0.1.25-1) unstable; urgency=medium
 
   * Refine premium dashboard and firewall bot visuals
