@@ -379,177 +379,149 @@ def generate_premium_dashboard(history: dict[str, list[dict[str, Any]]], now: da
     if not rows:
         return False, "No speed data available for premium dashboard"
 
-    _, stats = _build_dashboard_payload(rows)
-    figure = plt.figure(figsize=(16, 9), facecolor="#0b1220")
-    gs = figure.add_gridspec(3, 12, height_ratios=[1.0, 2.9, 1.5], hspace=0.34, wspace=0.34)
+    data, stats = _build_dashboard_payload(rows)
+    figure = plt.figure(figsize=(16, 10), facecolor="#111827")
+    gs = figure.add_gridspec(3, 12, height_ratios=[1.0, 2.2, 2.0], hspace=0.28, wspace=0.42)
 
-    def add_card(col_start: int, col_end: int) -> Any:
-        ax = figure.add_subplot(gs[0, col_start:col_end])
-        ax.set_facecolor("#101a2d")
+    figure.text(0.04, 0.95, "Internet Health Snapshot", color="#f8fafc", fontsize=26, fontweight="bold", ha="left", va="top")
+    figure.text(
+        0.04,
+        0.915,
+        f"Local history · {stats['start']} – {stats['end']} · {stats['tests']} tests",
+        color="#94a3b8",
+        fontsize=13,
+        ha="left",
+        va="top",
+    )
+
+    score = _score_connection(stats["avgDown"], stats["avgUp"], stats["avgPing"], stats["pct250"])
+    cards = [
+        ("Typical download", f"{stats['medianDown']:.0f} Mbps", f"Average {stats['avgDown']:.0f} Mbps"),
+        ("Upload average", f"{stats['avgUp']:.1f} Mbps", "Typical upstream"),
+        ("Average ping", f"{stats['avgPing']:.1f} ms", "Typical latency"),
+        ("Reliability", f"{score}/100", f"{stats['pct250']:.0f}% of tests ≥250 Mbps"),
+    ]
+    for idx, (title, value, subtitle) in enumerate(cards):
+        ax = figure.add_subplot(gs[0, idx * 12 // 4 : (idx + 1) * 12 // 4])
+        ax.set_facecolor("#152033")
         ax.set_xticks([])
         ax.set_yticks([])
         for spine in ax.spines.values():
             spine.set_visible(False)
-        return ax
+        ax.text(0.06, 0.74, title, transform=ax.transAxes, color="#cbd5e1", fontsize=12, fontweight="bold", ha="left")
+        ax.text(0.06, 0.40, value, transform=ax.transAxes, color="#f8fafc", fontsize=27, fontweight="bold", ha="left")
+        ax.text(0.06, 0.18, subtitle, transform=ax.transAxes, color="#94a3b8", fontsize=10.5, ha="left")
 
-    def style_axis(ax: Any, title: str, subtitle: str | None = None) -> None:
-        ax.set_facecolor("#101a2d")
+    def style_panel(ax: Any, title: str, subtitle: str | None = None) -> Any:
+        ax.set_facecolor("#152033")
+        ax.set_xticks([])
+        ax.set_yticks([])
         for spine in ax.spines.values():
-            spine.set_color("#263449")
-        ax.grid(color="#223044", linewidth=0.8, alpha=0.6)
-        ax.tick_params(colors="#9fb2c8", labelsize=10)
-        ax.set_title(title, loc="left", color="#f8fafc", fontsize=18, fontweight="bold", pad=18)
+            spine.set_visible(False)
+        ax.text(0.04, 0.94, title, transform=ax.transAxes, color="#f8fafc", fontsize=16.5, fontweight="bold", ha="left", va="top")
         if subtitle:
-            ax.text(0.0, 1.02, subtitle, transform=ax.transAxes, color="#7c8ea6", fontsize=10.5, ha="left", va="bottom")
-
-    download_points = [(row.timestamp, row.download) for row in rows if row.download is not None]
-    upload_points = [(row.timestamp, row.upload) for row in rows if row.upload is not None]
-    ping_points = [(row.timestamp, row.ping) for row in rows if row.ping is not None]
-
-    last_24_cutoff = now - timedelta(hours=24)
-    download_24 = [(moment, value) for moment, value in download_points if moment >= last_24_cutoff]
-
-    baseline_moments: list[datetime] = []
-    baseline_avg: list[float] = []
-    baseline_low: list[float] = []
-    baseline_high: list[float] = []
-    for moment, _ in download_24:
-        baseline = calculate_same_time_baseline(download_points, moment)
-        if baseline.avg is None or baseline.low is None or baseline.high is None:
-            continue
-        baseline_moments.append(moment)
-        baseline_avg.append(baseline.avg)
-        baseline_low.append(baseline.low)
-        baseline_high.append(baseline.high)
-
-    current_baseline = calculate_same_time_baseline(download_points, now)
-    baseline_delta_pct: float | None = None
-    if speed_result.download_mbps is not None and current_baseline.avg not in {None, 0}:
-        baseline_delta_pct = ((speed_result.download_mbps - current_baseline.avg) / current_baseline.avg) * 100.0
-
-    if not speed_result.ok:
-        verdict = "SPEED TEST FAILED"
-        verdict_detail = "No reliable verdict was produced from this run."
-        verdict_color = "#f97316"
-    elif baseline_delta_pct is None:
-        verdict = "BUILDING BASELINE"
-        verdict_detail = "Need more same-time history before calling this unusual."
-        verdict_color = "#f8fafc"
-    elif baseline_delta_pct <= -12:
-        verdict = "BELOW USUAL"
-        verdict_detail = f"{abs(baseline_delta_pct):.0f}% below the usual result for this time of day."
-        verdict_color = "#f59e0b"
-    elif baseline_delta_pct >= 12:
-        verdict = "AHEAD OF USUAL"
-        verdict_detail = f"{baseline_delta_pct:.0f}% above the usual result for this time of day."
-        verdict_color = "#5eead4"
-    else:
-        verdict = "ON TRACK"
-        verdict_detail = "Current result sits inside the normal band for this time slot."
-        verdict_color = "#5eead4"
-
-    figure.text(0.04, 0.95, "Pi Probe NBN Performance Dashboard", color="#f8fafc", fontsize=28, fontweight="bold", ha="left", va="top")
-    figure.text(0.04, 0.915, f"Local history · {stats['start']} – {stats['end']} · {stats['tests']} tests", color="#7c8ea6", fontsize=12.5, ha="left", va="top")
-
-    hero = add_card(0, 5)
-    hero.text(0.05, 0.78, verdict, transform=hero.transAxes, color=verdict_color, fontsize=24, fontweight="bold", ha="left")
-    hero.text(0.05, 0.54, f"{_format_metric(speed_result.download_mbps, 'Mbps')} ↓   {_format_metric(speed_result.upload_mbps, 'Mbps')} ↑   {_format_metric(speed_result.ping_ms, 'ms', 0)}", transform=hero.transAxes, color="#f8fafc", fontsize=22, fontweight="bold", ha="left")
-    baseline_label = "Same-time baseline unavailable"
-    if current_baseline.avg is not None:
-        baseline_label = f"Same-time avg {current_baseline.avg:.0f} Mbps"
-        if current_baseline.low is not None and current_baseline.high is not None:
-            baseline_label += f" · usual band {current_baseline.low:.0f}–{current_baseline.high:.0f} Mbps"
-    hero.text(0.05, 0.28, baseline_label, transform=hero.transAxes, color="#9fb2c8", fontsize=12, ha="left")
-    hero.text(0.05, 0.12, verdict_detail, transform=hero.transAxes, color="#7c8ea6", fontsize=11.5, ha="left")
-
-    score = _score_connection(stats["avgDown"], stats["avgUp"], stats["avgPing"], stats["pct250"])
-    score_card = add_card(5, 7)
-    score_card.text(0.07, 0.72, "30 day reliability", transform=score_card.transAxes, color="#9fb2c8", fontsize=12, fontweight="bold", ha="left")
-    score_card.text(0.07, 0.40, f"{score}/100", transform=score_card.transAxes, color="#f8fafc", fontsize=30, fontweight="bold", ha="left")
-    score_card.text(0.07, 0.14, f"5th percentile {stats['p05']:.0f} Mbps", transform=score_card.transAxes, color="#7c8ea6", fontsize=11, ha="left")
-
-    trend_card = add_card(7, 9)
-    trend_card.text(0.07, 0.72, "Typical download", transform=trend_card.transAxes, color="#9fb2c8", fontsize=12, fontweight="bold", ha="left")
-    trend_card.text(0.07, 0.40, f"{stats['medianDown']:.0f} Mbps", transform=trend_card.transAxes, color="#f8fafc", fontsize=28, fontweight="bold", ha="left")
-    trend_card.text(0.07, 0.14, f"{stats['pct250']:.0f}% of tests ≥250 Mbps", transform=trend_card.transAxes, color="#7c8ea6", fontsize=11, ha="left")
-
-    latency_card = add_card(9, 12)
-    latency_card.text(0.07, 0.72, "Latency and upload", transform=latency_card.transAxes, color="#9fb2c8", fontsize=12, fontweight="bold", ha="left")
-    latency_card.text(0.07, 0.46, f"{stats['avgPing']:.1f} ms  ·  {stats['avgUp']:.1f} Mbps", transform=latency_card.transAxes, color="#f8fafc", fontsize=22, fontweight="bold", ha="left")
-    latency_card.text(0.07, 0.14, "30 day averages", transform=latency_card.transAxes, color="#7c8ea6", fontsize=11, ha="left")
-
-    ax_main = figure.add_subplot(gs[1, :])
-    style_axis(ax_main, "Current performance versus usual time-slot behaviour", "Solid line is actual download. Dashed line and shaded band are the expected range from prior days at the same local time.")
-    if baseline_moments:
-        ax_main.fill_between(baseline_moments, baseline_low, baseline_high, color="#1d4ed8", alpha=0.12, linewidth=0)
-        ax_main.plot(baseline_moments, baseline_avg, color="#93c5fd", linewidth=2.0, linestyle=(0, (4, 4)), alpha=0.95, label="Same-time avg")
-    if download_24:
-        ax_main.plot([moment for moment, _ in download_24], [value for _, value in download_24], color="#38bdf8", linewidth=2.8, label="Download now")
-        last_moment, last_value = download_24[-1]
-        ax_main.scatter([last_moment], [last_value], color=verdict_color, s=64, zorder=5)
-        ax_main.annotate(
-            f"{last_value:.0f} Mbps",
-            xy=(last_moment, last_value),
-            xytext=(-16, 18),
-            textcoords="offset points",
-            color="#f8fafc",
-            fontsize=10.5,
-            bbox={"boxstyle": "round,pad=0.25", "facecolor": "#0b1220", "edgecolor": "#263449"},
-        )
-    ax_main.set_ylabel("Mbps", color="#9fb2c8")
-    ax_main.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
-    ax_main.xaxis.set_major_locator(mdates.HourLocator(interval=3))
-    ax_main.legend(loc="upper left", frameon=False, labelcolor="#cbd5e1")
+            ax.text(0.04, 0.86, subtitle, transform=ax.transAxes, color="#94a3b8", fontsize=10, ha="left", va="top")
+        inner = ax.inset_axes([0.05, 0.12, 0.90, 0.68])
+        inner.set_facecolor("#152033")
+        inner.grid(color="#334155", linewidth=0.8, alpha=0.65)
+        inner.tick_params(colors="#cbd5e1", labelsize=10)
+        for spine in inner.spines.values():
+            spine.set_color("#334155")
+        return inner
 
     by_day: dict[str, list[float]] = {}
     for row in rows:
-        if row.download is not None:
-            by_day.setdefault(row.timestamp.strftime("%Y-%m-%d"), []).append(row.download)
-    day_dates = [datetime.fromisoformat(day) for day in sorted(by_day)][-7:]
+        if row.download is None:
+            continue
+        by_day.setdefault(row.timestamp.strftime("%Y-%m-%d"), []).append(row.download)
+    day_dates = [datetime.fromisoformat(day) for day in sorted(by_day)]
     day_median = [_quantile(by_day[day.strftime("%Y-%m-%d")], 0.5) or 0.0 for day in day_dates]
+    day_average = [average(by_day[day.strftime("%Y-%m-%d")]) or 0.0 for day in day_dates]
+    day_low = [min(by_day[day.strftime("%Y-%m-%d")]) for day in day_dates]
+    day_high = [max(by_day[day.strftime("%Y-%m-%d")]) for day in day_dates]
+
+    ax_band_panel = figure.add_subplot(gs[1, :7])
+    ax_band = style_panel(ax_band_panel, "Daily Download Reliability Band")
+    ax_band.fill_between(day_dates, day_low, day_high, color="#1d4ed8", alpha=0.18)
+    ax_band.plot(day_dates, day_median, color="#38bdf8", linewidth=2.4, label="Median")
+    ax_band.plot(day_dates, day_average, color="#fb923c", linewidth=1.6, linestyle="--", label="Average")
+    ax_band.set_ylabel("Mbps", color="#cbd5e1")
+    band_locator = mdates.AutoDateLocator(minticks=4, maxticks=6)
+    ax_band.xaxis.set_major_locator(band_locator)
+    ax_band.xaxis.set_major_formatter(mdates.DateFormatter("%d %b"))
+    ax_band.xaxis.get_offset_text().set_visible(False)
+    ax_band.legend(loc="lower right", frameon=False, labelcolor="#cbd5e1")
+
+    heat_values = [[None for _ in range(24)] for _ in range(7)]
+    for dow_idx, day_name in enumerate(DAY_NAMES):
+        for hour in range(24):
+            hour_values = [
+                row.download for row in rows
+                if row.download is not None and row.timestamp.strftime("%A") == day_name and row.timestamp.hour == hour
+            ]
+            heat_values[dow_idx][hour] = average(hour_values)
+    ax_heat_panel = figure.add_subplot(gs[1, 7:])
+    ax_heat = style_panel(ax_heat_panel, "Speed Heatmap by Hour and Weekday", "Average speed by local hour.")
+    image = ax_heat.imshow(heat_values, aspect="auto", cmap="viridis")
+    ax_heat.set_yticks(range(7), [name[:3] for name in DAY_NAMES], color="#cbd5e1")
+    ax_heat.set_xticks(range(0, 24, 3))
+    ax_heat.set_xticklabels([str(hour) for hour in range(0, 24, 3)], color="#cbd5e1")
+    cbar = figure.colorbar(image, ax=ax_heat, fraction=0.046, pad=0.04)
+    cbar.ax.tick_params(colors="#cbd5e1")
 
     hourly_values: list[list[float]] = [[] for _ in range(24)]
     for row in rows:
         if row.download is not None:
             hourly_values[row.timestamp.hour].append(row.download)
-    best_hour = max(((hour, average(values) or 0.0) for hour, values in enumerate(hourly_values) if values), key=lambda item: item[1], default=None)
-    slow_hour = min(((hour, average(values) or 0.0) for hour, values in enumerate(hourly_values) if values), key=lambda item: item[1], default=None)
+    hour_avg = [average(values) if values else None for values in hourly_values]
+    hour_low = [min(values) if values else None for values in hourly_values]
+    hour_high = [max(values) if values else None for values in hourly_values]
+    valid_hours = [hour for hour, value in enumerate(hour_avg) if value is not None]
+    valid_avg = [hour_avg[hour] for hour in valid_hours]
+    valid_low = [hour_low[hour] for hour in valid_hours]
+    valid_high = [hour_high[hour] for hour in valid_hours]
 
-    card_specs = [
-        ("7 day consistency", "Daily typical download", day_dates, day_median, "#38bdf8"),
-        ("30 day reliability", f"90% of results stay between {stats['p05']:.0f} and {stats['p95']:.0f} Mbps", None, None, "#60a5fa"),
-        ("Recent time-slot note", f"Best hour {best_hour[0]:02d}:00 · Slowest {slow_hour[0]:02d}:00" if best_hour and slow_hour else "Not enough history yet", None, None, "#5eead4"),
+    ax_times_panel = figure.add_subplot(gs[2, :7])
+    ax_times = style_panel(ax_times_panel, "Best and Slowest Times of Day")
+    ax_times.fill_between(valid_hours, valid_low, valid_high, color="#1d4ed8", alpha=0.18)
+    ax_times.plot(valid_hours, valid_avg, color="#38bdf8", linewidth=2.4)
+    if valid_avg:
+        best_hour_index = valid_hours[max(range(len(valid_avg)), key=lambda idx: valid_avg[idx])]
+        slow_hour_index = valid_hours[min(range(len(valid_avg)), key=lambda idx: valid_avg[idx])]
+        ax_times.scatter([best_hour_index], [hour_avg[best_hour_index]], color="#22c55e", s=60, zorder=5)
+        ax_times.scatter([slow_hour_index], [hour_avg[slow_hour_index]], color="#f97316", s=60, zorder=5)
+    ax_times.set_xlabel("Hour of day", color="#cbd5e1")
+    ax_times.set_ylabel("Mbps", color="#cbd5e1")
+    ax_times.xaxis.set_major_locator(mticker.MultipleLocator(2))
+
+    ax_exec = figure.add_subplot(gs[2, 7:])
+    ax_exec.set_facecolor("#152033")
+    ax_exec.set_xticks([])
+    ax_exec.set_yticks([])
+    for spine in ax_exec.spines.values():
+        spine.set_visible(False)
+    ax_exec.text(0.04, 0.92, "What Stands Out", transform=ax_exec.transAxes, color="#f8fafc", fontsize=17, fontweight="bold", ha="left")
+    best_hour = max(((hour, value) for hour, value in enumerate(hour_avg) if value is not None), key=lambda item: item[1], default=None)
+    slow_hour = min(((hour, value) for hour, value in enumerate(hour_avg) if value is not None), key=lambda item: item[1], default=None)
+    lines = [
+        f"• Typical result: {stats['medianDown']:.0f} Mbps down",
+        f"• Reliability floor: {stats['p05']:.0f} Mbps",
+        f"• Peak band: {stats['p95']:.0f} Mbps",
+        f"• Best hour: {best_hour[0]:02d}:00" if best_hour else "• Best hour: n/a",
+        f"• Slowest hour: {slow_hour[0]:02d}:00" if slow_hour else "• Slowest hour: n/a",
+        f"• Average ping: {stats['avgPing']:.1f} ms",
     ]
+    for idx, line in enumerate(lines):
+        ax_exec.text(0.06, 0.80 - idx * 0.10, line, transform=ax_exec.transAxes, color="#cbd5e1", fontsize=12.2, ha="left")
 
-    for idx, (title, subtitle, x_values, y_values, line_color) in enumerate(card_specs):
-        ax = figure.add_subplot(gs[2, idx * 4 : (idx + 1) * 4])
-        ax.set_facecolor("#101a2d")
-        for spine in ax.spines.values():
-            spine.set_visible(False)
-        ax.set_xticks([])
-        ax.set_yticks([])
-        ax.text(0.05, 0.88, title, transform=ax.transAxes, color="#f8fafc", fontsize=16, fontweight="bold", ha="left")
-        ax.text(0.05, 0.72, subtitle, transform=ax.transAxes, color="#7c8ea6", fontsize=10.5, ha="left")
-        if x_values and y_values:
-            inset = ax.inset_axes([0.06, 0.13, 0.88, 0.42])
-            inset.set_facecolor("#101a2d")
-            for spine in inset.spines.values():
-                spine.set_color("#263449")
-            inset.grid(color="#223044", linewidth=0.7, alpha=0.45)
-            inset.tick_params(colors="#7c8ea6", labelsize=8)
-            inset.plot(x_values, y_values, color=line_color, linewidth=2.0)
-            inset.fill_between(x_values, y_values, [min(y_values)] * len(y_values), color=line_color, alpha=0.08)
-            inset.xaxis.set_major_formatter(mdates.DateFormatter("%a"))
-        elif idx == 1:
-            ax.text(0.05, 0.40, f"{score}/100", transform=ax.transAxes, color="#f8fafc", fontsize=28, fontweight="bold", ha="left")
-            ax.text(0.05, 0.20, f"{stats['pct300']:.0f}% of tests cleared 300 Mbps", transform=ax.transAxes, color="#9fb2c8", fontsize=11, ha="left")
-        else:
-            delta_text = "No same-time delta available"
-            if baseline_delta_pct is not None:
-                direction = "below" if baseline_delta_pct < 0 else "above"
-                delta_text = f"{abs(baseline_delta_pct):.0f}% {direction} usual on the latest test"
-            ax.text(0.05, 0.40, delta_text, transform=ax.transAxes, color="#f8fafc", fontsize=18, fontweight="bold", ha="left")
-            ax.text(0.05, 0.20, f"Latest result {_format_metric(speed_result.download_mbps, 'Mbps')} down", transform=ax.transAxes, color="#9fb2c8", fontsize=11, ha="left")
+    figure.text(
+        0.04,
+        0.025,
+        "Shaded bands show normal variation. Heatmap shows recurring time-of-day patterns.",
+        color="#94a3b8",
+        fontsize=10,
+        ha="left",
+    )
 
     output = Path(chart_path)
     output.parent.mkdir(parents=True, exist_ok=True)
