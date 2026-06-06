@@ -10,6 +10,7 @@ class AppConfig:
     config_file: str
     log_file: str
     chart_file: str
+    firewall_chart_file: str
     dashboard_style: str
     interactive_dashboard_enabled: bool
     interactive_dashboard_file: str

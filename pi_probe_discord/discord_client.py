@@ -44,13 +44,23 @@ def build_embed(
         "WAITING FOR DATA": "Still building enough local history to judge the connection.",
     }.get(assessment.label, assessment.headline)
 
-    title = (
-        "✅ Internet Looks Normal" if assessment.discord_color == 3066993 else
-        "⚠️ Internet Slower Than Usual" if assessment.discord_color == 16766720 else
-        "❌ Internet Problem Detected"
-    )
+    title = "✅ Internet Looks Normal"
     color = assessment.discord_color
     description = plain_summary
+
+    if not speed_result.ok:
+        title = "⚠️ Speed Test Failed"
+        color = 16766720
+        description = "The speed test did not complete, so no reliable internet health verdict was produced."
+    elif assessment.label == "WAITING FOR DATA":
+        title = "⏳ Building Local Baseline"
+        color = 16766720
+        description = plain_summary
+    elif assessment.label == "INTERNET SLOWER THAN NORMAL":
+        title = "⚠️ Internet Slower Than Usual"
+    elif assessment.label == "INTERNET DEGRADED":
+        title = "❌ Internet Problem Detected"
+
     if not update_result.ok:
         title = "❌ Update Failed"
         color = 15158332

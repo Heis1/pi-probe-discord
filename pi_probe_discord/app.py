@@ -17,6 +17,7 @@ from .firewall import (
     format_firewall_snapshot_json,
     format_firewall_snapshot_text,
 )
+from .firewall_charts import generate_firewall_chart
 from .models import PiholeResult, RunRecord, SpeedResult, UpdateResult
 from .router_snmp import (
     format_router_snapshot_json,
@@ -191,8 +192,12 @@ def run_mode(mode: str) -> int:
                         should_send = False
                 if should_send:
                     alert_payload = _build_firewall_alert_payload(hostname, run_at_local, firewall_snapshot, reasons)
+                    firewall_chart_ok, _ = generate_firewall_chart(firewall_snapshot, config.firewall_chart_file)
                     try:
-                        post_webhook_json(config, alert_payload)
+                        if firewall_chart_ok and Path(config.firewall_chart_file).exists():
+                            post_webhook_file(config, alert_payload, config.firewall_chart_file)
+                        else:
+                            post_webhook_json(config, alert_payload)
                         _write_last_firewall_alert_sent_at(state_file, run_at)
                     except requests.RequestException as exc:
                         raise RuntimeError(f"Discord firewall alert POST failed: {exc}") from exc

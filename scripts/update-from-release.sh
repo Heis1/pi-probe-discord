@@ -222,6 +222,20 @@ show_installed_version() {
     dpkg-query -W -f='${Version}\n' "$PACKAGE_NAME" 2>/dev/null || true
 }
 
+unit_status_summary() {
+    local unit="$1"
+    if ! systemctl list-unit-files "$unit" >/dev/null 2>&1; then
+        printf '%s: not installed\n' "$unit"
+        return 0
+    fi
+
+    local enabled_state="disabled"
+    local active_state="inactive"
+    enabled_state="$(systemctl is-enabled "$unit" 2>/dev/null || true)"
+    active_state="$(systemctl is-active "$unit" 2>/dev/null || true)"
+    printf '%s: enabled=%s active=%s\n' "$unit" "$enabled_state" "$active_state"
+}
+
 main() {
     if [[ $# -lt 1 || $# -gt 2 ]]; then
         usage >&2
@@ -278,8 +292,12 @@ main() {
     fi
 
     echo "Installed version: $(show_installed_version)"
+    echo "Service health:"
+    unit_status_summary "pi-probe-discord-speedtest.timer"
+    unit_status_summary "pi-probe-discord-full.timer"
+    unit_status_summary "pi-probe-discord-bot.service"
+    unit_status_summary "pi-probe-discord-snmp-listener.service"
     systemctl list-timers --all | grep 'pi-probe-discord' || true
-    systemctl status pi-probe-discord-bot.service --no-pager --lines=5 || true
 }
 
 main "$@"

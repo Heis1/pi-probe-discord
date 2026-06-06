@@ -14,6 +14,7 @@ DEFAULT_DATA_DIR = Path("/var/lib/pi-probe-discord")
 DEFAULT_CONFIG_FILE = DEFAULT_CONFIG_DIR / "pihole-update-discord.env"
 DEFAULT_DB_PATH = DEFAULT_DATA_DIR / "pi_probe_discord.db"
 DEFAULT_CHART_PATH = DEFAULT_DATA_DIR / "speed_chart.png"
+DEFAULT_FIREWALL_CHART_PATH = DEFAULT_DATA_DIR / "firewall_snapshot.png"
 DEFAULT_INTERACTIVE_DASHBOARD_PATH = DEFAULT_DATA_DIR / "dashboard" / "index.html"
 DEFAULT_FIREWALL_LOG_PATHS = ["/var/log/ufw.log", "/var/log/kern.log", "/var/log/syslog"]
 DEFAULT_ROUTER_SNMP_LOG_PATH = "/var/log/snmptrapd.log"
@@ -85,6 +86,7 @@ def load_config(base_dir: Path | None = None, require_webhook: bool = True) -> A
         config_file=str(config_file),
         log_file=os.environ.get("LOG_FILE", "/tmp/pihole-update-discord.log"),
         chart_file=os.environ.get("CHART_FILE", str(DEFAULT_CHART_PATH)),
+        firewall_chart_file=os.environ.get("PI_PROBE_FIREWALL_CHART_FILE", str(DEFAULT_FIREWALL_CHART_PATH)),
         dashboard_style=os.environ.get("PI_PROBE_DASHBOARD_STYLE", "standard").strip().lower() or "standard",
         interactive_dashboard_enabled=_env_bool("PI_PROBE_INTERACTIVE_DASHBOARD_ENABLED", False),
         interactive_dashboard_file=os.environ.get(
