@@ -1,3 +1,9 @@
+pi-probe-discord (0.1.25-1) unstable; urgency=medium
+
+  * Refine premium dashboard and firewall bot visuals
+
+ -- Codex Builder <noreply@example.invalid>  Sat, 06 Jun 2026 13:53:04 +0930
+
 pi-probe-discord (0.1.24-1) unstable; urgency=medium
 
   * Improve speedtest failure handling and add firewall visual alerts
