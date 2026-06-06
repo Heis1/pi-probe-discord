@@ -21,6 +21,11 @@ FIREWALL_REPORT_COMMAND = [
     "/usr/bin/pi-probe-discord",
     "firewall",
 ]
+FIREWALL_CHART_COMMAND = [
+    "sudo",
+    "/usr/bin/pi-probe-discord",
+    "firewall-chart",
+]
 ROUTER_REPORT_COMMAND = [
     "sudo",
     "/usr/bin/pi-probe-discord",
@@ -135,6 +140,7 @@ class PiProbeDiscordBot(discord.Client):
             ["/bin/systemctl", "start", "--no-block", "pi-probe-discord-speedtest.service"],
             ["/bin/systemctl", "start", "--no-block", "pi-probe-discord-full.service"],
             ["/usr/bin/pi-probe-discord", "firewall"],
+            ["/usr/bin/pi-probe-discord", "firewall-chart"],
             ["/usr/bin/pi-probe-discord", "router"],
         ]
         for cmd in required_sudo_cmds:
@@ -203,6 +209,36 @@ class PiProbeDiscordBot(discord.Client):
 
         self.logger.info("Authorized /firewall request by %s", username)
         await interaction.response.defer(thinking=False)
+        try:
+            completed = subprocess.run(
+                FIREWALL_CHART_COMMAND,
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=25,
+            )
+            chart_path = completed.stdout.strip()
+            if not chart_path:
+                raise RuntimeError("No firewall chart output path.")
+            if not Path(chart_path).exists():
+                raise RuntimeError(f"Firewall chart not found at {chart_path}")
+            await interaction.followup.send(
+                content="Current firewall snapshot.",
+                file=discord.File(chart_path, filename=Path(chart_path).name),
+            )
+            return
+        except subprocess.CalledProcessError as exc:
+            self.logger.error(
+                "Failed to render firewall chart for %s: returncode=%s stderr=%s",
+                username,
+                exc.returncode,
+                exc.stderr.strip(),
+            )
+        except subprocess.TimeoutExpired:
+            self.logger.error("Timed out rendering firewall chart for %s", username)
+        except RuntimeError as exc:
+            self.logger.error("Firewall chart unavailable for %s: %s", username, exc)
+
         try:
             completed = subprocess.run(
                 FIREWALL_REPORT_COMMAND,

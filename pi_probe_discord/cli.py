@@ -4,6 +4,7 @@ import sys
 
 from .app import (
     render_dashboard_html,
+    render_firewall_chart,
     render_firewall_report,
     render_report,
     render_router_report,
@@ -26,7 +27,7 @@ def parse_mode(argv: list[str]) -> tuple[str, int | None]:
             except ValueError as exc:
                 raise ValueError("Usage: pihole_update_report.py report [days]") from exc
         return "report", days
-    if len(argv) >= 2 and argv[1] in {"full", "speedtest-only", "update-only", "router-listener", "dashboard-serve"}:
+    if len(argv) >= 2 and argv[1] in {"full", "speedtest-only", "update-only", "router-listener", "dashboard-serve", "firewall-chart"}:
         return argv[1], None
     if len(argv) >= 2 and argv[1] == "dashboard-html":
         return "dashboard-html", None
@@ -38,7 +39,7 @@ def parse_mode(argv: list[str]) -> tuple[str, int | None]:
         return "doctor", None
     if len(argv) >= 2:
         raise ValueError(
-            "Usage: pihole_update_report.py [full|speedtest-only|update-only|install|firewall|router|router-listener|doctor|dashboard-html|dashboard-serve] | report [days]"
+            "Usage: pihole_update_report.py [full|speedtest-only|update-only|install|firewall|firewall-chart|router|router-listener|doctor|dashboard-html|dashboard-serve] | report [days]"
         )
     return "full", None
 
@@ -82,6 +83,14 @@ def main(argv: list[str] | None = None) -> int:
             idx += 1
         try:
             print(render_firewall_report(window_hours=window_hours, as_json=as_json))
+        except RuntimeError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        return 0
+    if mode == "firewall-chart":
+        output_path = args[2] if len(args) >= 3 else None
+        try:
+            print(render_firewall_chart(output_path=output_path))
         except RuntimeError as exc:
             print(str(exc), file=sys.stderr)
             return 1

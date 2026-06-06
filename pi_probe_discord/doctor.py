@@ -56,6 +56,7 @@ def run_doctor() -> tuple[int, str]:
         ["/bin/systemctl", "start", "--no-block", "pi-probe-discord-speedtest.service"],
         ["/bin/systemctl", "start", "--no-block", "pi-probe-discord-full.service"],
         ["/usr/bin/pi-probe-discord", "firewall"],
+        ["/usr/bin/pi-probe-discord", "firewall-chart"],
         ["/usr/bin/pi-probe-discord", "router"],
     ]
     for cmd in required_sudo_cmds:

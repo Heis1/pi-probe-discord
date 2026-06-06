@@ -8,6 +8,7 @@ probeuser ALL=(root) NOPASSWD: /bin/systemctl start pi-probe-discord-speedtest.s
 probeuser ALL=(root) NOPASSWD: /bin/systemctl start --no-block pi-probe-discord-full.service
 probeuser ALL=(root) NOPASSWD: /bin/systemctl start pi-probe-discord-full.service
 probeuser ALL=(root) NOPASSWD: /usr/bin/pi-probe-discord firewall
+probeuser ALL=(root) NOPASSWD: /usr/bin/pi-probe-discord firewall-chart
 probeuser ALL=(root) NOPASSWD: /usr/bin/pi-probe-discord router
 probeuser ALL=(root) NOPASSWD: /usr/sbin/ufw status verbose
 # Optional if logs are only available via journald:

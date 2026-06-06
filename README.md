@@ -86,7 +86,7 @@ The optional bot supports:
 
 - `/speedtest`
 - `/fullreport`
-- `/firewall`
+- `/firewall` (visual snapshot when chart rendering is available, text fallback otherwise)
 - `/router`
 
 Bot env file:

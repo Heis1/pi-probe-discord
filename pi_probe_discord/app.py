@@ -268,6 +268,24 @@ def render_firewall_report(window_hours: int | None = None, as_json: bool = Fals
     return format_firewall_snapshot_text(snapshot, detailed=True)
 
 
+def render_firewall_chart(output_path: str | None = None, window_hours: int | None = None) -> str:
+    config = load_config(require_webhook=False)
+    firewall_config = FirewallConfig(
+        enabled=config.firewall_enabled,
+        window_hours=window_hours or config.firewall_window_hours,
+        top_n=config.firewall_top_n,
+        noisy_source_threshold=config.firewall_noisy_source_threshold,
+        include_allow=config.firewall_include_allow,
+        log_paths=config.firewall_log_paths,
+    )
+    snapshot = collect_firewall_snapshot(firewall_config)
+    target_path = output_path or config.firewall_chart_file
+    ok, message = generate_firewall_chart(snapshot, target_path)
+    if not ok:
+        raise RuntimeError(message)
+    return target_path
+
+
 def render_router_report(window_hours: int | None = None, as_json: bool = False) -> str:
     config = load_config(require_webhook=False)
     now = datetime.now().astimezone()

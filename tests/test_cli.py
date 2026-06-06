@@ -16,6 +16,11 @@ class CliTests(unittest.TestCase):
         self.assertEqual(mode, "dashboard-serve")
         self.assertIsNone(extra)
 
+    def test_parse_mode_firewall_chart(self) -> None:
+        mode, extra = parse_mode(["pi-probe-discord", "firewall-chart"])
+        self.assertEqual(mode, "firewall-chart")
+        self.assertIsNone(extra)
+
 
 if __name__ == "__main__":
     unittest.main()
