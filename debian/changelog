@@ -1,3 +1,9 @@
+pi-probe-discord (0.1.27-1) unstable; urgency=medium
+
+  * Add dashboard outage diagnostics, overlays, and Discord link export
+
+ -- Codex Builder <noreply@example.invalid>  Sat, 06 Jun 2026 18:19:56 +0930
+
 pi-probe-discord (0.1.26-1) unstable; urgency=medium
 
   * Refine dashboard and firewall chart layouts
