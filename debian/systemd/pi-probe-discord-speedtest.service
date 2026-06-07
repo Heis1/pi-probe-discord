@@ -6,4 +6,5 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 WorkingDirectory=/opt/pi-probe-discord
+Environment=MPLCONFIGDIR=/var/lib/pi-probe-discord/.config/matplotlib
 ExecStart=/usr/bin/pi-probe-discord speedtest-only

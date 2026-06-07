@@ -91,6 +91,12 @@ Serve the dashboard:
 sudo pi-probe-discord dashboard-serve
 ```
 
+Keep it running across reboots:
+
+```bash
+sudo systemctl enable --now pi-probe-discord-dashboard.service
+```
+
 Check the setup:
 
 ```bash
@@ -102,6 +108,10 @@ Open it at:
 ```text
 https://<pi-or-tailscale-name>:8088/
 ```
+
+If you want browsers to trust the dashboard certificate on your LAN or Tailscale, create or reuse a local CA, sign `/etc/pi-probe-discord/dashboard-cert.pem` with it, and import that CA certificate into the devices that will open the dashboard.
+
+The packaged dashboard service uses `/var/lib/pi-probe-discord/.config/matplotlib` for its cache so it does not emit root-home cache warnings.
 
 The dashboard server also exposes:
 
@@ -217,6 +227,25 @@ sudo systemctl enable --now pi-probe-discord-bot.service
 journalctl -u pi-probe-discord-bot.service -n 50 --no-pager
 ```
 The packaged bot runs as a systemd-managed root service so it can trigger local reports and timers directly.
+
+## Router SNMP listener
+
+The packaged SNMP listener binds UDP port `162` directly. Because this is a privileged port, the packaged service runs as `root` and writes state into `/var/lib/pi-probe-discord`.
+
+Check the listener:
+
+```bash
+sudo systemctl status pi-probe-discord-snmp-listener.service --no-pager
+sudo ss -lunp | grep ':162'
+sudo pi-probe-discord router
+```
+
+TP-Link side:
+
+- enable SNMP trap sending, not just SNMP polling
+- set the trap destination host to the Pi IP, for example `192.168.1.51`
+- set the trap destination UDP port to `162`
+- trigger a test trap or a real link event, then rerun `sudo pi-probe-discord router`
 
 ## Important files
 

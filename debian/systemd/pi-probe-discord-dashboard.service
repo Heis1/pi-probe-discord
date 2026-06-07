@@ -1,5 +1,5 @@
 [Unit]
-Description=Pi Probe Discord SNMP UDP listener
+Description=Pi Probe Discord interactive dashboard
 After=network-online.target
 Wants=network-online.target
 
@@ -7,10 +7,9 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=/opt/pi-probe-discord
 Environment=MPLCONFIGDIR=/var/lib/pi-probe-discord/.config/matplotlib
-ExecStart=/usr/bin/pi-probe-discord router-listener
-Restart=always
-RestartSec=2
-NoNewPrivileges=true
+ExecStart=/opt/pi-probe-discord/.venv/bin/python /opt/pi-probe-discord/pihole_update_report.py dashboard-serve
+Restart=on-failure
+RestartSec=5
 PrivateTmp=true
 PrivateDevices=true
 ProtectSystem=strict
@@ -18,8 +17,12 @@ ProtectHome=true
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
+ReadOnlyPaths=/etc/pi-probe-discord/pihole-update-discord.env /etc/pi-probe-discord/dashboard-cert.pem /etc/pi-probe-discord/dashboard-key.pem
 ReadWritePaths=/var/lib/pi-probe-discord
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 LockPersonality=true
 MemoryDenyWriteExecute=true
 UMask=007
+
+[Install]
+WantedBy=multi-user.target

@@ -1,5 +1,5 @@
 [Unit]
-Description=Pi Probe Discord SNMP UDP listener
+Description=Pi Probe Discord interactive dashboard
 After=network-online.target
 Wants=network-online.target
 
@@ -7,6 +7,9 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=/opt/pi-probe-discord
 Environment=MPLCONFIGDIR=/var/lib/pi-probe-discord/.config/matplotlib
-ExecStart=/usr/bin/pi-probe-discord router-listener
-Restart=always
-RestartSec=2
+ExecStart=/usr/bin/pi-probe-discord dashboard-serve
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -7,6 +7,7 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=/opt/pi-probe-discord
 EnvironmentFile=/etc/pi-probe-discord/pi-probe-discord-bot.env
+Environment=MPLCONFIGDIR=/var/lib/pi-probe-discord/.config/matplotlib
 ExecStart=/usr/bin/pi-probe-discord-bot
 Restart=on-failure
 RestartSec=5

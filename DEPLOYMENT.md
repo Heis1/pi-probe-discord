@@ -116,6 +116,12 @@ Serve the HTML dashboard:
 pi-probe-discord dashboard-serve
 ```
 
+Keep it persistent:
+
+```bash
+sudo systemctl enable --now pi-probe-discord-dashboard.service
+```
+
 Open:
 
 ```text
@@ -129,7 +135,20 @@ The package upgrade path now:
 - reloads systemd
 - restarts speedtest and full timers
 - restarts the bot service if enabled or active
+- restarts the dashboard service if enabled or active
 - restarts the SNMP listener if enabled or active
+
+## Optional router SNMP listener
+
+The packaged listener binds UDP `162` directly and runs as `root` so routers can send traps without extra port-redirection work.
+
+Check it with:
+
+```bash
+sudo systemctl status pi-probe-discord-snmp-listener.service --no-pager
+sudo ss -lunp | grep ':162'
+sudo pi-probe-discord router
+```
 
 ## Troubleshooting
 
