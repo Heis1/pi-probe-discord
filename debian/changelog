@@ -1,3 +1,10 @@
+pi-probe-discord (1.1.0-1) unstable; urgency=medium
+
+  * Fix Discord bot command execution by removing sudo from the bot path
+  and packaging the bot service to run privileged actions directly.
+
+ -- Codex Builder <noreply@example.invalid>  Sun, 07 Jun 2026 17:31:12 +0930
+
 pi-probe-discord (1.0.0-1) unstable; urgency=medium
 
   * First stable release
