@@ -32,7 +32,6 @@ override_dh_auto_install:
 	install -d debian/pi-probe-discord/usr/share/pi-probe-discord
 	install -m 0644 pihole-update-discord.env.example debian/pi-probe-discord/usr/share/pi-probe-discord/pihole-update-discord.env.example
 	install -m 0644 pi-probe-discord-bot.env.example debian/pi-probe-discord/usr/share/pi-probe-discord/pi-probe-discord-bot.env.example
-	install -m 0644 pi-probe-discord-bot.sudoers.example debian/pi-probe-discord/usr/share/pi-probe-discord/pi-probe-discord-bot.sudoers.example
 	install -d debian/pi-probe-discord/lib/systemd/system
 	install -m 0644 debian/systemd/pi-probe-discord-speedtest.service debian/pi-probe-discord/lib/systemd/system/pi-probe-discord-speedtest.service
 	install -m 0644 debian/systemd/pi-probe-discord-speedtest.timer debian/pi-probe-discord/lib/systemd/system/pi-probe-discord-speedtest.timer

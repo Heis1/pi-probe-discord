@@ -52,24 +52,10 @@ def run_doctor() -> tuple[int, str]:
         enabled = result.returncode == 0
         checks.append(_check(f"{service} enabled", enabled, result.stdout.strip() or result.stderr.strip() or "unknown"))
 
-    required_sudo_cmds = [
-        ["/bin/systemctl", "start", "--no-block", "pi-probe-discord-speedtest.service"],
-        ["/bin/systemctl", "start", "--no-block", "pi-probe-discord-full.service"],
-        ["/usr/bin/pi-probe-discord", "firewall"],
-        ["/usr/bin/pi-probe-discord", "firewall-chart"],
-        ["/usr/bin/pi-probe-discord", "router"],
-    ]
-    for cmd in required_sudo_cmds:
-        result = subprocess.run(["sudo", "-n", "-l", *cmd], capture_output=True, text=True, check=False)
-        allowed = result.returncode == 0
-        checks.append(_check(f"sudo rule {' '.join(cmd)}", allowed, "allowed" if allowed else "missing"))
-
     failures = [line for ok, line in checks if not ok]
     lines = [line for _, line in checks]
     if failures:
         lines.append("")
         lines.append("Remediation:")
-        lines.append("- Run: sudo visudo -f /etc/sudoers.d/pi-probe-discord-bot")
-        lines.append("- Add missing NOPASSWD command lines from /usr/share/pi-probe-discord/pi-probe-discord-bot.sudoers.example")
         lines.append("- Ensure /etc/pi-probe-discord/pihole-update-discord.env and pi-probe-discord-bot.env are owned by root:pi-probe-discord with mode 640")
     return (1 if failures else 0), "\n".join(lines)

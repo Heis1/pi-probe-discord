@@ -81,11 +81,7 @@ Check:
 journalctl -u pi-probe-discord-bot.service -n 50 --no-pager
 ```
 
-The packaged bot runs as the dedicated `pi-probe-discord` service user. Install the matching sudoers policy from:
-
-```text
-/usr/share/pi-probe-discord/pi-probe-discord-bot.sudoers.example
-```
+The packaged bot runs as a systemd-managed root service so it can trigger local reports and timers directly.
 
 ## Optional premium and interactive dashboards
 

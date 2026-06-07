@@ -10,29 +10,24 @@ import discord
 from discord import app_commands
 
 START_SPEEDTEST_COMMAND = [
-    "sudo",
     "/bin/systemctl",
     "start",
     "--no-block",
     "pi-probe-discord-speedtest.service",
 ]
 FIREWALL_REPORT_COMMAND = [
-    "sudo",
     "/usr/bin/pi-probe-discord",
     "firewall",
 ]
 FIREWALL_CHART_COMMAND = [
-    "sudo",
     "/usr/bin/pi-probe-discord",
     "firewall-chart",
 ]
 ROUTER_REPORT_COMMAND = [
-    "sudo",
     "/usr/bin/pi-probe-discord",
     "router",
 ]
 START_FULLREPORT_COMMAND = [
-    "sudo",
     "/bin/systemctl",
     "start",
     "--no-block",
@@ -135,18 +130,6 @@ class PiProbeDiscordBot(discord.Client):
             self.logger.error("Bot self-check failed: missing %s", config_path)
         elif not os.access(config_path, os.R_OK):
             self.logger.error("Bot self-check failed: cannot read %s", config_path)
-
-        required_sudo_cmds = [
-            ["/bin/systemctl", "start", "--no-block", "pi-probe-discord-speedtest.service"],
-            ["/bin/systemctl", "start", "--no-block", "pi-probe-discord-full.service"],
-            ["/usr/bin/pi-probe-discord", "firewall"],
-            ["/usr/bin/pi-probe-discord", "firewall-chart"],
-            ["/usr/bin/pi-probe-discord", "router"],
-        ]
-        for cmd in required_sudo_cmds:
-            result = subprocess.run(["sudo", "-n", "-l", *cmd], capture_output=True, text=True, check=False)
-            if result.returncode != 0:
-                self.logger.error("Bot self-check failed: sudo rule missing for `%s`", " ".join(cmd))
 
     async def on_ready(self) -> None:
         self.logger.info("Discord bot connected as %s (%s)", self.user, getattr(self.user, "id", "unknown"))

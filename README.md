@@ -216,12 +216,7 @@ Start the bot:
 sudo systemctl enable --now pi-probe-discord-bot.service
 journalctl -u pi-probe-discord-bot.service -n 50 --no-pager
 ```
-
-The packaged bot now runs as the dedicated `pi-probe-discord` service user. Install the matching sudoers policy at:
-
-```text
-/usr/share/pi-probe-discord/pi-probe-discord-bot.sudoers.example
-```
+The packaged bot runs as a systemd-managed root service so it can trigger local reports and timers directly.
 
 ## Important files
 

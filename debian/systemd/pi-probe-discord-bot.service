@@ -6,13 +6,10 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=/opt/pi-probe-discord
-User=pi-probe-discord
-Group=pi-probe-discord
 EnvironmentFile=/etc/pi-probe-discord/pi-probe-discord-bot.env
 ExecStart=/usr/bin/pi-probe-discord-bot
 Restart=on-failure
 RestartSec=5
-NoNewPrivileges=true
 PrivateTmp=true
 PrivateDevices=true
 ProtectSystem=strict
