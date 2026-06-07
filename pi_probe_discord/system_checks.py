@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import stat
 import shutil
 import sqlite3
 import subprocess
@@ -9,6 +11,38 @@ from datetime import datetime
 from pathlib import Path
 
 from .models import PiholeResult, UpdateResult
+
+
+def _append_log_line(log_path: Path, text: str) -> None:
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    fd = os.open(log_path, flags, 0o600)
+    try:
+        stat_result = os.fstat(fd)
+        if not stat.S_ISREG(stat_result.st_mode):
+            raise RuntimeError(f"Refusing to write to non-regular log target: {log_path}")
+        with os.fdopen(fd, "a", encoding="utf-8", closefd=False) as handle:
+            handle.write(text)
+    finally:
+        os.close(fd)
+
+
+def _write_log_header(log_path: Path, text: str) -> None:
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    fd = os.open(log_path, flags, 0o600)
+    try:
+        stat_result = os.fstat(fd)
+        if not stat.S_ISREG(stat_result.st_mode):
+            raise RuntimeError(f"Refusing to write to non-regular log target: {log_path}")
+        with os.fdopen(fd, "w", encoding="utf-8", closefd=False) as handle:
+            handle.write(text)
+    finally:
+        os.close(fd)
 
 
 def _extract_pihole_update_status(output: str) -> str:
@@ -37,21 +71,21 @@ def _extract_pihole_update_status(output: str) -> str:
 def run_command(command: list[str], log_path: Path | None = None) -> subprocess.CompletedProcess[str]:
     result = subprocess.run(command, text=True, capture_output=True, check=False)
     if log_path is not None:
-        with log_path.open("a", encoding="utf-8") as handle:
-            handle.write(f"$ {' '.join(command)}\n")
-            if result.stdout:
-                handle.write(result.stdout)
-                if not result.stdout.endswith("\n"):
-                    handle.write("\n")
-            if result.stderr:
-                handle.write(result.stderr)
-                if not result.stderr.endswith("\n"):
-                    handle.write("\n")
+        chunks = [f"$ {' '.join(command)}\n"]
+        if result.stdout:
+            chunks.append(result.stdout)
+            if not result.stdout.endswith("\n"):
+                chunks.append("\n")
+        if result.stderr:
+            chunks.append(result.stderr)
+            if not result.stderr.endswith("\n"):
+                chunks.append("\n")
+        _append_log_line(log_path, "".join(chunks))
     return result
 
 
 def run_updates(hostname: str, run_at_local: str, log_path: Path) -> UpdateResult:
-    log_path.write_text(f"Running apt update and upgrade on {hostname} at {run_at_local}\n", encoding="utf-8")
+    _write_log_header(log_path, f"Running apt update and upgrade on {hostname} at {run_at_local}\n")
 
     update = run_command(["sudo", "apt-get", "update"], log_path)
     if update.returncode != 0:

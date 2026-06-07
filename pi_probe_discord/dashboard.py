@@ -8,6 +8,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from importlib import metadata as importlib_metadata
 import json
 from pathlib import Path
+import ssl
 from typing import Any
 
 from .baselines import average, history_points_for_window
@@ -499,7 +500,7 @@ def _build_dashboard_payload(
         "dataset_start": rows[0].timestamp.isoformat() if rows else "",
         "dataset_end": rows[-1].timestamp.isoformat() if rows else "",
         "test_count": len(rows),
-        "dashboard_path": str(Path(output_path).resolve()),
+        "dashboard_file": Path(output_path).name,
         "version": _version_string(),
     }
 
@@ -599,14 +600,18 @@ def generate_interactive_dashboard(
 
 
 def _render_interactive_dashboard_html(payload: dict[str, Any]) -> str:
-    payload_json = json.dumps(payload)
+    payload_json = (
+        json.dumps(payload)
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("&", "\\u0026")
+    )
     template = """<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pi Probe NBN Interactive Dashboard</title>
-<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <style>
 :root {
   --bg: #07101c;
@@ -770,8 +775,9 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
     </div>
   </section>
 </div>
+<script id="dashboard-payload" type="application/json">__PAYLOAD_JSON__</script>
 <script>
-const payload = __PAYLOAD_JSON__;
+const payload = JSON.parse(document.getElementById('dashboard-payload').textContent);
 const rawData = payload.data;
 const rawEvents = payload.events;
 const piholeRows = payload.pihole;
@@ -806,27 +812,102 @@ function applyTheme(choice) {
   document.body.classList.toggle('theme-clean', !dark);
   render();
 }
-function layoutBase() {
+function svgEl(name, attrs = {}) {
+  const el = document.createElementNS('http://www.w3.org/2000/svg', name);
+  Object.entries(attrs).forEach(([key, value]) => el.setAttribute(key, String(value)));
+  return el;
+}
+function clearNode(node) {
+  while (node.firstChild) node.removeChild(node.firstChild);
+}
+function chartTheme() {
   const dark = !document.body.classList.contains('theme-clean');
   return {
-    paper_bgcolor: 'rgba(0,0,0,0)',
-    plot_bgcolor: 'rgba(0,0,0,0)',
-    font: { color: dark ? '#dbeafe' : '#0f172a', family: 'Inter, system-ui, sans-serif' },
-    margin: { l: 48, r: 22, t: 18, b: 48 },
-    xaxis: { gridcolor: dark ? 'rgba(148,163,184,.10)' : 'rgba(15,23,42,.10)' },
-    yaxis: { gridcolor: dark ? 'rgba(148,163,184,.10)' : 'rgba(15,23,42,.10)' },
-    hoverlabel: { bgcolor: dark ? '#0f172a' : '#ffffff', bordercolor: '#38bdf8', font: { color: dark ? '#f8fafc' : '#0f172a' } },
-    showlegend: true,
-    legend: { orientation: 'h', yanchor: 'bottom', y: 1.02, x: 0 }
+    text: dark ? '#dbeafe' : '#0f172a',
+    muted: dark ? '#94a3b8' : '#475569',
+    grid: dark ? 'rgba(148,163,184,.12)' : 'rgba(15,23,42,.12)',
+    border: dark ? 'rgba(148,163,184,.18)' : 'rgba(30,41,59,.18)',
+    panel: dark ? '#07101c' : '#ffffff'
   };
+}
+function chartSurface(containerId, height) {
+  const container = document.getElementById(containerId);
+  clearNode(container);
+  const width = Math.max(container.clientWidth || 720, 320);
+  const svg = svgEl('svg', { viewBox: `0 0 ${width} ${height}`, width: '100%', height });
+  container.appendChild(svg);
+  return { container, svg, width, height, left: 58, right: 20, top: 18, bottom: 42 };
+}
+function extent(values, fallbackMax = 1) {
+  const clean = values.filter(v => v !== null && v !== undefined && !Number.isNaN(v));
+  if (!clean.length) return [0, fallbackMax];
+  let min = Math.min(...clean);
+  let max = Math.max(...clean);
+  if (min === max) {
+    const delta = min === 0 ? 1 : Math.abs(min) * 0.1;
+    min -= delta;
+    max += delta;
+  }
+  return [min, max];
+}
+function scaleLinear(domainMin, domainMax, rangeMin, rangeMax) {
+  const span = domainMax - domainMin || 1;
+  return value => rangeMin + ((value - domainMin) / span) * (rangeMax - rangeMin);
+}
+function makeTicks(min, max, count) {
+  const ticks = [];
+  const step = (max - min) / Math.max(count - 1, 1);
+  for (let i = 0; i < count; i += 1) ticks.push(min + step * i);
+  return ticks;
+}
+function drawAxes(surface, yMin, yMax, xLabels = []) {
+  const { svg, width, height, left, right, top, bottom } = surface;
+  const theme = chartTheme();
+  const plotWidth = width - left - right;
+  const plotHeight = height - top - bottom;
+  const axis = svgEl('g');
+  axis.appendChild(svgEl('line', { x1: left, y1: top + plotHeight, x2: width - right, y2: top + plotHeight, stroke: theme.border }));
+  axis.appendChild(svgEl('line', { x1: left, y1: top, x2: left, y2: top + plotHeight, stroke: theme.border }));
+  makeTicks(yMin, yMax, 5).forEach(value => {
+    const y = top + plotHeight - ((value - yMin) / (yMax - yMin || 1)) * plotHeight;
+    axis.appendChild(svgEl('line', { x1: left, y1: y, x2: width - right, y2: y, stroke: theme.grid }));
+    const label = svgEl('text', { x: left - 8, y: y + 4, 'text-anchor': 'end', fill: theme.muted, 'font-size': 11 });
+    label.textContent = Number.isInteger(value) ? `${Math.round(value)}` : value.toFixed(1);
+    axis.appendChild(label);
+  });
+  xLabels.forEach(({ x, label }) => {
+    axis.appendChild(svgEl('line', { x1: x, y1: top + plotHeight, x2: x, y2: top + plotHeight + 4, stroke: theme.border }));
+    const text = svgEl('text', { x, y: height - 12, 'text-anchor': 'middle', fill: theme.muted, 'font-size': 11 });
+    text.textContent = label;
+    axis.appendChild(text);
+  });
+  svg.appendChild(axis);
+}
+function pathFromPoints(points) {
+  if (!points.length) return '';
+  return points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point[0].toFixed(2)} ${point[1].toFixed(2)}`).join(' ');
+}
+function setText(elementId, value) {
+  document.getElementById(elementId).textContent = value;
 }
 function initFilters() {
   const severitySelect = document.getElementById('severityFilter');
   const typeSelect = document.getElementById('eventTypeFilter');
   const severities = ['all', ...new Set(rawEvents.map(e => e.severity || 'info'))];
   const types = ['all', ...new Set(rawEvents.map(e => e.eventType || 'event'))];
-  severitySelect.innerHTML = severities.map(value => `<option value="${value}">${value === 'all' ? 'All severities' : value}</option>`).join('');
-  typeSelect.innerHTML = types.map(value => `<option value="${value}">${value === 'all' ? 'All types' : value}</option>`).join('');
+  [severitySelect, typeSelect].forEach(select => clearNode(select));
+  severities.forEach(value => {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = value === 'all' ? 'All severities' : value;
+    severitySelect.appendChild(option);
+  });
+  types.forEach(value => {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = value === 'all' ? 'All types' : value;
+    typeSelect.appendChild(option);
+  });
 }
 function filteredData() {
   const day = document.getElementById('dayFilter').value;
@@ -839,104 +920,149 @@ function filteredEvents() {
 }
 function renderTable(events) {
   const body = document.getElementById('eventRows');
+  clearNode(body);
   if (!events.length) {
-    body.innerHTML = '<tr><td colspan="5">No matching events.</td></tr>';
+    const row = document.createElement('tr');
+    const cell = document.createElement('td');
+    cell.colSpan = 5;
+    cell.textContent = 'No matching events.';
+    row.appendChild(cell);
+    body.appendChild(row);
     return;
   }
-  body.innerHTML = events.slice(-20).reverse().map(event => `<tr><td>${event.time}</td><td>${event.eventType}</td><td>${event.severity}</td><td>${event.source || 'n/a'}</td><td>${event.message || ''}</td></tr>`).join('');
-}
-function heatmapColorscale() {
-  const maxValue = Math.max(thresholds.heatmapGoodMbps * 1.15, ...rawData.map(item => item.download || 0), thresholds.heatmapWarnMbps + 1);
-  const warnFrac = Math.min(1, thresholds.heatmapWarnMbps / maxValue);
-  const goodFrac = Math.min(1, thresholds.heatmapGoodMbps / maxValue);
-  return { colorscale: [
-    [0, '#b91c1c'],
-    [Math.max(0, warnFrac - 0.0001), '#ef4444'],
-    [warnFrac, '#f59e0b'],
-    [Math.max(warnFrac, goodFrac - 0.0001), '#facc15'],
-    [goodFrac, '#22c55e'],
-    [1, '#15803d']
-  ], zmax: maxValue };
-}
-function timelineTraces(data, events, metric) {
-  const suffix = metric === 'ping' ? ' ms' : ' Mbps';
-  const traces = [{
-    x: data.map(d => d.datetime),
-    y: data.map(d => d[metric]),
-    text: data.map(d => d.label),
-    type: 'scatter',
-    mode: 'lines',
-    name: 'All tests',
-    line: { width: 2.4, color: '#38bdf8' },
-    hovertemplate: '%{text}<br>' + metric + ': %{y:.2f}' + suffix + '<br>Status: %{customdata}<extra></extra>',
-    customdata: data.map(d => d.status)
-  }];
-  const markerSeries = [
-    ['degraded', '#f59e0b', 'Degraded tests'],
-    ['outage', '#ef4444', 'Outage tests'],
-    ['failed', '#f97316', 'Failed tests']
-  ];
-  for (const [status, color, label] of markerSeries) {
-    const subset = data.filter(item => item.status === status);
-    if (!subset.length) continue;
-    traces.push({
-      x: subset.map(d => d.datetime), y: subset.map(d => d[metric]), text: subset.map(d => d.label),
-      type: 'scatter', mode: 'markers', name: label,
-      marker: { size: status === 'failed' ? 10 : 9, color, symbol: status === 'failed' ? 'x' : 'circle' },
-      hovertemplate: '%{text}<br>' + metric + ': %{y:.2f}' + suffix + '<br>Status: ' + status + '<extra></extra>'
+  events.slice(-20).reverse().forEach(event => {
+    const row = document.createElement('tr');
+    [event.time, event.eventType, event.severity, event.source || 'n/a', event.message || ''].forEach(value => {
+      const cell = document.createElement('td');
+      cell.textContent = value;
+      row.appendChild(cell);
     });
-  }
-  return traces;
+    body.appendChild(row);
+  });
+}
+function heatmapColor(value, maxValue) {
+  if (value === null || value === undefined) return 'rgba(148,163,184,.20)';
+  if (value >= thresholds.heatmapGoodMbps) return '#15803d';
+  if (value >= thresholds.heatmapWarnMbps) return '#f59e0b';
+  return value >= thresholds.outageDownloadMbps ? '#ef4444' : '#b91c1c';
 }
 function renderTimeline(data, events) {
   const metric = document.getElementById('metric').value;
-  const layout = layoutBase();
-  layout.yaxis.title = metric === 'ping' ? 'Milliseconds' : 'Mbps';
-  layout.shapes = events.map(event => ({
-    type: 'line', xref: 'x', yref: 'paper', x0: event.datetime, x1: event.datetime, y0: 0, y1: 1,
-    line: { color: event.severity === 'critical' ? '#ef4444' : event.severity === 'warning' ? '#f59e0b' : '#94a3b8', width: 1.2, dash: 'dot' }
+  const surface = chartSurface('timeline', 390);
+  const theme = chartTheme();
+  const plotWidth = surface.width - surface.left - surface.right;
+  const plotHeight = surface.height - surface.top - surface.bottom;
+  const points = data.filter(item => item[metric] !== null).map(item => ({ ...item, ts: new Date(item.datetime).getTime() }));
+  if (!points.length) return;
+  const [xMin, xMax] = extent(points.map(item => item.ts), points[0].ts + 1);
+  const [yMin0, yMax0] = extent(points.map(item => Number(item[metric])), 1);
+  const yMin = metric === 'ping' ? Math.max(0, yMin0 * 0.95) : Math.max(0, yMin0 * 0.9);
+  const yMax = yMax0 * 1.05;
+  const scaleX = scaleLinear(xMin, xMax, surface.left, surface.left + plotWidth);
+  const scaleY = scaleLinear(yMin, yMax, surface.top + plotHeight, surface.top);
+  const xTicks = makeTicks(xMin, xMax, Math.min(6, points.length)).map(value => ({
+    x: scaleX(value),
+    label: new Date(value).toLocaleDateString(undefined, { day: '2-digit', month: 'short' })
   }));
-  Plotly.newPlot('timeline', timelineTraces(data, events, metric), layout, { responsive: true, displaylogo: false });
+  drawAxes(surface, yMin, yMax, xTicks);
+  const eventLines = svgEl('g');
+  events.forEach(event => {
+    const x = scaleX(new Date(event.datetime).getTime());
+    eventLines.appendChild(svgEl('line', {
+      x1: x, y1: surface.top, x2: x, y2: surface.top + plotHeight,
+      stroke: event.severity === 'critical' ? '#ef4444' : event.severity === 'warning' ? '#f59e0b' : '#94a3b8',
+      'stroke-dasharray': '4 4'
+    }));
+  });
+  surface.svg.appendChild(eventLines);
+  const line = svgEl('path', {
+    d: pathFromPoints(points.map(item => [scaleX(item.ts), scaleY(Number(item[metric]))])),
+    fill: 'none',
+    stroke: '#38bdf8',
+    'stroke-width': 2.4
+  });
+  surface.svg.appendChild(line);
+  points.forEach(item => {
+    const circle = svgEl('circle', {
+      cx: scaleX(item.ts),
+      cy: scaleY(Number(item[metric])),
+      r: item.status === 'failed' ? 4.5 : 3.5,
+      fill: item.status === 'degraded' ? '#f59e0b' : item.status === 'outage' ? '#ef4444' : item.status === 'failed' ? '#f97316' : '#38bdf8'
+    });
+    const title = svgEl('title');
+    title.textContent = `${item.label} • ${metric}: ${Number(item[metric]).toFixed(2)} • ${item.status}`;
+    circle.appendChild(title);
+    surface.svg.appendChild(circle);
+  });
+  const yLabel = svgEl('text', { x: 18, y: surface.top + plotHeight / 2, fill: theme.muted, 'font-size': 11, transform: `rotate(-90 18 ${surface.top + plotHeight / 2})` });
+  yLabel.textContent = metric === 'ping' ? 'Milliseconds' : 'Mbps';
+  surface.svg.appendChild(yLabel);
 }
 function renderHeatmap(data) {
   const days = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
-  const z = days.map(day => Array.from({length:24}, (_,hour) => {
-    const values = data.filter(item => item.day === day).filter(item => item.hour === hour).map(item => item.download).filter(v => v !== null);
-    return values.length ? average(values) : null;
-  }));
-  const scale = heatmapColorscale();
-  const layout = layoutBase();
-  layout.xaxis.title = 'Hour';
-  Plotly.newPlot('heatmap', [{
-    z, x: Array.from({length:24}, (_,i)=>i), y: days.map(day => day.slice(0,3)), type: 'heatmap',
-    colorscale: scale.colorscale, zmin: 0, zmax: scale.zmax,
-    colorbar: { title: 'Mbps' },
-    hovertemplate: '%{y} %{x}:00<br>Average download: %{z:.1f} Mbps<extra></extra>'
-  }], layout, { responsive: true, displaylogo: false });
+  const surface = chartSurface('heatmap', 320);
+  const maxValue = Math.max(thresholds.heatmapGoodMbps * 1.15, ...rawData.map(item => item.download || 0), thresholds.heatmapWarnMbps + 1);
+  const cellWidth = (surface.width - surface.left - surface.right) / 24;
+  const cellHeight = (surface.height - surface.top - surface.bottom) / 7;
+  days.forEach((day, rowIndex) => {
+    const label = svgEl('text', { x: surface.left - 10, y: surface.top + rowIndex * cellHeight + cellHeight / 2 + 4, 'text-anchor': 'end', fill: chartTheme().muted, 'font-size': 11 });
+    label.textContent = day.slice(0, 3);
+    surface.svg.appendChild(label);
+    Array.from({ length: 24 }, (_, hour) => hour).forEach(hour => {
+      const values = data.filter(item => item.day === day && item.hour === hour).map(item => item.download).filter(v => v !== null);
+      const avgValue = values.length ? average(values) : null;
+      const rect = svgEl('rect', {
+        x: surface.left + hour * cellWidth,
+        y: surface.top + rowIndex * cellHeight,
+        width: cellWidth - 1,
+        height: cellHeight - 1,
+        rx: 2,
+        fill: heatmapColor(avgValue, maxValue)
+      });
+      const title = svgEl('title');
+      title.textContent = `${day} ${String(hour).padStart(2, '0')}:00 • ${avgValue === null ? 'No data' : `${avgValue.toFixed(1)} Mbps`}`;
+      rect.appendChild(title);
+      surface.svg.appendChild(rect);
+    });
+  });
+  Array.from({ length: 24 }, (_, hour) => hour).forEach(hour => {
+    if (hour % 3 !== 0) return;
+    const label = svgEl('text', { x: surface.left + hour * cellWidth + cellWidth / 2, y: surface.height - 12, 'text-anchor': 'middle', fill: chartTheme().muted, 'font-size': 11 });
+    label.textContent = String(hour);
+    surface.svg.appendChild(label);
+  });
 }
 function renderScatter(data) {
-  const layout = layoutBase();
-  layout.xaxis.title = 'Download Mbps';
-  layout.yaxis.title = 'Ping ms';
-  const series = [
-    ['normal', '#38bdf8', 'Normal'],
-    ['degraded', '#f59e0b', 'Degraded'],
-    ['outage', '#ef4444', 'Outage'],
-    ['failed', '#f97316', 'Failed']
-  ].map(([status, color, label]) => {
-    const subset = data.filter(item => item.status === status && item.download !== null && item.ping !== null);
-    return {
-      x: subset.map(item => item.download), y: subset.map(item => item.ping), text: subset.map(item => item.label), type: 'scatter', mode: 'markers',
-      name: label, marker: { size: status === 'failed' ? 11 : 8, opacity: .78, color },
-      hovertemplate: '%{text}<br>Download: %{x:.2f} Mbps<br>Ping: %{y:.2f} ms<br>Status: ' + status + '<extra></extra>'
-    };
-  }).filter(trace => trace.x.length);
-  Plotly.newPlot('scatter', series, layout, { responsive: true, displaylogo: false });
+  const surface = chartSurface('scatter', 320);
+  const points = data.filter(item => item.download !== null && item.ping !== null);
+  if (!points.length) return;
+  const [xMin, xMax] = extent(points.map(item => item.download), 1);
+  const [yMin, yMax] = extent(points.map(item => item.ping), 1);
+  drawAxes(surface, yMin, yMax, makeTicks(xMin, xMax, 6).map(value => ({
+    x: scaleLinear(xMin, xMax, surface.left, surface.width - surface.right)(value),
+    label: value.toFixed(0)
+  })));
+  const scaleX = scaleLinear(xMin, xMax, surface.left, surface.width - surface.right);
+  const scaleY = scaleLinear(yMin, yMax, surface.height - surface.bottom, surface.top);
+  points.forEach(item => {
+    const circle = svgEl('circle', {
+      cx: scaleX(item.download),
+      cy: scaleY(item.ping),
+      r: item.status === 'failed' ? 5 : 4,
+      fill: item.status === 'degraded' ? '#f59e0b' : item.status === 'outage' ? '#ef4444' : item.status === 'failed' ? '#f97316' : '#38bdf8',
+      opacity: 0.82
+    });
+    const title = svgEl('title');
+    title.textContent = `${item.label} • ${item.download.toFixed(2)} Mbps • ${item.ping.toFixed(2)} ms • ${item.status}`;
+    circle.appendChild(title);
+    surface.svg.appendChild(circle);
+  });
 }
 function renderDnsCorrelation(data) {
   const dnsChart = document.getElementById('dnsCorrelation');
   const dnsEmpty = document.getElementById('dnsEmpty');
   if (!piholeRows.length) {
+    clearNode(dnsChart);
     dnsChart.style.display = 'none';
     dnsEmpty.style.display = 'block';
     return;
@@ -954,37 +1080,61 @@ function renderDnsCorrelation(data) {
       blocked: average(subset.map(item => item.blockedQueries))
     };
   });
-  const layout = layoutBase();
-  layout.xaxis.title = 'Hour';
-  layout.yaxis.title = 'Download Mbps';
-  layout.yaxis2 = { title: 'Queries', overlaying: 'y', side: 'right', gridcolor: 'rgba(0,0,0,0)' };
-  Plotly.newPlot('dnsCorrelation', [
-    { x: Array.from({length:24}, (_,i)=>i), y: hourlyDownload, type: 'scatter', mode: 'lines+markers', name: 'Avg download', line: { color: '#38bdf8', width: 2.5 } },
-    { x: Array.from({length:24}, (_,i)=>i), y: dnsByHour.map(item => item.dns), type: 'bar', name: 'DNS queries', yaxis: 'y2', marker: { color: 'rgba(34,197,94,.50)' } },
-    { x: Array.from({length:24}, (_,i)=>i), y: dnsByHour.map(item => item.blocked), type: 'bar', name: 'Blocked queries', yaxis: 'y2', marker: { color: 'rgba(245,158,11,.50)' } }
-  ], layout, { responsive: true, displaylogo: false });
+  const surface = chartSurface('dnsCorrelation', 320);
+  const downloadScaleValues = hourlyDownload.map(value => value || 0);
+  const queryScaleValues = dnsByHour.flatMap(item => [item.dns || 0, item.blocked || 0]);
+  const [leftMin, leftMax] = extent(downloadScaleValues, 1);
+  const [rightMin, rightMax] = extent(queryScaleValues, 1);
+  drawAxes(surface, leftMin, leftMax, Array.from({ length: 24 }, (_, hour) => hour).filter(hour => hour % 3 === 0).map(hour => ({
+    x: scaleLinear(0, 23, surface.left, surface.width - surface.right)(hour),
+    label: String(hour)
+  })));
+  const scaleX = scaleLinear(0, 23, surface.left, surface.width - surface.right);
+  const scaleLeft = scaleLinear(leftMin, leftMax, surface.height - surface.bottom, surface.top);
+  const scaleRight = scaleLinear(rightMin, rightMax, surface.height - surface.bottom, surface.top);
+  const barWidth = (surface.width - surface.left - surface.right) / 24 / 2.4;
+  dnsByHour.forEach((item, hour) => {
+    const x = scaleX(hour);
+    const dnsHeight = surface.height - surface.bottom - scaleRight(item.dns || 0);
+    const blockedHeight = surface.height - surface.bottom - scaleRight(item.blocked || 0);
+    surface.svg.appendChild(svgEl('rect', { x: x - barWidth - 1, y: scaleRight(item.dns || 0), width: barWidth, height: dnsHeight, fill: 'rgba(34,197,94,.55)' }));
+    surface.svg.appendChild(svgEl('rect', { x: x + 1, y: scaleRight(item.blocked || 0), width: barWidth, height: blockedHeight, fill: 'rgba(245,158,11,.55)' }));
+  });
+  const line = svgEl('path', {
+    d: pathFromPoints(hourlyDownload.map((value, hour) => [scaleX(hour), scaleLeft(value || 0)])),
+    fill: 'none',
+    stroke: '#38bdf8',
+    'stroke-width': 2.4
+  });
+  surface.svg.appendChild(line);
 }
 function renderScore() {
-  document.getElementById('scoreSpeed').textContent = score.speed.toFixed(1) + ' / 40';
-  document.getElementById('scoreUpload').textContent = score.upload.toFixed(1) + ' / 20';
-  document.getElementById('scoreLatency').textContent = score.latency.toFixed(1) + ' / 20';
-  document.getElementById('scoreStability').textContent = score.stability.toFixed(1) + ' / 20';
-  document.getElementById('scoreTotal').textContent = score.total.toFixed(1) + ' / 100';
-  document.getElementById('scoreNotes').innerHTML = score.explanation.map(line => `<li>${line}</li>`).join('');
+  setText('scoreSpeed', score.speed.toFixed(1) + ' / 40');
+  setText('scoreUpload', score.upload.toFixed(1) + ' / 20');
+  setText('scoreLatency', score.latency.toFixed(1) + ' / 20');
+  setText('scoreStability', score.stability.toFixed(1) + ' / 20');
+  setText('scoreTotal', score.total.toFixed(1) + ' / 100');
+  const notes = document.getElementById('scoreNotes');
+  clearNode(notes);
+  score.explanation.forEach(line => {
+    const item = document.createElement('li');
+    item.textContent = line;
+    notes.appendChild(item);
+  });
 }
 function renderSummary(data) {
   const threshold = Number(document.getElementById('threshold').value || thresholds.degradedDownloadMbps);
   const downloads = data.map(item => item.download).filter(v => v !== null);
-  document.getElementById('subtitle').textContent = `Interactive history view · dataset ${stats.start} – ${stats.end} · generated ${meta.generated_at}`;
-  document.getElementById('kpiMedian').textContent = (quantile(downloads, .5) || 0).toFixed(1) + ' Mbps';
-  document.getElementById('kpiUpload').textContent = average(data.map(item => item.upload)).toFixed(1) + ' Mbps';
-  document.getElementById('kpiPing').textContent = average(data.map(item => item.ping)).toFixed(2) + ' ms';
-  document.getElementById('kpiFloor').textContent = (quantile(downloads, .05) || 0).toFixed(1) + ' Mbps';
+  setText('subtitle', `Interactive history view · dataset ${stats.start} – ${stats.end} · generated ${meta.generated_at}`);
+  setText('kpiMedian', (quantile(downloads, .5) || 0).toFixed(1) + ' Mbps');
+  setText('kpiUpload', average(data.map(item => item.upload)).toFixed(1) + ' Mbps');
+  setText('kpiPing', average(data.map(item => item.ping)).toFixed(2) + ' ms');
+  setText('kpiFloor', (quantile(downloads, .05) || 0).toFixed(1) + ' Mbps');
   const pct = downloads.length ? downloads.filter(v => v >= threshold).length / downloads.length * 100 : 0;
-  document.getElementById('kpiThreshold').textContent = pct.toFixed(1) + `% ≥ ${threshold} Mbps`;
-  document.getElementById('kpiFailed').textContent = `${data.filter(item => item.isFailed).length} failed`;
-  document.getElementById('kpiOutage').textContent = `${data.filter(item => item.isOutage).length} outage`;
-  document.getElementById('kpiDegraded').textContent = `${data.filter(item => item.isDegraded).length} degraded`;
+  setText('kpiThreshold', pct.toFixed(1) + `% ≥ ${threshold} Mbps`);
+  setText('kpiFailed', `${data.filter(item => item.isFailed).length} failed`);
+  setText('kpiOutage', `${data.filter(item => item.isOutage).length} outage`);
+  setText('kpiDegraded', `${data.filter(item => item.isDegraded).length} degraded`);
   const longest = (() => {
     let best = 0, current = 0;
     for (const item of data) {
@@ -993,12 +1143,20 @@ function renderSummary(data) {
     }
     return best;
   })();
-  document.getElementById('kpiStreak').textContent = `${longest} longest outage streak`;
-  document.getElementById('verdict').textContent = stats.verdictLabel;
-  document.getElementById('verdictCopy').textContent = `Latest result: ${stats.latestDownload ?? 'n/a'} Mbps down, ${stats.latestUpload ?? 'n/a'} Mbps up, ${stats.latestPing ?? 'n/a'} ms ping.`;
-  document.getElementById('worstWindow').textContent = `Worst window: ${stats.worstWindow}`;
+  setText('kpiStreak', `${longest} longest outage streak`);
+  setText('verdict', stats.verdictLabel);
+  setText('verdictCopy', `Latest result: ${stats.latestDownload ?? 'n/a'} Mbps down, ${stats.latestUpload ?? 'n/a'} Mbps up, ${stats.latestPing ?? 'n/a'} ms ping.`);
+  setText('worstWindow', `Worst window: ${stats.worstWindow}`);
   const linkWrap = document.getElementById('dashboardLinkWrap');
-  linkWrap.innerHTML = stats.publicDashboardUrl ? `<a href="${stats.publicDashboardUrl}" target="_blank" rel="noreferrer">Open public dashboard</a>` : '';
+  clearNode(linkWrap);
+  if (stats.publicDashboardUrl) {
+    const link = document.createElement('a');
+    link.href = stats.publicDashboardUrl;
+    link.target = '_blank';
+    link.rel = 'noreferrer';
+    link.textContent = 'Open public dashboard';
+    linkWrap.appendChild(link);
+  }
 }
 function render() {
   const data = filteredData();
@@ -1012,6 +1170,7 @@ function render() {
   renderScore();
 }
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (getThemeChoice() === 'auto') applyTheme('auto'); });
+window.addEventListener('resize', () => render());
 document.getElementById('theme').value = getThemeChoice();
 document.getElementById('theme').addEventListener('change', event => applyTheme(event.target.value));
 document.getElementById('metric').addEventListener('change', render);
@@ -1199,7 +1358,15 @@ def _version_string() -> str:
         return "unknown"
 
 
-def serve_interactive_dashboard(output_path: str, host: str, port: int) -> int:
+def serve_interactive_dashboard(
+    output_path: str,
+    host: str,
+    port: int,
+    *,
+    tls_enabled: bool = False,
+    tls_cert_file: str = "",
+    tls_key_file: str = "",
+) -> int:
     file_path = Path(output_path).resolve()
     directory = file_path.parent
     status_path = directory / STATUS_FILE_NAME
@@ -1228,7 +1395,7 @@ def serve_interactive_dashboard(output_path: str, host: str, port: int) -> int:
                             "dataset_start": "",
                             "dataset_end": "",
                             "test_count": 0,
-                            "dashboard_path": str(file_path),
+                            "dashboard_file": file_path.name,
                             "version": _version_string(),
                         }
                     ).encode("utf-8")
@@ -1243,7 +1410,20 @@ def serve_interactive_dashboard(output_path: str, host: str, port: int) -> int:
             return super().do_GET()
 
     server = ThreadingHTTPServer((host, port), DashboardHandler)
-    print(f"Serving interactive dashboard at http://{host}:{port}/{file_path.name}")
+    scheme = "http"
+    if tls_enabled:
+        cert_path = Path(tls_cert_file)
+        key_path = Path(tls_key_file)
+        if not cert_path.exists():
+            raise RuntimeError(f"Dashboard TLS cert file not found: {cert_path}")
+        if not key_path.exists():
+            raise RuntimeError(f"Dashboard TLS key file not found: {key_path}")
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
+        context.load_cert_chain(certfile=str(cert_path), keyfile=str(key_path))
+        server.socket = context.wrap_socket(server.socket, server_side=True)
+        scheme = "https"
+    print(f"Serving interactive dashboard at {scheme}://{host}:{port}/{file_path.name}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

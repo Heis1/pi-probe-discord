@@ -17,9 +17,9 @@ usage() {
     cat <<'EOF'
 Usage:
   scripts/update-from-release.sh latest
-  scripts/update-from-release.sh 0.1.1
-  scripts/update-from-release.sh /path/to/pi-probe-discord_0.1.1-1_all.deb
-  scripts/update-from-release.sh https://github.com/.../pi-probe-discord_0.1.1-1_all.deb
+  scripts/update-from-release.sh 1.0.0
+  scripts/update-from-release.sh /path/to/pi-probe-discord_1.0.0-1_all.deb
+  scripts/update-from-release.sh https://github.com/.../pi-probe-discord_1.0.0-1_all.deb
   scripts/update-from-release.sh latest --reconfigure
 
 What it does:
@@ -86,6 +86,25 @@ validate_deb_file() {
     fi
 }
 
+verify_deb_checksum() {
+    local deb_path="$1"
+    local checksum_path="$2"
+    local deb_name
+    deb_name="$(basename "$deb_path")"
+    local expected
+    expected="$(awk -v name="$deb_name" '$2 == name || $2 == ("./" name) { print $1; exit }' "$checksum_path")"
+    if [[ -z "$expected" ]]; then
+        echo "Checksum file does not contain an entry for $deb_name" >&2
+        return 1
+    fi
+    local actual
+    actual="$(sha256sum "$deb_path" | awk '{print $1}')"
+    if [[ "$expected" != "$actual" ]]; then
+        echo "Checksum verification failed for $deb_name" >&2
+        return 1
+    fi
+}
+
 github_api_get() {
     local url="$1"
     if [[ -z "${GITHUB_TOKEN:-}" ]]; then
@@ -127,6 +146,7 @@ download_asset_from_release() {
     local version="$1"
     local destination="$2"
     local asset_name="${PACKAGE_NAME}_${version}-1_all.deb"
+    local checksum_name="${asset_name}.sha256"
     local tag="v${version}"
 
     if have_gh_auth; then
@@ -135,8 +155,18 @@ download_asset_from_release() {
             --pattern "$asset_name" \
             --dir "$(dirname "$destination")" \
             --clobber
+        gh release download "$tag" \
+            --repo "$REPO" \
+            --pattern "$checksum_name" \
+            --dir "$(dirname "$destination")" \
+            --clobber
         if [[ -f "$(dirname "$destination")/$asset_name" ]]; then
             mv "$(dirname "$destination")/$asset_name" "$destination"
+            if [[ ! -f "$(dirname "$destination")/$checksum_name" ]]; then
+                echo "Missing checksum asset ${checksum_name} in GitHub release ${tag}." >&2
+                return 1
+            fi
+            mv "$(dirname "$destination")/$checksum_name" "${destination}.sha256"
             return 0
         fi
     fi
@@ -165,6 +195,29 @@ PY
                     -H "Accept: application/octet-stream" \
                     -o "$destination" \
                     "$asset_api_url"
+                local checksum_api_url
+                checksum_api_url="$(
+                    PAYLOAD="$payload" ASSET_NAME="$checksum_name" python3 - <<'PY'
+from __future__ import annotations
+import json
+import os
+payload = json.loads(os.environ["PAYLOAD"])
+asset_name = os.environ["ASSET_NAME"]
+for asset in payload.get("assets", []):
+    if asset.get("name") == asset_name:
+        print(asset["url"])
+        break
+PY
+                )"
+                if [[ -z "$checksum_api_url" ]]; then
+                    echo "Missing checksum asset ${checksum_name} in GitHub release ${tag}." >&2
+                    return 1
+                fi
+                curl -fL \
+                    -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+                    -H "Accept: application/octet-stream" \
+                    -o "${destination}.sha256" \
+                    "$checksum_api_url"
                 return 0
             fi
         fi
@@ -173,6 +226,10 @@ PY
     if ! download_url_to_file "https://github.com/${REPO}/releases/download/${tag}/${asset_name}" "$destination"; then
         echo "Could not download ${asset_name} from GitHub release ${tag}." >&2
         echo "If the repo is private, authenticate gh on the Pi or export GITHUB_TOKEN first." >&2
+        return 1
+    fi
+    if ! download_url_to_file "https://github.com/${REPO}/releases/download/${tag}/${checksum_name}" "${destination}.sha256"; then
+        echo "Could not download ${checksum_name} from GitHub release ${tag}." >&2
         return 1
     fi
 }
@@ -190,6 +247,9 @@ resolve_deb_path() {
     if [[ "$source" =~ ^https?:// ]]; then
         download_url_to_file "$source" "$destination"
         validate_deb_file "$destination"
+        if download_url_to_file "${source}.sha256" "${destination}.sha256"; then
+            verify_deb_checksum "$destination" "${destination}.sha256"
+        fi
         printf '%s\n' "$destination"
         return 0
     fi
@@ -198,6 +258,7 @@ resolve_deb_path() {
     version="$(resolve_release_version "$source")" || return 1
     download_asset_from_release "$version" "$destination" || return 1
     validate_deb_file "$destination"
+    verify_deb_checksum "$destination" "${destination}.sha256"
     printf '%s\n' "$destination"
 }
 

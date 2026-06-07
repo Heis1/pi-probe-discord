@@ -30,7 +30,7 @@ from .router_snmp import (
     format_router_snapshot_text,
     ingest_router_snmp_events,
     load_router_snapshot,
-    run_router_snmp_listener,
+    run_router_snmp_listener_limited,
 )
 from .speedtest_runner import run_speedtest_measurement
 from .storage import build_report, init_database, load_history_from_db, load_probe_runs_from_db, save_run_record
@@ -330,7 +330,14 @@ def run_router_listener() -> int:
     init_database(config)
     if not config.router_snmp_listener_enabled:
         raise RuntimeError("Router SNMP listener is disabled. Set PI_PROBE_ROUTER_SNMP_LISTENER_ENABLED=true.")
-    run_router_snmp_listener(config.db_path, config.router_snmp_bind_host, config.router_snmp_bind_port)
+    run_router_snmp_listener_limited(
+        config.db_path,
+        config.router_snmp_bind_host,
+        config.router_snmp_bind_port,
+        max_events_per_minute=config.router_snmp_max_events_per_minute,
+        max_packet_bytes=config.router_snmp_max_packet_bytes,
+        retention_days=config.history_retention_days,
+    )
     return 0
 
 
@@ -365,6 +372,9 @@ def run_dashboard_server() -> int:
         config.interactive_dashboard_file,
         config.interactive_dashboard_host,
         config.interactive_dashboard_port,
+        tls_enabled=config.interactive_dashboard_tls_enabled,
+        tls_cert_file=config.interactive_dashboard_tls_cert_file,
+        tls_key_file=config.interactive_dashboard_tls_key_file,
     )
 
 
@@ -383,6 +393,7 @@ def render_dashboard_check() -> str:
     exists = dashboard_path.exists()
     host = config.interactive_dashboard_host
     port = config.interactive_dashboard_port
+    scheme = "https" if config.interactive_dashboard_tls_enabled else "http"
 
     listening = "unknown"
     ok, ss_output = _run_optional_command(["ss", "-ltn"])
@@ -404,7 +415,7 @@ def render_dashboard_check() -> str:
     ok, tailscale_ip = _run_optional_command(["tailscale", "ip", "-4"])
     if ok and tailscale_ip:
         ip = tailscale_ip.splitlines()[0].strip()
-        tailscale_url = f"http://{ip}:{port}/"
+        tailscale_url = f"{scheme}://{ip}:{port}/"
 
     public_dashboard = config.public_dashboard_url or "not set"
     local_host = "127.0.0.1" if host == "0.0.0.0" else host
@@ -413,10 +424,14 @@ def render_dashboard_check() -> str:
         f"Dashboard path: {dashboard_path}",
         f"Configured host: {host}",
         f"Configured port: {port}",
+        f"Dashboard TLS: {'enabled' if config.interactive_dashboard_tls_enabled else 'disabled'}",
         f"Port listening: {listening}",
         f"UFW status for port: {ufw_state}",
-        f"Suggested local URL: http://{local_host}:{port}/",
+        f"Suggested local URL: {scheme}://{local_host}:{port}/",
         f"Suggested Tailscale URL: {tailscale_url}",
         f"Public dashboard URL: {public_dashboard}",
     ]
+    if config.interactive_dashboard_tls_enabled:
+        lines.append(f"TLS cert file: {config.interactive_dashboard_tls_cert_file}")
+        lines.append(f"TLS key file: {config.interactive_dashboard_tls_key_file}")
     return "\n".join(lines)

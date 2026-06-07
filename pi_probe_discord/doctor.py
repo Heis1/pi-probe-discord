@@ -71,5 +71,5 @@ def run_doctor() -> tuple[int, str]:
         lines.append("Remediation:")
         lines.append("- Run: sudo visudo -f /etc/sudoers.d/pi-probe-discord-bot")
         lines.append("- Add missing NOPASSWD command lines from /usr/share/pi-probe-discord/pi-probe-discord-bot.sudoers.example")
-        lines.append("- Ensure /etc/pi-probe-discord/pihole-update-discord.env is readable by bot user/group")
+        lines.append("- Ensure /etc/pi-probe-discord/pihole-update-discord.env and pi-probe-discord-bot.env are owned by root:pi-probe-discord with mode 640")
     return (1 if failures else 0), "\n".join(lines)

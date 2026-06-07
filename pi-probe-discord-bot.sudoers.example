@@ -1,15 +1,15 @@
 # Install with:
 #   sudo visudo -f /etc/sudoers.d/pi-probe-discord-bot
 #
-# Replace "probeuser" if the bot runs under a different Linux user.
+# Replace "pi-probe-discord" only if you intentionally run the bot under a different Linux user.
 
-probeuser ALL=(root) NOPASSWD: /bin/systemctl start --no-block pi-probe-discord-speedtest.service
-probeuser ALL=(root) NOPASSWD: /bin/systemctl start pi-probe-discord-speedtest.service
-probeuser ALL=(root) NOPASSWD: /bin/systemctl start --no-block pi-probe-discord-full.service
-probeuser ALL=(root) NOPASSWD: /bin/systemctl start pi-probe-discord-full.service
-probeuser ALL=(root) NOPASSWD: /usr/bin/pi-probe-discord firewall
-probeuser ALL=(root) NOPASSWD: /usr/bin/pi-probe-discord firewall-chart
-probeuser ALL=(root) NOPASSWD: /usr/bin/pi-probe-discord router
-probeuser ALL=(root) NOPASSWD: /usr/sbin/ufw status verbose
+pi-probe-discord ALL=(root) NOPASSWD: /bin/systemctl start --no-block pi-probe-discord-speedtest.service
+pi-probe-discord ALL=(root) NOPASSWD: /bin/systemctl start pi-probe-discord-speedtest.service
+pi-probe-discord ALL=(root) NOPASSWD: /bin/systemctl start --no-block pi-probe-discord-full.service
+pi-probe-discord ALL=(root) NOPASSWD: /bin/systemctl start pi-probe-discord-full.service
+pi-probe-discord ALL=(root) NOPASSWD: /usr/bin/pi-probe-discord firewall
+pi-probe-discord ALL=(root) NOPASSWD: /usr/bin/pi-probe-discord firewall-chart
+pi-probe-discord ALL=(root) NOPASSWD: /usr/bin/pi-probe-discord router
+pi-probe-discord ALL=(root) NOPASSWD: /usr/sbin/ufw status verbose
 # Optional if logs are only available via journald:
-probeuser ALL=(root) NOPASSWD: /usr/bin/journalctl -k --since -24 hours --no-pager
+pi-probe-discord ALL=(root) NOPASSWD: /usr/bin/journalctl -k --since -24 hours --no-pager

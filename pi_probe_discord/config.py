@@ -21,6 +21,7 @@ DEFAULT_ROUTER_EVENTS_JSON = DEFAULT_DATA_DIR / "events" / "router_events.json"
 DEFAULT_PIHOLE_HOURLY_CSV = DEFAULT_DATA_DIR / "pihole" / "pihole_hourly.csv"
 DEFAULT_FIREWALL_LOG_PATHS = ["/var/log/ufw.log", "/var/log/kern.log", "/var/log/syslog"]
 DEFAULT_ROUTER_SNMP_LOG_PATH = "/var/log/snmptrapd.log"
+DEFAULT_LOG_FILE = DEFAULT_DATA_DIR / "pihole-update-discord.log"
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -87,7 +88,7 @@ def load_config(base_dir: Path | None = None, require_webhook: bool = True) -> A
     return AppConfig(
         webhook_url=webhook_url or "",
         config_file=str(config_file),
-        log_file=os.environ.get("LOG_FILE", "/tmp/pihole-update-discord.log"),
+        log_file=os.environ.get("LOG_FILE", str(DEFAULT_LOG_FILE)),
         chart_file=os.environ.get("CHART_FILE", str(DEFAULT_CHART_PATH)),
         firewall_chart_file=os.environ.get("PI_PROBE_FIREWALL_CHART_FILE", str(DEFAULT_FIREWALL_CHART_PATH)),
         dashboard_style=os.environ.get("PI_PROBE_DASHBOARD_STYLE", "standard").strip().lower() or "standard",
@@ -96,8 +97,17 @@ def load_config(base_dir: Path | None = None, require_webhook: bool = True) -> A
             "PI_PROBE_INTERACTIVE_DASHBOARD_FILE",
             str(DEFAULT_INTERACTIVE_DASHBOARD_PATH),
         ),
-        interactive_dashboard_host=os.environ.get("PI_PROBE_INTERACTIVE_DASHBOARD_HOST", "0.0.0.0"),
+        interactive_dashboard_host=os.environ.get("PI_PROBE_INTERACTIVE_DASHBOARD_HOST", "127.0.0.1"),
         interactive_dashboard_port=max(1, int(os.environ.get("PI_PROBE_INTERACTIVE_DASHBOARD_PORT", "8088"))),
+        interactive_dashboard_tls_enabled=_env_bool("PI_PROBE_INTERACTIVE_DASHBOARD_TLS_ENABLED", False),
+        interactive_dashboard_tls_cert_file=os.environ.get(
+            "PI_PROBE_INTERACTIVE_DASHBOARD_TLS_CERT_FILE",
+            str(DEFAULT_CONFIG_DIR / "dashboard-cert.pem"),
+        ),
+        interactive_dashboard_tls_key_file=os.environ.get(
+            "PI_PROBE_INTERACTIVE_DASHBOARD_TLS_KEY_FILE",
+            str(DEFAULT_CONFIG_DIR / "dashboard-key.pem"),
+        ),
         public_dashboard_url=os.environ.get("PI_PROBE_PUBLIC_DASHBOARD_URL", "").strip(),
         dashboard_link_label=os.environ.get("PI_PROBE_DASHBOARD_LINK_LABEL", "Open Interactive Dashboard").strip()
         or "Open Interactive Dashboard",
@@ -144,7 +154,13 @@ def load_config(base_dir: Path | None = None, require_webhook: bool = True) -> A
         router_snmp_window_hours=max(1, int(os.environ.get("PI_PROBE_ROUTER_SNMP_WINDOW_HOURS", "24"))),
         router_snmp_top_n=max(1, int(os.environ.get("PI_PROBE_ROUTER_SNMP_TOP_N", "5"))),
         router_snmp_listener_enabled=_env_bool("PI_PROBE_ROUTER_SNMP_LISTENER_ENABLED", False),
-        router_snmp_bind_host=os.environ.get("PI_PROBE_ROUTER_SNMP_BIND_HOST", "0.0.0.0"),
+        router_snmp_bind_host=os.environ.get("PI_PROBE_ROUTER_SNMP_BIND_HOST", "127.0.0.1"),
         router_snmp_bind_port=max(1, int(os.environ.get("PI_PROBE_ROUTER_SNMP_BIND_PORT", "9162"))),
+        router_snmp_max_events_per_minute=max(
+            1, int(os.environ.get("PI_PROBE_ROUTER_SNMP_MAX_EVENTS_PER_MINUTE", "120"))
+        ),
+        router_snmp_max_packet_bytes=max(
+            256, int(os.environ.get("PI_PROBE_ROUTER_SNMP_MAX_PACKET_BYTES", "4096"))
+        ),
         router_snmp_oid_severity_map=_env_severity_map("PI_PROBE_ROUTER_SNMP_OID_SEVERITY_MAP"),
     )

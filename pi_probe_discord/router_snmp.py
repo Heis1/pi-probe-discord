@@ -7,6 +7,7 @@ import sqlite3
 from collections import Counter
 from datetime import datetime, timedelta
 from pathlib import Path
+import time
 from typing import Any
 
 from .models import RouterSnapshot
@@ -242,10 +243,39 @@ def format_router_snapshot_json(snapshot: RouterSnapshot) -> str:
 
 
 def run_router_snmp_listener(db_path: str, bind_host: str, bind_port: int) -> None:
+    run_router_snmp_listener_limited(
+        db_path,
+        bind_host,
+        bind_port,
+        max_events_per_minute=120,
+        max_packet_bytes=4096,
+        retention_days=365,
+    )
+
+
+def run_router_snmp_listener_limited(
+    db_path: str,
+    bind_host: str,
+    bind_port: int,
+    *,
+    max_events_per_minute: int,
+    max_packet_bytes: int,
+    retention_days: int,
+) -> None:
+    window_start = time.monotonic()
+    accepted_in_window = 0
+    inserted_since_prune = 0
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
         sock.bind((bind_host, bind_port))
         while True:
             payload, addr = sock.recvfrom(65535)
+            now_monotonic = time.monotonic()
+            if now_monotonic - window_start >= 60:
+                window_start = now_monotonic
+                accepted_in_window = 0
+            if len(payload) > max_packet_bytes or accepted_in_window >= max_events_per_minute:
+                continue
+            accepted_in_window += 1
             now = datetime.now().astimezone()
             source_ip = addr[0] if addr else "unknown"
             text = payload.decode("utf-8", errors="replace")
@@ -253,3 +283,8 @@ def run_router_snmp_listener(db_path: str, bind_host: str, bind_port: int) -> No
             summary = text.strip().replace("\n", " ")[:280] or f"SNMP packet ({len(payload)} bytes)"
             with sqlite3.connect(db_path) as conn:
                 _insert_event(conn, now, source_ip, trap_oid, summary, text)
+                inserted_since_prune += 1
+                if inserted_since_prune >= 25:
+                    cutoff = (now - timedelta(days=retention_days)).isoformat()
+                    conn.execute("DELETE FROM router_snmp_events WHERE recorded_at < ?", (cutoff,))
+                    inserted_since_prune = 0

@@ -3,6 +3,7 @@ set -e
 
 if command -v systemctl >/dev/null 2>&1; then
     systemctl disable --now pi-probe-discord-speedtest.timer pi-probe-discord-full.timer >/dev/null 2>&1 || true
+    systemctl stop pi-probe-discord-bot.service pi-probe-discord-snmp-listener.service >/dev/null 2>&1 || true
 fi
 
 exit 0

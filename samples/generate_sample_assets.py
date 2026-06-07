@@ -241,7 +241,7 @@ def build_payload():
                         "inline": False,
                     },
                 ],
-                "footer": {"text": "log: /tmp/pihole-update-discord.log"},
+                "footer": {"text": "log: /var/lib/pi-probe-discord/pihole-update-discord.log"},
                 "timestamp": "2026-04-26T10:45:00Z",
             }
         ]

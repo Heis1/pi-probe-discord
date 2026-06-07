@@ -58,11 +58,26 @@ Recommended dashboard settings in `/etc/pi-probe-discord/pihole-update-discord.e
 PI_PROBE_DASHBOARD_STYLE="premium"
 PI_PROBE_INTERACTIVE_DASHBOARD_ENABLED="true"
 PI_PROBE_INTERACTIVE_DASHBOARD_FILE="/var/lib/pi-probe-discord/dashboard/index.html"
-PI_PROBE_INTERACTIVE_DASHBOARD_HOST="0.0.0.0"
+PI_PROBE_INTERACTIVE_DASHBOARD_HOST="127.0.0.1"
 PI_PROBE_INTERACTIVE_DASHBOARD_PORT="8088"
+PI_PROBE_INTERACTIVE_DASHBOARD_TLS_ENABLED="true"
+PI_PROBE_INTERACTIVE_DASHBOARD_TLS_CERT_FILE="/etc/pi-probe-discord/dashboard-cert.pem"
+PI_PROBE_INTERACTIVE_DASHBOARD_TLS_KEY_FILE="/etc/pi-probe-discord/dashboard-key.pem"
 ```
 
 Use `8088`. It avoids the usual Pi-hole ports.
+
+Create a certificate and key if you do not already have them:
+
+```bash
+sudo openssl req -x509 -nodes -newkey rsa:4096 \
+  -keyout /etc/pi-probe-discord/dashboard-key.pem \
+  -out /etc/pi-probe-discord/dashboard-cert.pem \
+  -days 825 \
+  -subj "/CN=$(hostname -f)"
+sudo chown root:pi-probe-discord /etc/pi-probe-discord/dashboard-key.pem /etc/pi-probe-discord/dashboard-cert.pem
+sudo chmod 640 /etc/pi-probe-discord/dashboard-key.pem /etc/pi-probe-discord/dashboard-cert.pem
+```
 
 Generate the HTML once:
 
@@ -85,7 +100,7 @@ pi-probe-discord dashboard-check
 Open it at:
 
 ```text
-http://<pi-or-tailscale-name>:8088/
+https://<pi-or-tailscale-name>:8088/
 ```
 
 The dashboard server also exposes:
@@ -106,6 +121,14 @@ Tailscale example:
 ```bash
 sudo ufw allow in on tailscale0 to any port 8088 proto tcp comment 'pi-probe dashboard tailscale'
 ```
+
+Expose it beyond localhost only when you intend to:
+
+```bash
+PI_PROBE_INTERACTIVE_DASHBOARD_HOST="0.0.0.0"
+```
+
+If you keep TLS disabled, use `http://` instead of `https://`.
 
 ## Discord dashboard link
 
@@ -178,7 +201,8 @@ Bot env file:
 
 ```bash
 sudo cp /usr/share/pi-probe-discord/pi-probe-discord-bot.env.example /etc/pi-probe-discord/pi-probe-discord-bot.env
-sudo chmod 600 /etc/pi-probe-discord/pi-probe-discord-bot.env
+sudo chown root:pi-probe-discord /etc/pi-probe-discord/pi-probe-discord-bot.env
+sudo chmod 640 /etc/pi-probe-discord/pi-probe-discord-bot.env
 ```
 
 Set:
@@ -193,7 +217,7 @@ sudo systemctl enable --now pi-probe-discord-bot.service
 journalctl -u pi-probe-discord-bot.service -n 50 --no-pager
 ```
 
-If you run the bot as a non-root user, use the sudoers template at:
+The packaged bot now runs as the dedicated `pi-probe-discord` service user. Install the matching sudoers policy at:
 
 ```text
 /usr/share/pi-probe-discord/pi-probe-discord-bot.sudoers.example
@@ -217,7 +241,7 @@ sudo pi-probe-discord-update latest
 Or a specific version:
 
 ```bash
-sudo pi-probe-discord-update 0.1.26
+sudo pi-probe-discord-update 1.0.0
 ```
 
 ## Troubleshooting

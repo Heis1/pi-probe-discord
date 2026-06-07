@@ -9,11 +9,11 @@ usage() {
     cat <<'EOF'
 Usage:
   scripts/release.sh "Release notes"
-  scripts/release.sh --version 0.1.1 "Release notes"
+  scripts/release.sh --version 1.0.0 "Release notes"
 
 Example:
   scripts/release.sh "Improve Discord chart readability"
-  scripts/release.sh --version 0.2.0 "Add Pi upgrade helper"
+  scripts/release.sh --version 1.0.0 "First stable release"
 
 What it does:
   1. Verifies the git worktree is clean.
@@ -22,10 +22,11 @@ What it does:
   4. Commits the release metadata.
   5. Creates git tag vVERSION.
   6. Builds the .deb with dpkg-buildpackage.
-  7. Creates a GitHub release and uploads the .deb.
+  7. Writes a sha256 checksum file for the .deb.
+  8. Creates a GitHub release and uploads both files.
 
 Default version bump:
-  0.1.0 -> 0.1.1
+  1.0.0 -> 1.0.1
 
 The script currently auto-increments the patch version only.
 If you want a minor or major bump, pass --version explicitly.
@@ -186,6 +187,7 @@ main() {
     validate_version "$version"
     local tag="v$version"
     local artifact="../${PACKAGE_NAME}_${version}-1_all.deb"
+    local checksum_artifact="../${PACKAGE_NAME}_${version}-1_all.deb.sha256"
 
     require_tools
     require_clean_tree
@@ -214,9 +216,15 @@ main() {
         exit 1
     fi
 
+    (
+        cd "$(dirname "$artifact")"
+        sha256sum "$(basename "$artifact")" > "$(basename "$checksum_artifact")"
+    )
+
     gh release create \
         "$tag" \
         "$artifact" \
+        "$checksum_artifact" \
         --repo "Heis1/${PACKAGE_NAME}" \
         --title "$tag" \
         --notes "$notes"

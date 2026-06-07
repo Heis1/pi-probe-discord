@@ -27,6 +27,9 @@ def make_config(base_dir: Path) -> AppConfig:
         interactive_dashboard_file=str(base_dir / "dashboard" / "index.html"),
         interactive_dashboard_host="127.0.0.1",
         interactive_dashboard_port=8088,
+        interactive_dashboard_tls_enabled=False,
+        interactive_dashboard_tls_cert_file=str(base_dir / "dashboard-cert.pem"),
+        interactive_dashboard_tls_key_file=str(base_dir / "dashboard-key.pem"),
         public_dashboard_url="https://example.com/dashboard",
         dashboard_link_label="Open Interactive Dashboard",
         outage_download_mbps=50.0,
@@ -62,8 +65,10 @@ def make_config(base_dir: Path) -> AppConfig:
         router_snmp_window_hours=24,
         router_snmp_top_n=5,
         router_snmp_listener_enabled=False,
-        router_snmp_bind_host="0.0.0.0",
+        router_snmp_bind_host="127.0.0.1",
         router_snmp_bind_port=9162,
+        router_snmp_max_events_per_minute=120,
+        router_snmp_max_packet_bytes=4096,
         router_snmp_oid_severity_map={},
     )
 

@@ -6,10 +6,26 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=/opt/pi-probe-discord
+User=pi-probe-discord
+Group=pi-probe-discord
 EnvironmentFile=/etc/pi-probe-discord/pi-probe-discord-bot.env
 ExecStart=/usr/bin/pi-probe-discord-bot
 Restart=on-failure
 RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ReadOnlyPaths=/etc/pi-probe-discord/pi-probe-discord-bot.env /etc/pi-probe-discord/pihole-update-discord.env
+ReadWritePaths=/var/lib/pi-probe-discord
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=true
+MemoryDenyWriteExecute=true
+UMask=007
 
 [Install]
 WantedBy=multi-user.target

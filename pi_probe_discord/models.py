@@ -16,6 +16,9 @@ class AppConfig:
     interactive_dashboard_file: str
     interactive_dashboard_host: str
     interactive_dashboard_port: int
+    interactive_dashboard_tls_enabled: bool
+    interactive_dashboard_tls_cert_file: str
+    interactive_dashboard_tls_key_file: str
     public_dashboard_url: str
     dashboard_link_label: str
     outage_download_mbps: float
@@ -53,6 +56,8 @@ class AppConfig:
     router_snmp_listener_enabled: bool
     router_snmp_bind_host: str
     router_snmp_bind_port: int
+    router_snmp_max_events_per_minute: int
+    router_snmp_max_packet_bytes: int
     router_snmp_oid_severity_map: dict[str, str]
 
 
