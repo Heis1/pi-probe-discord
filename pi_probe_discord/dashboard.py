@@ -739,10 +739,32 @@ body.theme-clean select, body.theme-clean input { background: rgba(255,255,255,.
 .panel-head p { margin: 4px 0 0; color: var(--muted); font-size: 13px; line-height: 1.4; }
 .chart { height: 390px; }
 .chart-small { height: 320px; }
+.chart-meta { display:flex; flex-wrap:wrap; gap: 10px; margin: 10px 0 0; }
+.legend-chip {
+  display:inline-flex; align-items:center; gap: 8px;
+  padding: 7px 11px; border-radius: 999px;
+  background: var(--panel-2); border: 1px solid var(--border);
+  color: var(--muted); font-size: 12px; font-weight: 700;
+}
+.legend-swatch { width: 12px; height: 12px; border-radius: 999px; display:inline-block; }
 .table-wrap { overflow:auto; border-radius: 16px; border: 1px solid var(--border); }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: top; }
 th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+.time-cell { white-space: nowrap; min-width: 92px; }
+.type-cell { min-width: 146px; font-weight: 700; }
+.source-cell { white-space: nowrap; min-width: 110px; font-variant-numeric: tabular-nums; }
+.message-cell { min-width: 280px; color: var(--text); overflow-wrap: anywhere; line-height: 1.4; }
+.severity-pill {
+  display:inline-flex; align-items:center; justify-content:center;
+  min-width: 72px; padding: 5px 10px; border-radius: 999px;
+  border: 1px solid var(--border); font-size: 11px; font-weight: 800;
+  text-transform: uppercase; letter-spacing: .08em;
+}
+.severity-pill.info { color: #7dd3fc; background: rgba(56,189,248,.14); }
+.severity-pill.warning { color: #fbbf24; background: rgba(245,158,11,.14); }
+.severity-pill.critical { color: #fca5a5; background: rgba(239,68,68,.14); }
+.table-empty { color: var(--muted); text-align: center; padding: 18px; }
 .score-grid { display:grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 14px; }
 .score-card { padding: 14px; border: 1px solid var(--border); border-radius: 16px; background: var(--panel-2); }
 .score-card b { display:block; font-size: 26px; margin-top: 6px; }
@@ -805,6 +827,7 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
       <div class="panel">
         <div class="panel-head"><h2>DNS Activity Correlation</h2><p>Hourly DNS load and blocked requests plotted against average download when Pi-hole hourly data exists.</p></div>
         <div id="dnsCorrelation" class="chart-small"></div>
+        <div id="dnsLegend" class="chart-meta"></div>
         <div id="dnsEmpty" class="empty" style="display:none">No Pi-hole hourly data yet.</div>
       </div>
     </div>
@@ -939,6 +962,22 @@ function drawAxes(surface, yMin, yMax, xLabels = []) {
   });
   svg.appendChild(axis);
 }
+function drawRightAxis(surface, yMin, yMax, formatter) {
+  const { svg, width, top, right, bottom, height } = surface;
+  const theme = chartTheme();
+  const plotHeight = height - top - bottom;
+  const axis = svgEl('g');
+  const x = width - right;
+  axis.appendChild(svgEl('line', { x1: x, y1: top, x2: x, y2: top + plotHeight, stroke: theme.border }));
+  makeTicks(yMin, yMax, 5).forEach(value => {
+    const y = top + plotHeight - ((value - yMin) / (yMax - yMin || 1)) * plotHeight;
+    axis.appendChild(svgEl('line', { x1: x - 4, y1: y, x2: x, y2: y, stroke: theme.border }));
+    const label = svgEl('text', { x: x + 8, y: y + 4, fill: theme.muted, 'font-size': 11 });
+    label.textContent = formatter(value);
+    axis.appendChild(label);
+  });
+  svg.appendChild(axis);
+}
 function pathFromPoints(points) {
   if (!points.length) return '';
   return points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point[0].toFixed(2)} ${point[1].toFixed(2)}`).join(' ');
@@ -981,6 +1020,7 @@ function renderTable(events) {
     const row = document.createElement('tr');
     const cell = document.createElement('td');
     cell.colSpan = 5;
+    cell.className = 'table-empty';
     cell.textContent = 'No matching events.';
     row.appendChild(cell);
     body.appendChild(row);
@@ -988,11 +1028,32 @@ function renderTable(events) {
   }
   events.slice(-20).reverse().forEach(event => {
     const row = document.createElement('tr');
-    [event.time, event.eventType, event.severity, event.source || 'n/a', event.message || ''].forEach(value => {
-      const cell = document.createElement('td');
-      cell.textContent = value;
-      row.appendChild(cell);
-    });
+    const timeCell = document.createElement('td');
+    timeCell.className = 'time-cell';
+    timeCell.textContent = event.time;
+    row.appendChild(timeCell);
+
+    const typeCell = document.createElement('td');
+    typeCell.className = 'type-cell';
+    typeCell.textContent = event.eventType;
+    row.appendChild(typeCell);
+
+    const severityCell = document.createElement('td');
+    const severityPill = document.createElement('span');
+    severityPill.className = `severity-pill ${event.severity || 'info'}`;
+    severityPill.textContent = event.severity || 'info';
+    severityCell.appendChild(severityPill);
+    row.appendChild(severityCell);
+
+    const sourceCell = document.createElement('td');
+    sourceCell.className = 'source-cell';
+    sourceCell.textContent = event.source || 'n/a';
+    row.appendChild(sourceCell);
+
+    const messageCell = document.createElement('td');
+    messageCell.className = 'message-cell';
+    messageCell.textContent = event.message || '';
+    row.appendChild(messageCell);
     body.appendChild(row);
   });
 }
@@ -1117,8 +1178,10 @@ function renderScatter(data) {
 function renderDnsCorrelation(data) {
   const dnsChart = document.getElementById('dnsCorrelation');
   const dnsEmpty = document.getElementById('dnsEmpty');
+  const dnsLegend = document.getElementById('dnsLegend');
   if (!piholeRows.length) {
     clearNode(dnsChart);
+    clearNode(dnsLegend);
     dnsChart.style.display = 'none';
     dnsEmpty.style.display = 'block';
     return;
@@ -1145,6 +1208,7 @@ function renderDnsCorrelation(data) {
     x: scaleLinear(0, 23, surface.left, surface.width - surface.right)(hour),
     label: String(hour)
   })));
+  drawRightAxis(surface, rightMin, rightMax, value => `${Math.round(value)}`);
   const scaleX = scaleLinear(0, 23, surface.left, surface.width - surface.right);
   const scaleLeft = scaleLinear(leftMin, leftMax, surface.height - surface.bottom, surface.top);
   const scaleRight = scaleLinear(rightMin, rightMax, surface.height - surface.bottom, surface.top);
@@ -1163,6 +1227,29 @@ function renderDnsCorrelation(data) {
     'stroke-width': 2.4
   });
   surface.svg.appendChild(line);
+  const leftLabel = svgEl('text', { x: 18, y: surface.top + (surface.height - surface.top - surface.bottom) / 2, fill: chartTheme().muted, 'font-size': 11, transform: `rotate(-90 18 ${surface.top + (surface.height - surface.top - surface.bottom) / 2})` });
+  leftLabel.textContent = 'Average download (Mbps)';
+  surface.svg.appendChild(leftLabel);
+  const rightLabel = svgEl('text', { x: surface.width - 6, y: surface.top + (surface.height - surface.top - surface.bottom) / 2, fill: chartTheme().muted, 'font-size': 11, transform: `rotate(90 ${surface.width - 6} ${surface.top + (surface.height - surface.top - surface.bottom) / 2})`, 'text-anchor': 'middle' });
+  rightLabel.textContent = 'Avg DNS requests / blocked';
+  surface.svg.appendChild(rightLabel);
+
+  clearNode(dnsLegend);
+  const legendItems = [
+    { color: '#38bdf8', label: `Avg download ${average(hourlyDownload.filter(value => value !== null)).toFixed(1)} Mbps` },
+    { color: 'rgba(34,197,94,.75)', label: `Avg DNS queries ${average(dnsByHour.map(item => item.dns || 0)).toFixed(0)}/hr` },
+    { color: 'rgba(245,158,11,.75)', label: `Avg blocked ${average(dnsByHour.map(item => item.blocked || 0)).toFixed(1)}/hr` }
+  ];
+  legendItems.forEach(item => {
+    const chip = document.createElement('div');
+    chip.className = 'legend-chip';
+    const swatch = document.createElement('span');
+    swatch.className = 'legend-swatch';
+    swatch.style.background = item.color;
+    chip.appendChild(swatch);
+    chip.appendChild(document.createTextNode(item.label));
+    dnsLegend.appendChild(chip);
+  });
 }
 function renderScore() {
   setText('scoreSpeed', score.speed.toFixed(1) + ' / 40');
