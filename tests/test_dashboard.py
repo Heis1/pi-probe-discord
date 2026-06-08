@@ -47,7 +47,7 @@ def make_config(base_dir: Path) -> AppConfig:
         nmap_inventory_json=str(base_dir / "nmap" / "latest.json"),
         nmap_events_json=str(base_dir / "nmap" / "events.json"),
         nmap_targets="192.168.1.0/24",
-        nmap_arguments="-sV",
+        nmap_arguments="-F --min-rate 2000 --host-timeout 30s",
         nmap_scan_minutes=360,
         db_path=str(base_dir / "probe.db"),
         history_retention_days=365,
