@@ -43,6 +43,8 @@ def make_config(base_dir: Path) -> AppConfig:
         router_events_json=str(base_dir / "events" / "router_events.json"),
         pihole_hourly_csv=str(base_dir / "pihole" / "pihole_hourly.csv"),
         pihole_ftl_db_path=str(base_dir / "pihole-FTL.db"),
+        nmap_inventory_xml=str(base_dir / "nmap" / "latest.xml"),
+        nmap_inventory_json=str(base_dir / "nmap" / "latest.json"),
         db_path=str(base_dir / "probe.db"),
         history_retention_days=365,
         request_timeout=30,
@@ -99,12 +101,57 @@ class DashboardTests(unittest.TestCase):
             config = make_config(base)
             Path(config.router_events_csv).parent.mkdir(parents=True, exist_ok=True)
             Path(config.pihole_hourly_csv).parent.mkdir(parents=True, exist_ok=True)
+            Path(config.nmap_inventory_json).parent.mkdir(parents=True, exist_ok=True)
             Path(config.router_events_csv).write_text(
                 "timestamp,event_type,message,severity,source\n2026-06-06T10:00:00,wan_disconnect,Carrier lost,critical,router\n",
                 encoding="utf-8",
             )
             Path(config.pihole_hourly_csv).write_text(
                 "datetime,dns_queries,blocked_queries,blocked_percent\n2026-06-06T10:00:00,1200,210,17.5\n",
+                encoding="utf-8",
+            )
+            Path(config.nmap_inventory_json).write_text(
+                json.dumps(
+                    {
+                        "scannedAt": "2026-06-06T10:15:00",
+                        "network": "192.168.1.0/24",
+                        "deviceCount": 2,
+                        "devices": [
+                            {
+                                "id": "192.168.1.1",
+                                "name": "TP-Link Router",
+                                "hostname": "archer",
+                                "ip": "192.168.1.1",
+                                "vendor": "TP-Link",
+                                "status": "up",
+                                "category": "infrastructure",
+                                "categoryLabel": "Infrastructure",
+                                "accent": "cyan",
+                                "ports": [{"port": 443, "protocol": "tcp", "service": "https"}],
+                                "openPorts": [443],
+                                "services": ["https"],
+                                "portCount": 1,
+                                "lastSeen": "2026-06-06T10:15:00",
+                            },
+                            {
+                                "id": "192.168.1.51",
+                                "name": "Pi-hole",
+                                "hostname": "pi.hole",
+                                "ip": "192.168.1.51",
+                                "vendor": "Raspberry Pi",
+                                "status": "up",
+                                "category": "servers",
+                                "categoryLabel": "Servers",
+                                "accent": "green",
+                                "ports": [{"port": 53, "protocol": "tcp", "service": "domain"}],
+                                "openPorts": [53],
+                                "services": ["domain"],
+                                "portCount": 1,
+                                "lastSeen": "2026-06-06T10:15:00",
+                            },
+                        ],
+                    }
+                ),
                 encoding="utf-8",
             )
             now = datetime(2026, 6, 6, 12, 0, 0)
@@ -125,6 +172,8 @@ class DashboardTests(unittest.TestCase):
             self.assertIn("wan_disconnect", html)
             self.assertIn("https://example.com/dashboard", html)
             self.assertIn("blockedQueries", html)
+            self.assertIn("Network Devices", html)
+            self.assertIn("TP-Link Router", html)
             self.assertEqual(status["service"], "pi-probe-discord-dashboard")
             self.assertEqual(status["test_count"], 2)
 

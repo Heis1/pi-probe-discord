@@ -20,6 +20,8 @@ DEFAULT_ROUTER_EVENTS_CSV = DEFAULT_DATA_DIR / "events" / "router_events.csv"
 DEFAULT_ROUTER_EVENTS_JSON = DEFAULT_DATA_DIR / "events" / "router_events.json"
 DEFAULT_PIHOLE_HOURLY_CSV = DEFAULT_DATA_DIR / "pihole" / "pihole_hourly.csv"
 DEFAULT_PIHOLE_FTL_DB_PATH = Path("/etc/pihole/pihole-FTL.db")
+DEFAULT_NMAP_INVENTORY_XML = DEFAULT_DATA_DIR / "nmap" / "latest.xml"
+DEFAULT_NMAP_INVENTORY_JSON = DEFAULT_DATA_DIR / "nmap" / "latest.json"
 DEFAULT_FIREWALL_LOG_PATHS = ["/var/log/ufw.log", "/var/log/kern.log", "/var/log/syslog"]
 DEFAULT_ROUTER_SNMP_LOG_PATH = "/var/log/snmptrapd.log"
 DEFAULT_LOG_FILE = DEFAULT_DATA_DIR / "pihole-update-discord.log"
@@ -122,6 +124,8 @@ def load_config(base_dir: Path | None = None, require_webhook: bool = True) -> A
         router_events_json=os.environ.get("PI_PROBE_ROUTER_EVENTS_JSON", str(DEFAULT_ROUTER_EVENTS_JSON)),
         pihole_hourly_csv=os.environ.get("PI_PROBE_PIHOLE_HOURLY_CSV", str(DEFAULT_PIHOLE_HOURLY_CSV)),
         pihole_ftl_db_path=os.environ.get("PI_PROBE_PIHOLE_FTL_DB_PATH", str(DEFAULT_PIHOLE_FTL_DB_PATH)),
+        nmap_inventory_xml=os.environ.get("PI_PROBE_NMAP_INVENTORY_XML", str(DEFAULT_NMAP_INVENTORY_XML)),
+        nmap_inventory_json=os.environ.get("PI_PROBE_NMAP_INVENTORY_JSON", str(DEFAULT_NMAP_INVENTORY_JSON)),
         db_path=os.environ.get("DB_PATH", str(DEFAULT_DB_PATH)),
         history_retention_days=int(os.environ.get("HISTORY_RETENTION_DAYS", "365")),
         request_timeout=int(os.environ.get("REQUEST_TIMEOUT", "30")),

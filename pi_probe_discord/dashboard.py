@@ -75,6 +75,25 @@ class PiholeHourlyRow:
     blocked_percent: float | None
 
 
+@dataclass
+class NmapDeviceRow:
+    device_id: str
+    name: str
+    hostname: str
+    ip: str
+    mac: str
+    vendor: str
+    status: str
+    category: str
+    category_label: str
+    accent: str
+    ports: list[dict[str, Any]]
+    open_ports: list[int]
+    services: list[str]
+    port_count: int
+    last_seen: str
+
+
 def _format_metric(value: float | None, suffix: str, precision: int = 1) -> str:
     if value is None:
         return "n/a"
@@ -363,6 +382,48 @@ def _load_pihole_hourly_rows(config: AppConfig | None) -> list[PiholeHourlyRow]:
     return sorted(rows, key=lambda row: row.timestamp)
 
 
+def _load_nmap_inventory_rows(config: AppConfig | None) -> tuple[list[NmapDeviceRow], dict[str, Any]]:
+    if config is None:
+        return [], {}
+    path = Path(config.nmap_inventory_json)
+    if not path.exists():
+        return [], {}
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return [], {}
+    items = raw.get("devices", []) if isinstance(raw, dict) else []
+    rows: list[NmapDeviceRow] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        rows.append(
+            NmapDeviceRow(
+                device_id=str(item.get("id") or item.get("ip") or item.get("name") or ""),
+                name=str(item.get("name") or item.get("hostname") or item.get("ip") or "Unknown device"),
+                hostname=str(item.get("hostname") or ""),
+                ip=str(item.get("ip") or ""),
+                mac=str(item.get("mac") or ""),
+                vendor=str(item.get("vendor") or ""),
+                status=str(item.get("status") or "up"),
+                category=str(item.get("category") or "unknown"),
+                category_label=str(item.get("categoryLabel") or "Unknown"),
+                accent=str(item.get("accent") or "slate"),
+                ports=item.get("ports") if isinstance(item.get("ports"), list) else [],
+                open_ports=[int(port) for port in item.get("openPorts", []) if isinstance(port, int)],
+                services=[str(service) for service in item.get("services", []) if str(service)],
+                port_count=int(item.get("portCount") or 0),
+                last_seen=str(item.get("lastSeen") or ""),
+            )
+        )
+    meta = raw if isinstance(raw, dict) else {}
+    return rows, {
+        "scannedAt": str(meta.get("scannedAt") or ""),
+        "network": str(meta.get("network") or ""),
+        "deviceCount": int(meta.get("deviceCount") or len(rows)),
+    }
+
+
 def _hour_label(hour: int | None) -> str:
     if hour is None:
         return "n/a"
@@ -450,6 +511,8 @@ def _build_dashboard_payload(
     rows: list[DashboardRow],
     events: list[RouterEvent],
     pihole_rows: list[PiholeHourlyRow],
+    nmap_rows: list[NmapDeviceRow],
+    nmap_meta: dict[str, Any],
     thresholds: DashboardThresholds,
     output_path: str,
     public_dashboard_url: str = "",
@@ -549,6 +612,29 @@ def _build_dashboard_payload(
         }
         for row in pihole_rows
     ]
+    device_data = [
+        {
+            "id": row.device_id,
+            "name": row.name,
+            "hostname": row.hostname,
+            "ip": row.ip,
+            "mac": row.mac,
+            "vendor": row.vendor,
+            "status": row.status,
+            "category": row.category,
+            "categoryLabel": row.category_label,
+            "accent": row.accent,
+            "ports": row.ports,
+            "openPorts": row.open_ports,
+            "services": row.services,
+            "portCount": row.port_count,
+            "lastSeen": row.last_seen,
+        }
+        for row in nmap_rows
+    ]
+    device_counts: dict[str, int] = {}
+    for row in nmap_rows:
+        device_counts[row.category_label] = device_counts.get(row.category_label, 0) + 1
 
     metadata = {
         "service": SERVICE_NAME,
@@ -564,6 +650,13 @@ def _build_dashboard_payload(
         "data": data,
         "events": event_data,
         "pihole": pihole_data,
+        "devices": device_data,
+        "inventory": {
+            "scannedAt": nmap_meta.get("scannedAt", ""),
+            "network": nmap_meta.get("network", ""),
+            "deviceCount": nmap_meta.get("deviceCount", len(nmap_rows)),
+            "categoryCounts": device_counts,
+        },
         "stats": {
             "tests": len(rows),
             "start": start,
@@ -615,7 +708,16 @@ def build_dashboard_summary(
 ) -> dict[str, Any]:
     thresholds = _build_thresholds(config)
     rows = _rows_from_run_records(run_rows, history, now, thresholds, days=30)
-    payload = _build_dashboard_payload(rows, [], [], thresholds, output_path="dashboard.html", public_dashboard_url=(config.public_dashboard_url if config else ""))
+    payload = _build_dashboard_payload(
+        rows,
+        [],
+        [],
+        [],
+        {},
+        thresholds,
+        output_path="dashboard.html",
+        public_dashboard_url=(config.public_dashboard_url if config else ""),
+    )
     return {
         "stats": payload["stats"],
         "score": payload["score"],
@@ -639,10 +741,13 @@ def generate_interactive_dashboard(
 
     event_rows = router_events if router_events is not None else _load_router_events(config)
     dns_rows = pihole_rows if pihole_rows is not None else _load_pihole_hourly_rows(config)
+    nmap_rows, nmap_meta = _load_nmap_inventory_rows(config)
     payload = _build_dashboard_payload(
         rows,
         event_rows,
         dns_rows,
+        nmap_rows,
+        nmap_meta,
         thresholds,
         output_path=output_path,
         public_dashboard_url=(config.public_dashboard_url if config else ""),
@@ -739,6 +844,56 @@ body.theme-clean select, body.theme-clean input { background: rgba(255,255,255,.
 .panel-head p { margin: 4px 0 0; color: var(--muted); font-size: 13px; line-height: 1.4; }
 .chart { height: 390px; }
 .chart-small { height: 320px; }
+.device-map {
+  min-height: 330px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.device-cluster {
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--panel-2);
+  padding: 14px;
+}
+.cluster-head {
+  display:flex; justify-content:space-between; align-items:center; gap:10px;
+  margin-bottom: 12px;
+}
+.cluster-title { font-size: 14px; font-weight: 800; letter-spacing: -.01em; }
+.cluster-count {
+  border-radius: 999px; padding: 4px 9px; border: 1px solid var(--border);
+  color: var(--muted); font-size: 11px; font-weight: 800;
+}
+.device-list { display:grid; gap: 10px; }
+.device-card {
+  border: 1px solid var(--border);
+  border-left-width: 4px;
+  border-radius: 14px;
+  padding: 11px 12px;
+  background: rgba(2,6,23,.18);
+}
+.device-card.cyan { border-left-color: #38bdf8; }
+.device-card.green { border-left-color: #22c55e; }
+.device-card.blue { border-left-color: #60a5fa; }
+.device-card.amber { border-left-color: #f59e0b; }
+.device-card.violet { border-left-color: #8b5cf6; }
+.device-card.orange { border-left-color: #f97316; }
+.device-card.slate { border-left-color: #94a3b8; }
+.device-name { font-size: 14px; font-weight: 800; line-height: 1.2; }
+.device-ip { margin-top: 3px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.device-meta, .device-services {
+  margin-top: 8px;
+  display:flex; flex-wrap:wrap; gap: 6px;
+}
+.device-chip {
+  display:inline-flex; align-items:center;
+  border-radius: 999px; padding: 4px 8px;
+  background: rgba(148,163,184,.10);
+  border: 1px solid var(--border);
+  font-size: 11px; color: var(--muted); font-weight: 700;
+}
+.device-chip.primary { color: var(--text); }
 .chart-meta { display:flex; flex-wrap:wrap; gap: 10px; margin: 10px 0 0; }
 .legend-chip {
   display:inline-flex; align-items:center; gap: 8px;
@@ -825,6 +980,11 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
         <div class="table-wrap"><table><thead><tr><th>Time</th><th>Type</th><th>Severity</th><th>Source</th><th>Message</th></tr></thead><tbody id="eventRows"></tbody></table></div>
       </div>
       <div class="panel">
+        <div class="panel-head"><h2>Network Devices</h2><p>LAN inventory derived from the latest Nmap export. Devices are grouped by category for a quick visual sweep.</p></div>
+        <div id="deviceMap" class="device-map"></div>
+        <div id="deviceMapEmpty" class="empty" style="display:none">No Nmap inventory data yet.</div>
+      </div>
+      <div class="panel">
         <div class="panel-head"><h2>DNS Activity Correlation</h2><p>Hourly DNS load and blocked requests plotted against average download when Pi-hole hourly data exists.</p></div>
         <div id="dnsCorrelation" class="chart-small"></div>
         <div id="dnsLegend" class="chart-meta"></div>
@@ -860,6 +1020,8 @@ const payload = JSON.parse(document.getElementById('dashboard-payload').textCont
 const rawData = payload.data;
 const rawEvents = payload.events;
 const piholeRows = payload.pihole;
+const deviceRows = payload.devices;
+const inventory = payload.inventory;
 const stats = payload.stats;
 const score = payload.score;
 const thresholds = payload.thresholds;
@@ -1055,6 +1217,79 @@ function renderTable(events) {
     messageCell.textContent = event.message || '';
     row.appendChild(messageCell);
     body.appendChild(row);
+  });
+}
+function renderDeviceMap() {
+  const map = document.getElementById('deviceMap');
+  const empty = document.getElementById('deviceMapEmpty');
+  clearNode(map);
+  if (!deviceRows.length) {
+    map.style.display = 'none';
+    empty.style.display = 'block';
+    return;
+  }
+  map.style.display = 'grid';
+  empty.style.display = 'none';
+  const order = ['Infrastructure', 'Servers', 'Computers', 'Mobile', 'Media', 'IoT', 'Unknown'];
+  order.forEach(categoryLabel => {
+    const rows = deviceRows.filter(item => item.categoryLabel === categoryLabel);
+    if (!rows.length) return;
+    const cluster = document.createElement('section');
+    cluster.className = 'device-cluster';
+    const head = document.createElement('div');
+    head.className = 'cluster-head';
+    const title = document.createElement('div');
+    title.className = 'cluster-title';
+    title.textContent = categoryLabel;
+    const count = document.createElement('div');
+    count.className = 'cluster-count';
+    count.textContent = `${rows.length} device${rows.length === 1 ? '' : 's'}`;
+    head.appendChild(title);
+    head.appendChild(count);
+    cluster.appendChild(head);
+    const list = document.createElement('div');
+    list.className = 'device-list';
+    rows.slice(0, 8).forEach(device => {
+      const card = document.createElement('article');
+      card.className = `device-card ${device.accent || 'slate'}`;
+      const name = document.createElement('div');
+      name.className = 'device-name';
+      name.textContent = device.name || device.hostname || device.ip || 'Unknown device';
+      const ip = document.createElement('div');
+      ip.className = 'device-ip';
+      ip.textContent = device.ip || device.hostname || 'n/a';
+      const meta = document.createElement('div');
+      meta.className = 'device-meta';
+      const vendor = document.createElement('span');
+      vendor.className = 'device-chip';
+      vendor.textContent = device.vendor || 'Unknown vendor';
+      meta.appendChild(vendor);
+      const portCount = document.createElement('span');
+      portCount.className = 'device-chip primary';
+      portCount.textContent = `${device.portCount || 0} open port${(device.portCount || 0) === 1 ? '' : 's'}`;
+      meta.appendChild(portCount);
+      const services = document.createElement('div');
+      services.className = 'device-services';
+      (device.services || []).slice(0, 4).forEach(service => {
+        const chip = document.createElement('span');
+        chip.className = 'device-chip';
+        chip.textContent = service;
+        services.appendChild(chip);
+      });
+      if (!services.childNodes.length && Array.isArray(device.openPorts) && device.openPorts.length) {
+        const chip = document.createElement('span');
+        chip.className = 'device-chip';
+        chip.textContent = `Ports ${device.openPorts.slice(0, 4).join(', ')}`;
+        services.appendChild(chip);
+      }
+      card.appendChild(name);
+      card.appendChild(ip);
+      card.appendChild(meta);
+      if (services.childNodes.length) card.appendChild(services);
+      list.appendChild(card);
+    });
+    cluster.appendChild(list);
+    map.appendChild(cluster);
   });
 }
 function heatmapColor(value, maxValue) {
@@ -1310,6 +1545,7 @@ function render() {
   renderScatter(data);
   renderDnsCorrelation(data);
   renderTable(events);
+  renderDeviceMap();
   renderScore();
 }
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (getThemeChoice() === 'auto') applyTheme('auto'); });
