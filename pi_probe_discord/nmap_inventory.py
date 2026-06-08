@@ -62,6 +62,101 @@ def _category_accent(category: str) -> str:
     }.get(category, "slate")
 
 
+def _load_existing_inventory(path: Path) -> dict[str, dict[str, object]]:
+    if not path.exists():
+        return {}
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    items = raw.get("devices", []) if isinstance(raw, dict) else []
+    existing: dict[str, dict[str, object]] = {}
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        key = str(item.get("id") or item.get("ip") or item.get("name") or "")
+        if key:
+            existing[key] = item
+    return existing
+
+
+def _load_existing_events(path: Path) -> list[dict[str, object]]:
+    if not path.exists():
+        return []
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    items = raw if isinstance(raw, list) else raw.get("events", []) if isinstance(raw, dict) else []
+    return [item for item in items if isinstance(item, dict)]
+
+
+def _append_change_events(config: AppConfig, now: datetime, previous: dict[str, dict[str, object]], current: list[dict[str, object]]) -> None:
+    current_map = {str(item.get("id") or item.get("ip") or item.get("name") or ""): item for item in current}
+    events = _load_existing_events(Path(config.nmap_events_json))
+    new_events: list[dict[str, object]] = []
+
+    for device_id, device in current_map.items():
+        if not device_id:
+            continue
+        old = previous.get(device_id)
+        if old is None:
+            new_events.append(
+                {
+                    "timestamp": now.isoformat(),
+                    "event_type": "new_host",
+                    "severity": "warning",
+                    "source": str(device.get("ip") or device.get("hostname") or "nmap"),
+                    "message": f"New host discovered: {device.get('name') or device.get('hostname') or device_id}",
+                }
+            )
+            continue
+        old_ports = {int(port) for port in old.get("openPorts", []) if isinstance(port, int)}
+        current_ports = {int(port) for port in device.get("openPorts", []) if isinstance(port, int)}
+        opened = sorted(current_ports - old_ports)
+        closed = sorted(old_ports - current_ports)
+        if opened:
+            new_events.append(
+                {
+                    "timestamp": now.isoformat(),
+                    "event_type": "port_opened",
+                    "severity": "warning",
+                    "source": str(device.get("ip") or device.get("hostname") or "nmap"),
+                    "message": f"Opened port(s): {', '.join(str(port) for port in opened)} on {device.get('name') or device_id}",
+                }
+            )
+        if closed:
+            new_events.append(
+                {
+                    "timestamp": now.isoformat(),
+                    "event_type": "port_closed",
+                    "severity": "info",
+                    "source": str(device.get("ip") or device.get("hostname") or "nmap"),
+                    "message": f"Closed port(s): {', '.join(str(port) for port in closed)} on {device.get('name') or device_id}",
+                }
+            )
+
+    for device_id, device in previous.items():
+        if device_id and device_id not in current_map:
+            new_events.append(
+                {
+                    "timestamp": now.isoformat(),
+                    "event_type": "host_missing",
+                    "severity": "warning",
+                    "source": str(device.get("ip") or device.get("hostname") or "nmap"),
+                    "message": f"Host missing from latest scan: {device.get('name') or device.get('hostname') or device_id}",
+                }
+            )
+
+    if not new_events:
+        return
+
+    merged = sorted(events + new_events, key=lambda item: str(item.get("timestamp") or ""))[-200:]
+    events_path = Path(config.nmap_events_json)
+    events_path.parent.mkdir(parents=True, exist_ok=True)
+    events_path.write_text(json.dumps({"events": merged}, indent=2), encoding="utf-8")
+
+
 def export_nmap_inventory_json(config: AppConfig, now: datetime) -> tuple[bool, str]:
     xml_path = Path(config.nmap_inventory_xml)
     json_path = Path(config.nmap_inventory_json)
@@ -145,13 +240,16 @@ def export_nmap_inventory_json(config: AppConfig, now: datetime) -> tuple[bool, 
             }
         )
 
+    previous = _load_existing_inventory(json_path)
+    sorted_devices = sorted(devices, key=lambda item: (item["category"], item["name"], item["ip"]))
     payload = {
         "scannedAt": now.isoformat(),
         "network": network,
         "sourceXml": str(xml_path),
-        "deviceCount": len(devices),
-        "devices": sorted(devices, key=lambda item: (item["category"], item["name"], item["ip"])),
+        "deviceCount": len(sorted_devices),
+        "devices": sorted_devices,
     }
     json_path.parent.mkdir(parents=True, exist_ok=True)
     json_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    _append_change_events(config, now, previous, sorted_devices)
     return True, f"Nmap inventory JSON written to {json_path}"

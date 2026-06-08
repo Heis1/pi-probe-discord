@@ -311,6 +311,7 @@ def _estimate_router_event_severity(event_type: str, message: str) -> str:
 def _load_router_events_from_files(config: AppConfig) -> list[RouterEvent]:
     csv_path = Path(config.router_events_csv)
     json_path = Path(config.router_events_json)
+    nmap_json_path = Path(config.nmap_events_json)
     rows: list[RouterEvent] = []
     if csv_path.exists():
         try:
@@ -331,11 +332,32 @@ def _load_router_events_from_files(config: AppConfig) -> list[RouterEvent]:
                     )
         except OSError:
             return []
-    elif json_path.exists():
+    if json_path.exists():
         try:
             raw = json.loads(json_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
-            return []
+            raw = []
+        items = raw if isinstance(raw, list) else raw.get("events", []) if isinstance(raw, dict) else []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            timestamp = _coerce_datetime(item.get("timestamp") or item.get("datetime"))
+            if timestamp is None:
+                continue
+            rows.append(
+                RouterEvent(
+                    timestamp=timestamp,
+                    event_type=str(item.get("event_type") or "event"),
+                    message=str(item.get("message") or ""),
+                    severity=str(item.get("severity") or "info"),
+                    source=str(item.get("source") or ""),
+                )
+            )
+    if nmap_json_path.exists():
+        try:
+            raw = json.loads(nmap_json_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            raw = []
         items = raw if isinstance(raw, list) else raw.get("events", []) if isinstance(raw, dict) else []
         for item in items:
             if not isinstance(item, dict):

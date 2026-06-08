@@ -50,6 +50,52 @@ class NmapInventoryTests(unittest.TestCase):
             self.assertEqual(categories["192.168.1.1"], "infrastructure")
             self.assertEqual(categories["192.168.1.120"], "media")
 
+    def test_export_nmap_inventory_json_emits_change_events(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            config = make_config(base)
+            Path(config.nmap_inventory_xml).parent.mkdir(parents=True, exist_ok=True)
+            xml_path = Path(config.nmap_inventory_xml)
+            xml_path.write_text(
+                """<?xml version="1.0"?>
+<nmaprun args="nmap -sV 192.168.1.0/24">
+  <host>
+    <status state="up"/>
+    <address addr="192.168.1.1" addrtype="ipv4"/>
+    <hostnames><hostname name="router"/></hostnames>
+    <ports><port protocol="tcp" portid="443"><state state="open"/><service name="https"/></port></ports>
+  </host>
+</nmaprun>
+""",
+                encoding="utf-8",
+            )
+            ok, _ = export_nmap_inventory_json(config, datetime(2026, 6, 8, 20, 0, 0))
+            self.assertTrue(ok)
+            events_payload = json.loads(Path(config.nmap_events_json).read_text(encoding="utf-8"))
+            self.assertEqual(events_payload["events"][0]["event_type"], "new_host")
+
+            xml_path.write_text(
+                """<?xml version="1.0"?>
+<nmaprun args="nmap -sV 192.168.1.0/24">
+  <host>
+    <status state="up"/>
+    <address addr="192.168.1.1" addrtype="ipv4"/>
+    <hostnames><hostname name="router"/></hostnames>
+    <ports>
+      <port protocol="tcp" portid="443"><state state="open"/><service name="https"/></port>
+      <port protocol="tcp" portid="53"><state state="open"/><service name="domain"/></port>
+    </ports>
+  </host>
+</nmaprun>
+""",
+                encoding="utf-8",
+            )
+            ok, _ = export_nmap_inventory_json(config, datetime(2026, 6, 8, 21, 0, 0))
+            self.assertTrue(ok)
+            events_payload = json.loads(Path(config.nmap_events_json).read_text(encoding="utf-8"))
+            event_types = [event["event_type"] for event in events_payload["events"]]
+            self.assertIn("port_opened", event_types)
+
 
 if __name__ == "__main__":
     unittest.main()

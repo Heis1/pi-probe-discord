@@ -45,6 +45,7 @@ def make_config(base_dir: Path) -> AppConfig:
         pihole_ftl_db_path=str(base_dir / "pihole-FTL.db"),
         nmap_inventory_xml=str(base_dir / "nmap" / "latest.xml"),
         nmap_inventory_json=str(base_dir / "nmap" / "latest.json"),
+        nmap_events_json=str(base_dir / "nmap" / "events.json"),
         db_path=str(base_dir / "probe.db"),
         history_retention_days=365,
         request_timeout=30,
