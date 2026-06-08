@@ -24,6 +24,145 @@ _NUMERIC_TRAP_NAMES = {
     ".1.3.6.1.6.3.1.1.5.4": "IF-MIB::linkUp",
     ".1.3.6.1.6.3.1.1.5.5": "SNMPv2-MIB::authenticationFailure",
 }
+_TRAP_OID_VARBIND = ".1.3.6.1.6.3.1.1.4.1.0"
+_UPTIME_VARBIND = ".1.3.6.1.2.1.1.3.0"
+
+
+def _read_tlv(payload: bytes, offset: int) -> tuple[int, int, bytes, int]:
+    if offset + 2 > len(payload):
+        raise ValueError("truncated ASN.1 element")
+    tag = payload[offset]
+    offset += 1
+    first_len = payload[offset]
+    offset += 1
+    if first_len & 0x80:
+        count = first_len & 0x7F
+        if count == 0 or offset + count > len(payload):
+            raise ValueError("invalid ASN.1 length")
+        length = int.from_bytes(payload[offset : offset + count], "big")
+        offset += count
+    else:
+        length = first_len
+    if offset + length > len(payload):
+        raise ValueError("ASN.1 element exceeds payload")
+    value = payload[offset : offset + length]
+    return tag, length, value, offset + length
+
+
+def _decode_oid_bytes(data: bytes) -> str:
+    if not data:
+        return ""
+    first = data[0]
+    parts = [str(first // 40), str(first % 40)]
+    value = 0
+    for byte in data[1:]:
+        value = (value << 7) | (byte & 0x7F)
+        if not (byte & 0x80):
+            parts.append(str(value))
+            value = 0
+    if value:
+        parts.append(str(value))
+    return "." + ".".join(parts)
+
+
+def _lookup_trap_name(oid: str) -> str:
+    return _NUMERIC_TRAP_NAMES.get(oid, oid)
+
+
+def _decode_octet_string(data: bytes) -> str:
+    for encoding in ("utf-8", "latin-1"):
+        try:
+            text = data.decode(encoding)
+            break
+        except UnicodeDecodeError:
+            continue
+    else:
+        text = data.decode("latin-1", errors="replace")
+    return " ".join(text.replace("\x00", " ").split())
+
+
+def _format_timeticks(value: int) -> str:
+    total_seconds = value // 100
+    days, remainder = divmod(total_seconds, 86400)
+    hours, remainder = divmod(remainder, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if days:
+        return f"{days}d {hours:02d}:{minutes:02d}:{seconds:02d}"
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+
+def _decode_snmp_value(tag: int, value: bytes) -> str:
+    if tag == 0x06:
+        oid = _decode_oid_bytes(value)
+        return _lookup_trap_name(oid)
+    if tag in {0x02, 0x41, 0x42, 0x46, 0x43}:
+        number = int.from_bytes(value, "big", signed=(tag == 0x02))
+        if tag == 0x43:
+            return _format_timeticks(number)
+        return str(number)
+    if tag == 0x04:
+        return _decode_octet_string(value)
+    if tag == 0x05:
+        return "null"
+    if tag == 0x40 and len(value) == 4:
+        return ".".join(str(part) for part in value)
+    return value.hex()
+
+
+def _decode_snmp_udp_packet(payload: bytes) -> tuple[str, str] | None:
+    try:
+        tag, _, message_value, _ = _read_tlv(payload, 0)
+        if tag != 0x30:
+            return None
+        inner_offset = 0
+        _, _, _, inner_offset = _read_tlv(message_value, inner_offset)  # version
+        _, _, community_value, inner_offset = _read_tlv(message_value, inner_offset)
+        pdu_tag, _, pdu_value, _ = _read_tlv(message_value, inner_offset)
+        if pdu_tag not in {0xA4, 0xA7}:
+            return None
+        pdu_offset = 0
+        _, _, _, pdu_offset = _read_tlv(pdu_value, pdu_offset)  # request-id
+        _, _, _, pdu_offset = _read_tlv(pdu_value, pdu_offset)  # error-status
+        _, _, _, pdu_offset = _read_tlv(pdu_value, pdu_offset)  # error-index
+        list_tag, _, varbind_list, _ = _read_tlv(pdu_value, pdu_offset)
+        if list_tag != 0x30:
+            return None
+    except ValueError:
+        return None
+
+    trap_oid = ""
+    varbind_summaries: list[str] = []
+    list_offset = 0
+    while list_offset < len(varbind_list):
+        try:
+            vb_tag, _, vb_value, list_offset = _read_tlv(varbind_list, list_offset)
+            if vb_tag != 0x30:
+                continue
+            vb_offset = 0
+            oid_tag, _, oid_value, vb_offset = _read_tlv(vb_value, vb_offset)
+            if oid_tag != 0x06:
+                continue
+            value_tag, _, value_value, _ = _read_tlv(vb_value, vb_offset)
+        except ValueError:
+            break
+        oid = _decode_oid_bytes(oid_value)
+        rendered = _decode_snmp_value(value_tag, value_value)
+        if oid == _TRAP_OID_VARBIND:
+            trap_oid = rendered
+            continue
+        if oid == _UPTIME_VARBIND:
+            varbind_summaries.append(f"uptime={rendered}")
+            continue
+        short_oid = _lookup_trap_name(oid)
+        varbind_summaries.append(f"{short_oid}={rendered}")
+
+    if not trap_oid:
+        trap_oid = "snmp_trap"
+    community = _decode_octet_string(community_value)
+    summary_parts = [f"community={community}"] if community else []
+    summary_parts.extend(varbind_summaries[:4])
+    summary = "; ".join(part for part in summary_parts if part).strip() or f"SNMP trap from {community or 'unknown community'}"
+    return trap_oid, summary[:280]
 
 
 def _parse_event_line(line: str) -> tuple[str, str, str]:
@@ -278,11 +417,17 @@ def run_router_snmp_listener_limited(
             accepted_in_window += 1
             now = datetime.now().astimezone()
             source_ip = addr[0] if addr else "unknown"
-            text = payload.decode("utf-8", errors="replace")
-            _, trap_oid, _ = _parse_event_line(text)
-            summary = text.strip().replace("\n", " ")[:280] or f"SNMP packet ({len(payload)} bytes)"
+            decoded = _decode_snmp_udp_packet(payload)
+            if decoded is not None:
+                trap_oid, summary = decoded
+                raw_line = payload.hex()
+            else:
+                text = payload.decode("utf-8", errors="replace")
+                _, trap_oid, _ = _parse_event_line(text)
+                summary = text.strip().replace("\n", " ")[:280] or f"SNMP packet ({len(payload)} bytes)"
+                raw_line = text
             with sqlite3.connect(db_path) as conn:
-                _insert_event(conn, now, source_ip, trap_oid, summary, text)
+                _insert_event(conn, now, source_ip, trap_oid, summary, raw_line)
                 inserted_since_prune += 1
                 if inserted_since_prune >= 25:
                     cutoff = (now - timedelta(days=retention_days)).isoformat()
