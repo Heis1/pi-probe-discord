@@ -1,0 +1,23 @@
+[Unit]
+Description=Pi Probe Discord LAN inventory scan
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/pi-probe-discord
+Environment=MPLCONFIGDIR=/var/lib/pi-probe-discord/.config/matplotlib
+ExecStart=/usr/bin/pi-probe-discord nmap-scan
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ReadOnlyPaths=/etc/pi-probe-discord/pihole-update-discord.env
+ReadWritePaths=/var/lib/pi-probe-discord
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=true
+MemoryDenyWriteExecute=true
+UMask=007

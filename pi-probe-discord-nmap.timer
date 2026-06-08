@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Pi Probe Discord LAN inventory scans periodically
+
+[Timer]
+OnBootSec=15min
+OnUnitActiveSec=6h
+RandomizedDelaySec=10min
+Persistent=true
+Unit=pi-probe-discord-nmap.service
+
+[Install]
+WantedBy=timers.target

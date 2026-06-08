@@ -34,6 +34,9 @@ class AppConfig:
     nmap_inventory_xml: str
     nmap_inventory_json: str
     nmap_events_json: str
+    nmap_targets: str
+    nmap_arguments: str
+    nmap_scan_minutes: int
     db_path: str
     history_retention_days: int
     request_timeout: int

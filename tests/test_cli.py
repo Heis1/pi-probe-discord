@@ -26,6 +26,11 @@ class CliTests(unittest.TestCase):
         self.assertEqual(mode, "dashboard-check")
         self.assertIsNone(extra)
 
+    def test_parse_mode_nmap_scan(self) -> None:
+        mode, extra = parse_mode(["pi-probe-discord", "nmap-scan"])
+        self.assertEqual(mode, "nmap-scan")
+        self.assertIsNone(extra)
+
 
 if __name__ == "__main__":
     unittest.main()

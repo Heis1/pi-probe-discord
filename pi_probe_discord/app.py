@@ -25,7 +25,7 @@ from .firewall import (
 )
 from .firewall_charts import generate_firewall_chart
 from .models import PiholeResult, RunRecord, SpeedResult, UpdateResult
-from .nmap_inventory import export_nmap_inventory_json
+from .nmap_inventory import export_nmap_inventory_json, run_nmap_inventory_scan
 from .pihole_hourly import export_pihole_hourly_csv
 from .router_snmp import (
     format_router_snapshot_json,
@@ -57,6 +57,20 @@ def _read_last_firewall_alert_sent_at(state_file: Path) -> datetime | None:
 def _write_last_firewall_alert_sent_at(state_file: Path, sent_at: datetime) -> None:
     state_file.parent.mkdir(parents=True, exist_ok=True)
     state_file.write_text(json.dumps({"last_sent_at": sent_at.isoformat()}), encoding="utf-8")
+
+
+def _refresh_interactive_dashboard_snapshot(config, now: datetime) -> tuple[bool, str]:
+    history = load_history_from_db(config, now)
+    run_rows = load_probe_runs_from_db(config, now, days=30)
+    export_pihole_hourly_csv(config, now, days=30)
+    export_nmap_inventory_json(config, now)
+    return generate_interactive_dashboard(
+        history,
+        now,
+        config.interactive_dashboard_file,
+        config=config,
+        run_rows=run_rows,
+    )
 
 
 def _build_firewall_alert_payload(
@@ -344,17 +358,7 @@ def run_router_listener() -> int:
     if config.interactive_dashboard_enabled:
         def _refresh_dashboard() -> None:
             now = datetime.now().astimezone()
-            history = load_history_from_db(config, now)
-            run_rows = load_probe_runs_from_db(config, now, days=30)
-            export_pihole_hourly_csv(config, now, days=30)
-            export_nmap_inventory_json(config, now)
-            generate_interactive_dashboard(
-                history,
-                now,
-                config.interactive_dashboard_file,
-                config=config,
-                run_rows=run_rows,
-            )
+            _refresh_interactive_dashboard_snapshot(config, now)
 
         on_event_inserted = _refresh_dashboard
     run_router_snmp_listener_limited(
@@ -408,6 +412,20 @@ def run_dashboard_server() -> int:
         tls_cert_file=config.interactive_dashboard_tls_cert_file,
         tls_key_file=config.interactive_dashboard_tls_key_file,
     )
+
+
+def run_nmap_scan() -> int:
+    config = load_config(require_webhook=False)
+    now = datetime.now().astimezone()
+    ok, message = run_nmap_inventory_scan(config, now)
+    if not ok:
+        raise RuntimeError(message)
+    if config.interactive_dashboard_enabled:
+        dashboard_ok, dashboard_message = _refresh_interactive_dashboard_snapshot(config, now)
+        if not dashboard_ok:
+            raise RuntimeError(dashboard_message)
+    print(message)
+    return 0
 
 
 def _run_optional_command(command: list[str]) -> tuple[bool, str]:

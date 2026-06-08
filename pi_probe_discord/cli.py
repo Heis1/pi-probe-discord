@@ -7,6 +7,7 @@ from .app import (
     render_dashboard_html,
     render_firewall_chart,
     render_firewall_report,
+    run_nmap_scan,
     render_report,
     render_router_report,
     run_dashboard_server,
@@ -36,6 +37,7 @@ def parse_mode(argv: list[str]) -> tuple[str, int | None]:
         "dashboard-serve",
         "firewall-chart",
         "dashboard-check",
+        "nmap-scan",
     }:
         return argv[1], None
     if len(argv) >= 2 and argv[1] == "dashboard-html":
@@ -48,7 +50,7 @@ def parse_mode(argv: list[str]) -> tuple[str, int | None]:
         return "doctor", None
     if len(argv) >= 2:
         raise ValueError(
-            "Usage: pihole_update_report.py [full|speedtest-only|update-only|install|firewall|firewall-chart|router|router-listener|doctor|dashboard-html|dashboard-serve|dashboard-check] | report [days]"
+            "Usage: pihole_update_report.py [full|speedtest-only|update-only|install|firewall|firewall-chart|router|router-listener|doctor|dashboard-html|dashboard-serve|dashboard-check|nmap-scan] | report [days]"
         )
     return "full", None
 
@@ -160,6 +162,12 @@ def main(argv: list[str] | None = None) -> int:
             print(str(exc), file=sys.stderr)
             return 1
         return 0
+    if mode == "nmap-scan":
+        try:
+            return run_nmap_scan()
+        except RuntimeError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
     if mode == "doctor":
         code, output = run_doctor()
         print(output)

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import shlex
+import subprocess
 from datetime import datetime
 from pathlib import Path
 import xml.etree.ElementTree as ET
@@ -253,3 +255,23 @@ def export_nmap_inventory_json(config: AppConfig, now: datetime) -> tuple[bool, 
     json_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     _append_change_events(config, now, previous, sorted_devices)
     return True, f"Nmap inventory JSON written to {json_path}"
+
+
+def run_nmap_inventory_scan(config: AppConfig, now: datetime) -> tuple[bool, str]:
+    xml_path = Path(config.nmap_inventory_xml)
+    xml_path.parent.mkdir(parents=True, exist_ok=True)
+    args = ["nmap", *shlex.split(config.nmap_arguments), config.nmap_targets, "-oX", str(xml_path)]
+    try:
+        completed = subprocess.run(args, capture_output=True, text=True, timeout=900, check=False)
+    except FileNotFoundError:
+        return False, "nmap is not installed"
+    except subprocess.TimeoutExpired:
+        return False, "nmap scan timed out"
+    if completed.returncode != 0:
+        stderr = completed.stderr.strip() or completed.stdout.strip() or f"nmap exited with {completed.returncode}"
+        return False, f"Nmap scan failed: {stderr}"
+
+    ok, message = export_nmap_inventory_json(config, now)
+    if not ok:
+        return False, message
+    return True, f"Completed nmap scan for {config.nmap_targets}; {message}"
