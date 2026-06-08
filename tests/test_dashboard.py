@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 import json
 from multiprocessing import Process
 from pathlib import Path
+import sqlite3
 import socket
 import tempfile
 import time
@@ -125,6 +126,53 @@ class DashboardTests(unittest.TestCase):
             self.assertIn("blockedQueries", html)
             self.assertEqual(status["service"], "pi-probe-discord-dashboard")
             self.assertEqual(status["test_count"], 2)
+
+    def test_generate_dashboard_includes_router_snmp_db_events(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            config = make_config(base)
+            with sqlite3.connect(config.db_path) as conn:
+                conn.execute(
+                    """
+                    CREATE TABLE router_snmp_events (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        recorded_at TEXT NOT NULL,
+                        source_ip TEXT NOT NULL,
+                        trap_oid TEXT NOT NULL,
+                        summary TEXT NOT NULL,
+                        raw_line TEXT NOT NULL
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    INSERT INTO router_snmp_events (recorded_at, source_ip, trap_oid, summary, raw_line)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        "2026-06-06T10:00:00",
+                        "192.168.1.1",
+                        "SNMPv2-MIB::warmStart",
+                        "Router warm start detected",
+                        "raw trap line",
+                    ),
+                )
+            now = datetime(2026, 6, 6, 12, 0, 0)
+            run_rows = [
+                {"recorded_at": (now - timedelta(hours=2)).isoformat(), "speed_ok": True, "download_mbps": 320.0, "upload_mbps": 44.0, "ping_ms": 4.0},
+                {"recorded_at": (now - timedelta(hours=1)).isoformat(), "speed_ok": True, "download_mbps": 240.0, "upload_mbps": 42.0, "ping_ms": 5.0},
+            ]
+            ok, _ = generate_interactive_dashboard(
+                {"download": [], "upload": [], "ping": []},
+                now,
+                config.interactive_dashboard_file,
+                config=config,
+                run_rows=run_rows,
+            )
+            self.assertTrue(ok)
+            html = Path(config.interactive_dashboard_file).read_text(encoding="utf-8")
+            self.assertIn("SNMPv2-MIB::warmStart", html)
+            self.assertIn("192.168.1.1", html)
 
     def test_dashboard_server_health_and_status_endpoints(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

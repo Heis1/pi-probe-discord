@@ -8,6 +8,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from importlib import metadata as importlib_metadata
 import json
 from pathlib import Path
+import sqlite3
 import ssl
 from typing import Any
 
@@ -234,6 +235,61 @@ def _rows_from_run_records(
 def _load_router_events(config: AppConfig | None) -> list[RouterEvent]:
     if config is None:
         return []
+    rows: list[RouterEvent] = []
+    rows.extend(_load_router_events_from_db(config))
+    rows.extend(_load_router_events_from_files(config))
+    return sorted(rows, key=lambda event: event.timestamp)
+
+
+def _load_router_events_from_db(config: AppConfig) -> list[RouterEvent]:
+    db_path = Path(config.db_path)
+    if not db_path.exists():
+        return []
+    cutoff = (datetime.now().astimezone() - timedelta(days=max(1, config.history_retention_days))).isoformat()
+    rows: list[RouterEvent] = []
+    try:
+        with sqlite3.connect(db_path) as conn:
+            result = conn.execute(
+                """
+                SELECT recorded_at, source_ip, trap_oid, summary
+                FROM router_snmp_events
+                WHERE recorded_at >= ?
+                ORDER BY recorded_at ASC
+                """,
+                (cutoff,),
+            ).fetchall()
+    except sqlite3.Error:
+        return []
+
+    for recorded_at, source_ip, trap_oid, summary in result:
+        timestamp = _coerce_datetime(recorded_at)
+        if timestamp is None:
+            continue
+        event_type = str(trap_oid or "").strip() or "snmp_trap"
+        if event_type == "unknown":
+            event_type = "snmp_trap"
+        rows.append(
+            RouterEvent(
+                timestamp=timestamp,
+                event_type=event_type,
+                message=str(summary or ""),
+                severity=_estimate_router_event_severity(event_type, str(summary or "")),
+                source=str(source_ip or "router-snmp"),
+            )
+        )
+    return rows
+
+
+def _estimate_router_event_severity(event_type: str, message: str) -> str:
+    lowered = f"{event_type} {message}".lower()
+    if "authenticationfailure" in lowered or "authfail" in lowered:
+        return "critical"
+    if "linkdown" in lowered or "warmstart" in lowered or "coldstart" in lowered:
+        return "warning"
+    return "info"
+
+
+def _load_router_events_from_files(config: AppConfig) -> list[RouterEvent]:
     csv_path = Path(config.router_events_csv)
     json_path = Path(config.router_events_json)
     rows: list[RouterEvent] = []
@@ -277,7 +333,7 @@ def _load_router_events(config: AppConfig | None) -> list[RouterEvent]:
                     source=str(item.get("source") or ""),
                 )
             )
-    return sorted(rows, key=lambda event: event.timestamp)
+    return rows
 
 
 def _load_pihole_hourly_rows(config: AppConfig | None) -> list[PiholeHourlyRow]:
@@ -743,7 +799,7 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
         <div id="timeline" class="chart"></div>
       </div>
       <div class="panel">
-        <div class="panel-head"><h2>Recent Router and Network Events</h2><p>Most recent 20 imported events from the optional router events file.</p></div>
+        <div class="panel-head"><h2>Recent Router and Network Events</h2><p>Most recent 20 SNMP or imported overlay events available to the dashboard.</p></div>
         <div class="table-wrap"><table><thead><tr><th>Time</th><th>Type</th><th>Severity</th><th>Source</th><th>Message</th></tr></thead><tbody id="eventRows"></tbody></table></div>
       </div>
       <div class="panel">

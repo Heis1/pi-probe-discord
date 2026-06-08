@@ -1,3 +1,9 @@
+pi-probe-discord (1.1.3-1) unstable; urgency=medium
+
+  * Show router SNMP database events in the interactive dashboard event panel.
+
+ -- Codex Builder <noreply@example.invalid>  Mon, 08 Jun 2026 11:15:00 +0930
+
 pi-probe-discord (1.1.2-1) unstable; urgency=medium
 
   * Fix packaged dashboard service ExecStart to use the installed CLI wrapper.
