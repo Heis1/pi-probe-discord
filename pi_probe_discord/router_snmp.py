@@ -8,7 +8,7 @@ from collections import Counter
 from datetime import datetime, timedelta
 from pathlib import Path
 import time
-from typing import Any
+from typing import Any, Callable
 
 from .models import RouterSnapshot
 
@@ -407,6 +407,7 @@ def run_router_snmp_listener_limited(
     max_events_per_minute: int,
     max_packet_bytes: int,
     retention_days: int,
+    on_event_inserted: Callable[[], None] | None = None,
 ) -> None:
     window_start = time.monotonic()
     accepted_in_window = 0
@@ -440,3 +441,8 @@ def run_router_snmp_listener_limited(
                     cutoff = (now - timedelta(days=retention_days)).isoformat()
                     conn.execute("DELETE FROM router_snmp_events WHERE recorded_at < ?", (cutoff,))
                     inserted_since_prune = 0
+            if on_event_inserted is not None:
+                try:
+                    on_event_inserted()
+                except Exception:
+                    pass

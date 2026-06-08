@@ -330,6 +330,21 @@ def run_router_listener() -> int:
     init_database(config)
     if not config.router_snmp_listener_enabled:
         raise RuntimeError("Router SNMP listener is disabled. Set PI_PROBE_ROUTER_SNMP_LISTENER_ENABLED=true.")
+    on_event_inserted = None
+    if config.interactive_dashboard_enabled:
+        def _refresh_dashboard() -> None:
+            now = datetime.now().astimezone()
+            history = load_history_from_db(config, now)
+            run_rows = load_probe_runs_from_db(config, now, days=30)
+            generate_interactive_dashboard(
+                history,
+                now,
+                config.interactive_dashboard_file,
+                config=config,
+                run_rows=run_rows,
+            )
+
+        on_event_inserted = _refresh_dashboard
     run_router_snmp_listener_limited(
         config.db_path,
         config.router_snmp_bind_host,
@@ -337,6 +352,7 @@ def run_router_listener() -> int:
         max_events_per_minute=config.router_snmp_max_events_per_minute,
         max_packet_bytes=config.router_snmp_max_packet_bytes,
         retention_days=config.history_retention_days,
+        on_event_inserted=on_event_inserted,
     )
     return 0
 
