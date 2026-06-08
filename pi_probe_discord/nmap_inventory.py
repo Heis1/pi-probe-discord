@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import shlex
 import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
 import xml.etree.ElementTree as ET
@@ -260,15 +261,34 @@ def export_nmap_inventory_json(config: AppConfig, now: datetime) -> tuple[bool, 
 def run_nmap_inventory_scan(config: AppConfig, now: datetime) -> tuple[bool, str]:
     xml_path = Path(config.nmap_inventory_xml)
     xml_path.parent.mkdir(parents=True, exist_ok=True)
-    args = ["nmap", *shlex.split(config.nmap_arguments), config.nmap_targets, "-oX", str(xml_path)]
+    nmap_args = shlex.split(config.nmap_arguments)
+    if not any(arg in {"-v", "-vv", "-vvv"} or arg.startswith("--stats-every") for arg in nmap_args):
+        nmap_args = [*nmap_args, "-v", "--stats-every", "30s"]
+    args = ["nmap", *nmap_args, config.nmap_targets, "-oX", str(xml_path)]
+    print(f"Running nmap inventory scan: {' '.join(args)}", file=sys.stderr, flush=True)
     try:
-        completed = subprocess.run(args, capture_output=True, text=True, timeout=900, check=False)
+        process = subprocess.Popen(
+            args,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
     except FileNotFoundError:
         return False, "nmap is not installed"
+    output_lines: list[str] = []
+    try:
+        assert process.stdout is not None
+        for line in process.stdout:
+            text = line.rstrip()
+            output_lines.append(text)
+            print(text, file=sys.stderr, flush=True)
+        return_code = process.wait(timeout=900)
     except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=5)
         return False, "nmap scan timed out"
-    if completed.returncode != 0:
-        stderr = completed.stderr.strip() or completed.stdout.strip() or f"nmap exited with {completed.returncode}"
+    if return_code != 0:
+        stderr = next((line for line in reversed(output_lines) if line.strip()), f"nmap exited with {return_code}")
         return False, f"Nmap scan failed: {stderr}"
 
     ok, message = export_nmap_inventory_json(config, now)
