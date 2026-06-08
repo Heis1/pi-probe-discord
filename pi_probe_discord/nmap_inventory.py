@@ -4,6 +4,7 @@ import json
 import shlex
 import subprocess
 import sys
+import re
 from datetime import datetime
 from pathlib import Path
 import xml.etree.ElementTree as ET
@@ -276,17 +277,44 @@ def run_nmap_inventory_scan(config: AppConfig, now: datetime) -> tuple[bool, str
     except FileNotFoundError:
         return False, "nmap is not installed"
     output_lines: list[str] = []
+    host_down_count = 0
+    scan_report_count = 0
     try:
         assert process.stdout is not None
         for line in process.stdout:
             text = line.rstrip()
             output_lines.append(text)
-            print(text, file=sys.stderr, flush=True)
+            if "[host down]" in text:
+                host_down_count += 1
+                continue
+            if text.startswith("Nmap scan report for "):
+                scan_report_count += 1
+                if scan_report_count > 1:
+                    print("", file=sys.stderr, flush=True)
+            if (
+                text.startswith("Discovered open port ")
+                or text.startswith("Stats: ")
+                or "Timing:" in text
+                or text.startswith("Completed ")
+                or text.startswith("Initiating ")
+                or text.startswith("Nmap scan report for ")
+                or text.startswith("PORT")
+                or text.startswith("Host is up")
+                or text.startswith("Not shown:")
+                or text.startswith("All 100 scanned ports")
+                or text.startswith("MAC Address:")
+                or text.startswith("Nmap done:")
+                or text.startswith("Raw packets sent:")
+                or text.startswith("Starting Nmap")
+            ):
+                print(text, file=sys.stderr, flush=True)
         return_code = process.wait(timeout=900)
     except subprocess.TimeoutExpired:
         process.kill()
         process.wait(timeout=5)
         return False, "nmap scan timed out"
+    if host_down_count:
+        print(f"Suppressed {host_down_count} host-down lines.", file=sys.stderr, flush=True)
     if return_code != 0:
         stderr = next((line for line in reversed(output_lines) if line.strip()), f"nmap exited with {return_code}")
         return False, f"Nmap scan failed: {stderr}"
