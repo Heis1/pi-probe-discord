@@ -3,6 +3,8 @@ from __future__ import annotations
 import sys
 
 from .app import (
+    delete_nmap_override,
+    render_nmap_devices,
     render_dashboard_check,
     render_dashboard_html,
     render_firewall_chart,
@@ -13,6 +15,7 @@ from .app import (
     run_dashboard_server,
     run_mode,
     run_router_listener,
+    save_nmap_override,
 )
 from .doctor import run_doctor
 from .installer import run_install
@@ -38,6 +41,8 @@ def parse_mode(argv: list[str]) -> tuple[str, int | None]:
         "firewall-chart",
         "dashboard-check",
         "nmap-scan",
+        "nmap-devices",
+        "nmap-override",
     }:
         return argv[1], None
     if len(argv) >= 2 and argv[1] == "dashboard-html":
@@ -50,7 +55,7 @@ def parse_mode(argv: list[str]) -> tuple[str, int | None]:
         return "doctor", None
     if len(argv) >= 2:
         raise ValueError(
-            "Usage: pihole_update_report.py [full|speedtest-only|update-only|install|firewall|firewall-chart|router|router-listener|doctor|dashboard-html|dashboard-serve|dashboard-check|nmap-scan] | report [days]"
+            "Usage: pihole_update_report.py [full|speedtest-only|update-only|install|firewall|firewall-chart|router|router-listener|doctor|dashboard-html|dashboard-serve|dashboard-check|nmap-scan|nmap-devices|nmap-override] | report [days]"
         )
     return "full", None
 
@@ -168,6 +173,78 @@ def main(argv: list[str] | None = None) -> int:
         except RuntimeError as exc:
             print(str(exc), file=sys.stderr)
             return 1
+    if mode == "nmap-devices":
+        try:
+            print(render_nmap_devices())
+        except RuntimeError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        return 0
+    if mode == "nmap-override":
+        args_tail = args[2:]
+        if not args_tail or args_tail[0] not in {"set", "clear"}:
+            print(
+                "Usage: pihole_update_report.py nmap-override set|clear [--ip IP | --mac MAC | --hostname NAME] [--name LABEL] [--category CATEGORY] [--hidden true|false]",
+                file=sys.stderr,
+            )
+            return 1
+        action = args_tail[0]
+        ip = ""
+        mac = ""
+        hostname = ""
+        name = ""
+        category = ""
+        hidden = None
+        idx = 1
+        while idx < len(args_tail):
+            token = args_tail[idx]
+            if token in {"--ip", "--mac", "--hostname", "--name", "--category", "--hidden"}:
+                if idx + 1 >= len(args_tail):
+                    print(f"{token} requires a value", file=sys.stderr)
+                    return 1
+                idx += 1
+                value = args_tail[idx]
+                if token == "--ip":
+                    ip = value
+                elif token == "--mac":
+                    mac = value
+                elif token == "--hostname":
+                    hostname = value
+                elif token == "--name":
+                    name = value
+                elif token == "--category":
+                    category = value
+                else:
+                    lowered = value.strip().lower()
+                    if lowered not in {"true", "false"}:
+                        print("--hidden must be true or false", file=sys.stderr)
+                        return 1
+                    hidden = lowered == "true"
+            else:
+                print(
+                    "Usage: pihole_update_report.py nmap-override set|clear [--ip IP | --mac MAC | --hostname NAME] [--name LABEL] [--category CATEGORY] [--hidden true|false]",
+                    file=sys.stderr,
+                )
+                return 1
+            idx += 1
+        try:
+            if action == "set":
+                print(
+                    save_nmap_override(
+                        ip=ip,
+                        mac=mac,
+                        hostname=hostname,
+                        name=name,
+                        category=category,
+                        hidden=hidden,
+                    )
+                )
+            else:
+                print(delete_nmap_override(ip=ip, mac=mac, hostname=hostname))
+        except RuntimeError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        return 0
     if mode == "doctor":
         code, output = run_doctor()
         print(output)

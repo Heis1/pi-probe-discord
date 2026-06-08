@@ -25,7 +25,13 @@ from .firewall import (
 )
 from .firewall_charts import generate_firewall_chart
 from .models import PiholeResult, RunRecord, SpeedResult, UpdateResult
-from .nmap_inventory import export_nmap_inventory_json, run_nmap_inventory_scan
+from .nmap_inventory import (
+    export_nmap_inventory_json,
+    list_nmap_devices,
+    remove_nmap_override,
+    run_nmap_inventory_scan,
+    upsert_nmap_override,
+)
 from .pihole_hourly import export_pihole_hourly_csv
 from .router_snmp import (
     format_router_snapshot_json,
@@ -426,6 +432,37 @@ def run_nmap_scan() -> int:
             raise RuntimeError(dashboard_message)
     print(message)
     return 0
+
+
+def render_nmap_devices() -> str:
+    config = load_config(require_webhook=False)
+    return list_nmap_devices(config)
+
+
+def save_nmap_override(
+    *,
+    ip: str = "",
+    mac: str = "",
+    hostname: str = "",
+    name: str = "",
+    category: str = "",
+    hidden: bool | None = None,
+) -> str:
+    config = load_config(require_webhook=False)
+    return upsert_nmap_override(
+        config,
+        ip=ip,
+        mac=mac,
+        hostname=hostname,
+        name=name,
+        category=category,
+        hidden=hidden,
+    )
+
+
+def delete_nmap_override(*, ip: str = "", mac: str = "", hostname: str = "") -> str:
+    config = load_config(require_webhook=False)
+    return remove_nmap_override(config, ip=ip, mac=mac, hostname=hostname)
 
 
 def _run_optional_command(command: list[str]) -> tuple[bool, str]:

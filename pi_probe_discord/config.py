@@ -23,6 +23,7 @@ DEFAULT_PIHOLE_FTL_DB_PATH = Path("/etc/pihole/pihole-FTL.db")
 DEFAULT_NMAP_INVENTORY_XML = DEFAULT_DATA_DIR / "nmap" / "latest.xml"
 DEFAULT_NMAP_INVENTORY_JSON = DEFAULT_DATA_DIR / "nmap" / "latest.json"
 DEFAULT_NMAP_EVENTS_JSON = DEFAULT_DATA_DIR / "nmap" / "events.json"
+DEFAULT_NMAP_OVERRIDES_JSON = DEFAULT_DATA_DIR / "nmap" / "overrides.json"
 DEFAULT_NMAP_TARGETS = "192.168.1.0/24"
 DEFAULT_NMAP_ARGUMENTS = "-F --min-rate 2000 --host-timeout 30s"
 DEFAULT_FIREWALL_LOG_PATHS = ["/var/log/ufw.log", "/var/log/kern.log", "/var/log/syslog"]
@@ -130,6 +131,7 @@ def load_config(base_dir: Path | None = None, require_webhook: bool = True) -> A
         nmap_inventory_xml=os.environ.get("PI_PROBE_NMAP_INVENTORY_XML", str(DEFAULT_NMAP_INVENTORY_XML)),
         nmap_inventory_json=os.environ.get("PI_PROBE_NMAP_INVENTORY_JSON", str(DEFAULT_NMAP_INVENTORY_JSON)),
         nmap_events_json=os.environ.get("PI_PROBE_NMAP_EVENTS_JSON", str(DEFAULT_NMAP_EVENTS_JSON)),
+        nmap_overrides_json=os.environ.get("PI_PROBE_NMAP_OVERRIDES_JSON", str(DEFAULT_NMAP_OVERRIDES_JSON)),
         nmap_targets=os.environ.get("PI_PROBE_NMAP_TARGETS", DEFAULT_NMAP_TARGETS).strip() or DEFAULT_NMAP_TARGETS,
         nmap_arguments=os.environ.get("PI_PROBE_NMAP_ARGUMENTS", DEFAULT_NMAP_ARGUMENTS).strip() or DEFAULT_NMAP_ARGUMENTS,
         nmap_scan_minutes=max(5, int(os.environ.get("PI_PROBE_NMAP_SCAN_MINUTES", "360"))),

@@ -46,6 +46,7 @@ def make_config(base_dir: Path) -> AppConfig:
         nmap_inventory_xml=str(base_dir / "nmap" / "latest.xml"),
         nmap_inventory_json=str(base_dir / "nmap" / "latest.json"),
         nmap_events_json=str(base_dir / "nmap" / "events.json"),
+        nmap_overrides_json=str(base_dir / "nmap" / "overrides.json"),
         nmap_targets="192.168.1.0/24",
         nmap_arguments="-F --min-rate 2000 --host-timeout 30s",
         nmap_scan_minutes=360,

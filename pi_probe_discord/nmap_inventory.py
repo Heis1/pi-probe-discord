@@ -7,9 +7,21 @@ import sys
 import re
 from datetime import datetime
 from pathlib import Path
+from textwrap import shorten
 import xml.etree.ElementTree as ET
 
 from .models import AppConfig
+
+
+VALID_CATEGORIES = {
+    "infrastructure",
+    "servers",
+    "computers",
+    "mobile",
+    "media",
+    "iot",
+    "unknown",
+}
 
 
 def _first_text(element: ET.Element | None, xpath: str, default: str = "") -> str:
@@ -66,6 +78,14 @@ def _category_accent(category: str) -> str:
     }.get(category, "slate")
 
 
+def _normalize_mac(value: str) -> str:
+    return re.sub(r"[^0-9a-f]", "", value.lower())
+
+
+def _inventory_key(item: dict[str, object]) -> str:
+    return str(item.get("id") or item.get("ip") or item.get("name") or "")
+
+
 def _load_existing_inventory(path: Path) -> dict[str, dict[str, object]]:
     if not path.exists():
         return {}
@@ -78,7 +98,7 @@ def _load_existing_inventory(path: Path) -> dict[str, dict[str, object]]:
     for item in items:
         if not isinstance(item, dict):
             continue
-        key = str(item.get("id") or item.get("ip") or item.get("name") or "")
+        key = _inventory_key(item)
         if key:
             existing[key] = item
     return existing
@@ -95,8 +115,61 @@ def _load_existing_events(path: Path) -> list[dict[str, object]]:
     return [item for item in items if isinstance(item, dict)]
 
 
+def _load_overrides(path: Path) -> list[dict[str, object]]:
+    if not path.exists():
+        return []
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    items = raw.get("devices", []) if isinstance(raw, dict) else raw if isinstance(raw, list) else []
+    return [item for item in items if isinstance(item, dict)]
+
+
+def _save_overrides(path: Path, items: list[dict[str, object]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"devices": items}
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def _find_matching_override(
+    overrides: list[dict[str, object]],
+    ip: str,
+    mac: str,
+    hostname: str,
+) -> dict[str, object] | None:
+    normalized_mac = _normalize_mac(mac)
+    lowered_hostname = hostname.strip().lower()
+    for override in overrides:
+        override_ip = str(override.get("ip") or "").strip()
+        if override_ip and override_ip == ip:
+            return override
+        override_mac = _normalize_mac(str(override.get("mac") or ""))
+        if override_mac and override_mac == normalized_mac:
+            return override
+        override_hostname = str(override.get("hostname") or "").strip().lower()
+        if override_hostname and override_hostname == lowered_hostname:
+            return override
+    return None
+
+
+def _apply_override(device: dict[str, object], override: dict[str, object]) -> dict[str, object]:
+    updated = dict(device)
+    if "name" in override and str(override.get("name") or "").strip():
+        updated["name"] = str(override.get("name")).strip()
+    if "hostname" in override and str(override.get("hostname") or "").strip():
+        updated["hostname"] = str(override.get("hostname")).strip()
+    if "category" in override:
+        category = str(override.get("category") or "").strip().lower()
+        if category in VALID_CATEGORIES:
+            updated["category"] = category
+            updated["categoryLabel"] = _category_label(category)
+            updated["accent"] = _category_accent(category)
+    return updated
+
+
 def _append_change_events(config: AppConfig, now: datetime, previous: dict[str, dict[str, object]], current: list[dict[str, object]]) -> None:
-    current_map = {str(item.get("id") or item.get("ip") or item.get("name") or ""): item for item in current}
+    current_map = {_inventory_key(item): item for item in current}
     events = _load_existing_events(Path(config.nmap_events_json))
     new_events: list[dict[str, object]] = []
 
@@ -119,6 +192,30 @@ def _append_change_events(config: AppConfig, now: datetime, previous: dict[str, 
         current_ports = {int(port) for port in device.get("openPorts", []) if isinstance(port, int)}
         opened = sorted(current_ports - old_ports)
         closed = sorted(old_ports - current_ports)
+        old_name = str(old.get("name") or "")
+        current_name = str(device.get("name") or "")
+        if old_name and current_name and old_name != current_name:
+            new_events.append(
+                {
+                    "timestamp": now.isoformat(),
+                    "event_type": "device_renamed",
+                    "severity": "info",
+                    "source": str(device.get("ip") or device.get("hostname") or "nmap"),
+                    "message": f"Device renamed: {old_name} -> {current_name}",
+                }
+            )
+        old_category = str(old.get("category") or "")
+        current_category = str(device.get("category") or "")
+        if old_category and current_category and old_category != current_category:
+            new_events.append(
+                {
+                    "timestamp": now.isoformat(),
+                    "event_type": "device_reclassified",
+                    "severity": "info",
+                    "source": str(device.get("ip") or device.get("hostname") or "nmap"),
+                    "message": f"Category changed: {current_name or device_id} -> {current_category}",
+                }
+            )
         if opened:
             new_events.append(
                 {
@@ -164,6 +261,7 @@ def _append_change_events(config: AppConfig, now: datetime, previous: dict[str, 
 def export_nmap_inventory_json(config: AppConfig, now: datetime) -> tuple[bool, str]:
     xml_path = Path(config.nmap_inventory_xml)
     json_path = Path(config.nmap_inventory_json)
+    overrides = _load_overrides(Path(config.nmap_overrides_json))
     if not xml_path.exists():
         return False, f"Nmap XML not found: {xml_path}"
 
@@ -224,25 +322,29 @@ def export_nmap_inventory_json(config: AppConfig, now: datetime) -> tuple[bool, 
 
         category = _guess_category(hostname, vendor, open_ports, services, ip)
         label_name = hostname if hostname and hostname != ip else vendor or ip
-        devices.append(
-            {
-                "id": ip or hostname,
-                "name": label_name,
-                "hostname": hostname,
-                "ip": ip,
-                "mac": mac,
-                "vendor": vendor,
-                "status": "up",
-                "category": category,
-                "categoryLabel": _category_label(category),
-                "accent": _category_accent(category),
-                "ports": port_entries,
-                "openPorts": open_ports,
-                "services": sorted(set(services)),
-                "portCount": len(port_entries),
-                "lastSeen": now.isoformat(),
-            }
-        )
+        device = {
+            "id": ip or hostname,
+            "name": label_name,
+            "hostname": hostname,
+            "ip": ip,
+            "mac": mac,
+            "vendor": vendor,
+            "status": "up",
+            "category": category,
+            "categoryLabel": _category_label(category),
+            "accent": _category_accent(category),
+            "ports": port_entries,
+            "openPorts": open_ports,
+            "services": sorted(set(services)),
+            "portCount": len(port_entries),
+            "lastSeen": now.isoformat(),
+        }
+        override = _find_matching_override(overrides, ip, mac, hostname)
+        if override and bool(override.get("hidden")):
+            continue
+        if override:
+            device = _apply_override(device, override)
+        devices.append(device)
 
     previous = _load_existing_inventory(json_path)
     sorted_devices = sorted(devices, key=lambda item: (item["category"], item["name"], item["ip"]))
@@ -257,6 +359,90 @@ def export_nmap_inventory_json(config: AppConfig, now: datetime) -> tuple[bool, 
     json_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     _append_change_events(config, now, previous, sorted_devices)
     return True, f"Nmap inventory JSON written to {json_path}"
+
+
+def list_nmap_devices(config: AppConfig) -> str:
+    inventory_path = Path(config.nmap_inventory_json)
+    if not inventory_path.exists():
+        return "No Nmap inventory JSON found. Run `pi-probe-discord nmap-scan` first."
+    try:
+        payload = json.loads(inventory_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return f"Could not read Nmap inventory JSON: {exc}"
+    items = payload.get("devices", []) if isinstance(payload, dict) else []
+    if not isinstance(items, list) or not items:
+        return "No devices found in the latest Nmap inventory."
+    lines = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        ip = str(item.get("ip") or "?")
+        mac = str(item.get("mac") or "-")
+        category = str(item.get("category") or "unknown")
+        name = shorten(str(item.get("name") or item.get("hostname") or ip), width=30, placeholder="...")
+        vendor = shorten(str(item.get("vendor") or "-"), width=24, placeholder="...")
+        lines.append(f"{ip:15}  {mac:17}  {category:14}  {name:30}  {vendor}")
+    header = f"{'IP':15}  {'MAC':17}  {'CATEGORY':14}  {'NAME':30}  VENDOR"
+    return "\n".join([header, "-" * len(header), *lines])
+
+
+def upsert_nmap_override(
+    config: AppConfig,
+    *,
+    ip: str = "",
+    mac: str = "",
+    hostname: str = "",
+    name: str = "",
+    category: str = "",
+    hidden: bool | None = None,
+) -> str:
+    selectors = [("ip", ip.strip()), ("mac", mac.strip()), ("hostname", hostname.strip())]
+    active_selectors = [(key, value) for key, value in selectors if value]
+    if len(active_selectors) != 1:
+        raise RuntimeError("Specify exactly one selector: --ip, --mac, or --hostname.")
+    if not name.strip() and not category.strip() and hidden is None:
+        raise RuntimeError("Provide at least one change: --name, --category, or --hidden.")
+    if category.strip() and category.strip().lower() not in VALID_CATEGORIES:
+        raise RuntimeError(f"Invalid category: {category}. Valid values: {', '.join(sorted(VALID_CATEGORIES))}")
+
+    key, value = active_selectors[0]
+    overrides_path = Path(config.nmap_overrides_json)
+    overrides = _load_overrides(overrides_path)
+    existing = _find_matching_override(
+        overrides,
+        ip if key == "ip" else "",
+        mac if key == "mac" else "",
+        hostname if key == "hostname" else "",
+    )
+    if existing is None:
+        existing = {key: value}
+        overrides.append(existing)
+    else:
+        existing.clear()
+        existing[key] = value
+    if name.strip():
+        existing["name"] = name.strip()
+    if category.strip():
+        existing["category"] = category.strip().lower()
+    if hidden is not None:
+        existing["hidden"] = hidden
+    _save_overrides(overrides_path, overrides)
+    return f"Saved Nmap override for {key}={value} in {overrides_path}"
+
+
+def remove_nmap_override(config: AppConfig, *, ip: str = "", mac: str = "", hostname: str = "") -> str:
+    selectors = [("ip", ip.strip()), ("mac", mac.strip()), ("hostname", hostname.strip())]
+    active_selectors = [(key, value) for key, value in selectors if value]
+    if len(active_selectors) != 1:
+        raise RuntimeError("Specify exactly one selector: --ip, --mac, or --hostname.")
+    key, value = active_selectors[0]
+    overrides_path = Path(config.nmap_overrides_json)
+    overrides = _load_overrides(overrides_path)
+    kept = [item for item in overrides if str(item.get(key) or "").strip() != value]
+    if len(kept) == len(overrides):
+        return f"No Nmap override found for {key}={value}"
+    _save_overrides(overrides_path, kept)
+    return f"Removed Nmap override for {key}={value}"
 
 
 def run_nmap_inventory_scan(config: AppConfig, now: datetime) -> tuple[bool, str]:

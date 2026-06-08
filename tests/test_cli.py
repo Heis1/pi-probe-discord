@@ -31,6 +31,16 @@ class CliTests(unittest.TestCase):
         self.assertEqual(mode, "nmap-scan")
         self.assertIsNone(extra)
 
+    def test_parse_mode_nmap_devices(self) -> None:
+        mode, extra = parse_mode(["pi-probe-discord", "nmap-devices"])
+        self.assertEqual(mode, "nmap-devices")
+        self.assertIsNone(extra)
+
+    def test_parse_mode_nmap_override(self) -> None:
+        mode, extra = parse_mode(["pi-probe-discord", "nmap-override"])
+        self.assertEqual(mode, "nmap-override")
+        self.assertIsNone(extra)
+
 
 if __name__ == "__main__":
     unittest.main()
