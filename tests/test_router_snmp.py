@@ -61,9 +61,9 @@ class RouterSnmpTests(unittest.TestCase):
         self.assertIsNotNone(decoded)
         trap_oid, summary = decoded or ("", "")
         self.assertEqual(trap_oid, "SNMPv2-MIB::warmStart")
-        self.assertIn("community=home-monitor", summary)
+        self.assertIn("community: home-monitor", summary)
         self.assertIn("uptime=", summary)
-        self.assertIn(".1.3.6.1.6.3.1.1.4.3.0=.1.3.6.1.4.1.16972.2.10", summary)
+        self.assertIn("enterprise_oid=.1.3.6.1.4.1.16972.2.10", summary)
 
 
 if __name__ == "__main__":

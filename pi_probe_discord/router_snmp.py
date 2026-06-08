@@ -26,6 +26,9 @@ _NUMERIC_TRAP_NAMES = {
 }
 _TRAP_OID_VARBIND = ".1.3.6.1.6.3.1.1.4.1.0"
 _UPTIME_VARBIND = ".1.3.6.1.2.1.1.3.0"
+_FRIENDLY_VARBIND_LABELS = {
+    ".1.3.6.1.6.3.1.1.4.3.0": "enterprise_oid",
+}
 
 
 def _read_tlv(payload: bytes, offset: int) -> tuple[int, int, bytes, int]:
@@ -67,6 +70,10 @@ def _decode_oid_bytes(data: bytes) -> str:
 
 def _lookup_trap_name(oid: str) -> str:
     return _NUMERIC_TRAP_NAMES.get(oid, oid)
+
+
+def _pretty_varbind_label(oid: str) -> str:
+    return _FRIENDLY_VARBIND_LABELS.get(oid, oid)
 
 
 def _decode_octet_string(data: bytes) -> str:
@@ -153,13 +160,13 @@ def _decode_snmp_udp_packet(payload: bytes) -> tuple[str, str] | None:
         if oid == _UPTIME_VARBIND:
             varbind_summaries.append(f"uptime={rendered}")
             continue
-        short_oid = _lookup_trap_name(oid)
-        varbind_summaries.append(f"{short_oid}={rendered}")
+        label = _pretty_varbind_label(oid)
+        varbind_summaries.append(f"{label}={rendered}")
 
     if not trap_oid:
         trap_oid = "snmp_trap"
     community = _decode_octet_string(community_value)
-    summary_parts = [f"community={community}"] if community else []
+    summary_parts = [f"community: {community}"] if community else []
     summary_parts.extend(varbind_summaries[:4])
     summary = "; ".join(part for part in summary_parts if part).strip() or f"SNMP trap from {community or 'unknown community'}"
     return trap_oid, summary[:280]
