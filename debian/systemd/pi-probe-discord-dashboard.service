@@ -7,7 +7,7 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=/opt/pi-probe-discord
 Environment=MPLCONFIGDIR=/var/lib/pi-probe-discord/.config/matplotlib
-ExecStart=/opt/pi-probe-discord/.venv/bin/python /opt/pi-probe-discord/pihole_update_report.py dashboard-serve
+ExecStart=/usr/bin/pi-probe-discord dashboard-serve
 Restart=on-failure
 RestartSec=5
 PrivateTmp=true

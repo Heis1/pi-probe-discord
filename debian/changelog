@@ -1,3 +1,9 @@
+pi-probe-discord (1.1.2-1) unstable; urgency=medium
+
+  * Fix packaged dashboard service ExecStart to use the installed CLI wrapper.
+
+ -- Codex Builder <noreply@example.invalid>  Mon, 08 Jun 2026 10:45:00 +0930
+
 pi-probe-discord (1.1.1-1) unstable; urgency=medium
 
   * Package the interactive dashboard systemd service.
