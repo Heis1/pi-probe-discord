@@ -30,6 +30,7 @@ class AppConfig:
     router_events_csv: str
     router_events_json: str
     pihole_hourly_csv: str
+    pihole_ftl_db_path: str
     db_path: str
     history_retention_days: int
     request_timeout: int

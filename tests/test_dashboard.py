@@ -42,6 +42,7 @@ def make_config(base_dir: Path) -> AppConfig:
         router_events_csv=str(base_dir / "events" / "router_events.csv"),
         router_events_json=str(base_dir / "events" / "router_events.json"),
         pihole_hourly_csv=str(base_dir / "pihole" / "pihole_hourly.csv"),
+        pihole_ftl_db_path=str(base_dir / "pihole-FTL.db"),
         db_path=str(base_dir / "probe.db"),
         history_retention_days=365,
         request_timeout=30,

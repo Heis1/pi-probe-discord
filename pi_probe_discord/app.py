@@ -25,6 +25,7 @@ from .firewall import (
 )
 from .firewall_charts import generate_firewall_chart
 from .models import PiholeResult, RunRecord, SpeedResult, UpdateResult
+from .pihole_hourly import export_pihole_hourly_csv
 from .router_snmp import (
     format_router_snapshot_json,
     format_router_snapshot_text,
@@ -152,6 +153,11 @@ def run_mode(mode: str) -> int:
 
     history = load_history_from_db(config, run_at)
     run_rows = load_probe_runs_from_db(config, run_at, days=30)
+    pihole_hourly_warning = ""
+    if config.interactive_dashboard_enabled:
+        ok, message = export_pihole_hourly_csv(config, run_at, days=30)
+        if not ok:
+            pihole_hourly_warning = message
 
     if mode in {"full", "speedtest-only"} and speed_result.ok:
         chart_generator = generate_premium_dashboard if config.dashboard_style == "premium" else generate_chart
@@ -170,6 +176,8 @@ def run_mode(mode: str) -> int:
         )
         if not dashboard_ok:
             speed_result.warnings.append(dashboard_message)
+        elif pihole_hourly_warning:
+            speed_result.warnings.append(pihole_hourly_warning)
 
     version_line = version_status_line(timeout=config.request_timeout) if mode == "full" else None
     firewall_snapshot = None
@@ -336,6 +344,7 @@ def run_router_listener() -> int:
             now = datetime.now().astimezone()
             history = load_history_from_db(config, now)
             run_rows = load_probe_runs_from_db(config, now, days=30)
+            export_pihole_hourly_csv(config, now, days=30)
             generate_interactive_dashboard(
                 history,
                 now,
@@ -362,6 +371,7 @@ def render_dashboard_html(output_path: str | None = None) -> str:
     now = datetime.now().astimezone()
     history = load_history_from_db(config, now)
     run_rows = load_probe_runs_from_db(config, now, days=30)
+    export_pihole_hourly_csv(config, now, days=30)
     target_path = output_path or config.interactive_dashboard_file
     ok, message = generate_interactive_dashboard(history, now, target_path, config=config, run_rows=run_rows)
     if not ok:
@@ -374,6 +384,7 @@ def run_dashboard_server() -> int:
     now = datetime.now().astimezone()
     history = load_history_from_db(config, now)
     run_rows = load_probe_runs_from_db(config, now, days=30)
+    export_pihole_hourly_csv(config, now, days=30)
     ok, message = generate_interactive_dashboard(
         history,
         now,
