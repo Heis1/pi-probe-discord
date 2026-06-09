@@ -1477,16 +1477,19 @@ function buildDeviceEditor(device) {
   return editor;
 }
 async function submitDeviceOverride(device, changes) {
+  const selector = device.mac
+    ? { mac: device.mac }
+    : device.ip
+      ? { ip: device.ip }
+      : device.hostname
+        ? { hostname: device.hostname }
+        : {};
   try {
     const response = await fetch('/api/nmap/override', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        selector: {
-          ip: device.ip || '',
-          mac: device.mac || '',
-          hostname: device.hostname || '',
-        },
+        selector,
         ...changes,
       }),
     });

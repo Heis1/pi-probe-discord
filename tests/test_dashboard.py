@@ -238,6 +238,36 @@ class DashboardTests(unittest.TestCase):
             upsert_mock.assert_called_once()
             refresh_mock.assert_called_once()
 
+    def test_apply_dashboard_nmap_override_prefers_single_mac_selector(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            config = make_config(base)
+            with patch("pi_probe_discord.config.load_config", return_value=config), \
+                 patch("pi_probe_discord.nmap_inventory.upsert_nmap_override", return_value="override saved") as upsert_mock, \
+                 patch("pi_probe_discord.storage.load_history_from_db", return_value={"download": [], "upload": [], "ping": []}), \
+                 patch("pi_probe_discord.storage.load_probe_runs_from_db", return_value=[]), \
+                 patch("pi_probe_discord.pihole_hourly.export_pihole_hourly_csv", return_value=(True, "exported")), \
+                 patch("pi_probe_discord.dashboard.generate_interactive_dashboard", return_value=(True, "dashboard refreshed")):
+                result = apply_dashboard_nmap_override(
+                    config.interactive_dashboard_file,
+                    {
+                        "action": "set",
+                        "selector": {"ip": "192.168.1.101", "mac": "78:32:1B:BD:41:08", "hostname": "dlink"},
+                        "name": "D-Link International",
+                        "category": "servers",
+                    },
+                )
+
+            self.assertTrue(result["ok"])
+            upsert_mock.assert_called_once_with(
+                config,
+                ip="192.168.1.101",
+                mac="78:32:1B:BD:41:08",
+                hostname="dlink",
+                name="D-Link International",
+                category="servers",
+            )
+
     def test_generate_dashboard_includes_router_snmp_db_events(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
