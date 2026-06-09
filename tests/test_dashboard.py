@@ -10,9 +10,16 @@ import socket
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 from urllib.request import urlopen
 
-from pi_probe_discord.dashboard import build_dashboard_summary, generate_interactive_dashboard, serve_interactive_dashboard
+from pi_probe_discord.dashboard import (
+    apply_dashboard_nmap_override,
+    build_dashboard_summary,
+    generate_interactive_dashboard,
+    run_dashboard_nmap_scan,
+    serve_interactive_dashboard,
+)
 from pi_probe_discord.models import AppConfig
 
 
@@ -127,6 +134,7 @@ class DashboardTests(unittest.TestCase):
                                 "name": "TP-Link Router",
                                 "hostname": "archer",
                                 "ip": "192.168.1.1",
+                                "mac": "AA:BB:CC:DD:EE:01",
                                 "vendor": "TP-Link",
                                 "status": "up",
                                 "category": "infrastructure",
@@ -143,6 +151,7 @@ class DashboardTests(unittest.TestCase):
                                 "name": "Pi-hole",
                                 "hostname": "pi.hole",
                                 "ip": "192.168.1.51",
+                                "mac": "AA:BB:CC:DD:EE:FF",
                                 "vendor": "Raspberry Pi",
                                 "status": "up",
                                 "category": "servers",
@@ -179,8 +188,55 @@ class DashboardTests(unittest.TestCase):
             self.assertIn("blockedQueries", html)
             self.assertIn("Network Devices", html)
             self.assertIn("TP-Link Router", html)
+            self.assertIn("Run Nmap Scan", html)
+            self.assertIn("scanTargets", html)
+            self.assertIn('"mac": "AA:BB:CC:DD:EE:FF"', html)
+            self.assertIn("Clear override", html)
             self.assertEqual(status["service"], "pi-probe-discord-dashboard")
             self.assertEqual(status["test_count"], 2)
+
+    def test_run_dashboard_nmap_scan_refreshes_dashboard(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            config = make_config(base)
+            with patch("pi_probe_discord.config.load_config", return_value=config), \
+                 patch("pi_probe_discord.nmap_inventory.run_nmap_inventory_scan", return_value=(True, "scan ok")), \
+                 patch("pi_probe_discord.storage.load_history_from_db", return_value={"download": [], "upload": [], "ping": []}), \
+                 patch("pi_probe_discord.storage.load_probe_runs_from_db", return_value=[]), \
+                 patch("pi_probe_discord.pihole_hourly.export_pihole_hourly_csv", return_value=(True, "exported")), \
+                 patch("pi_probe_discord.dashboard.generate_interactive_dashboard", return_value=(True, "dashboard refreshed")) as refresh_mock:
+                result = run_dashboard_nmap_scan(config.interactive_dashboard_file)
+
+            self.assertTrue(result["ok"])
+            self.assertTrue(result["scanOk"])
+            self.assertTrue(result["refreshOk"])
+            self.assertEqual(result["message"], "dashboard refreshed")
+            refresh_mock.assert_called_once()
+
+    def test_apply_dashboard_nmap_override_refreshes_dashboard(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            config = make_config(base)
+            with patch("pi_probe_discord.config.load_config", return_value=config), \
+                 patch("pi_probe_discord.nmap_inventory.upsert_nmap_override", return_value="override saved") as upsert_mock, \
+                 patch("pi_probe_discord.storage.load_history_from_db", return_value={"download": [], "upload": [], "ping": []}), \
+                 patch("pi_probe_discord.storage.load_probe_runs_from_db", return_value=[]), \
+                 patch("pi_probe_discord.pihole_hourly.export_pihole_hourly_csv", return_value=(True, "exported")), \
+                 patch("pi_probe_discord.dashboard.generate_interactive_dashboard", return_value=(True, "dashboard refreshed")) as refresh_mock:
+                result = apply_dashboard_nmap_override(
+                    config.interactive_dashboard_file,
+                    {
+                        "action": "set",
+                        "selector": {"ip": "192.168.1.51", "mac": "AA:BB:CC:DD:EE:FF", "hostname": "pi.hole"},
+                        "name": "Office Pi-hole",
+                        "category": "servers",
+                    },
+                )
+
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["message"], "override saved")
+            upsert_mock.assert_called_once()
+            refresh_mock.assert_called_once()
 
     def test_generate_dashboard_includes_router_snmp_db_events(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

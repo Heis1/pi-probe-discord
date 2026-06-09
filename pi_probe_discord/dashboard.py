@@ -538,6 +538,7 @@ def _build_dashboard_payload(
     thresholds: DashboardThresholds,
     output_path: str,
     public_dashboard_url: str = "",
+    config: AppConfig | None = None,
 ) -> dict[str, Any]:
     downloads: list[float] = []
     uploads: list[float] = []
@@ -678,6 +679,10 @@ def _build_dashboard_payload(
             "network": nmap_meta.get("network", ""),
             "deviceCount": nmap_meta.get("deviceCount", len(nmap_rows)),
             "categoryCounts": device_counts,
+            "scanTargets": config.nmap_targets if config else "",
+            "scanArguments": config.nmap_arguments if config else "",
+            "scanMinutes": config.nmap_scan_minutes if config else 0,
+            "actionsEnabled": bool(config and config.interactive_dashboard_enabled),
         },
         "stats": {
             "tests": len(rows),
@@ -739,6 +744,7 @@ def build_dashboard_summary(
         thresholds,
         output_path="dashboard.html",
         public_dashboard_url=(config.public_dashboard_url if config else ""),
+        config=config,
     )
     return {
         "stats": payload["stats"],
@@ -773,6 +779,7 @@ def generate_interactive_dashboard(
         thresholds,
         output_path=output_path,
         public_dashboard_url=(config.public_dashboard_url if config else ""),
+        config=config,
     )
     html = _render_interactive_dashboard_html(payload)
     output = Path(output_path)
@@ -916,6 +923,26 @@ body.theme-clean select, body.theme-clean input { background: rgba(255,255,255,.
   font-size: 11px; color: var(--muted); font-weight: 700;
 }
 .device-chip.primary { color: var(--text); }
+.device-editor {
+  margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border);
+  display:grid; grid-template-columns: 1fr 1fr; gap: 8px;
+}
+.device-editor label {
+  display:block; color: var(--muted); font-size: 11px; font-weight: 700; margin-bottom: 4px;
+}
+.device-editor input, .device-editor select {
+  width: 100%; border-radius: 10px; border: 1px solid var(--border);
+  background: var(--panel-2); color: var(--text); padding: 8px 10px; font-size: 12px;
+}
+.device-editor .span-2 { grid-column: 1 / -1; }
+.device-actions { display:flex; gap: 8px; grid-column: 1 / -1; }
+.mini-button {
+  appearance:none; border: 1px solid var(--border); border-radius: 10px;
+  background: var(--panel-2); color: var(--text); padding: 8px 10px; font-size: 12px; font-weight: 800; cursor: pointer;
+}
+.mini-button.primary { background: rgba(56,189,248,.18); }
+.mini-button.warn { background: rgba(245,158,11,.14); }
+.device-status { grid-column: 1 / -1; color: var(--muted); font-size: 11px; line-height: 1.4; min-height: 16px; }
 .chart-meta { display:flex; flex-wrap:wrap; gap: 10px; margin: 10px 0 0; }
 .legend-chip {
   display:inline-flex; align-items:center; gap: 8px;
@@ -924,6 +951,16 @@ body.theme-clean select, body.theme-clean input { background: rgba(255,255,255,.
   color: var(--muted); font-size: 12px; font-weight: 700;
 }
 .legend-swatch { width: 12px; height: 12px; border-radius: 999px; display:inline-block; }
+.action-row { display:flex; flex-wrap:wrap; gap: 10px; align-items:center; margin: 12px 0 14px; }
+.action-button {
+  appearance:none; border: 1px solid var(--border); border-radius: 12px;
+  background: linear-gradient(135deg, rgba(56,189,248,.20), rgba(34,197,94,.18));
+  color: var(--text); padding: 10px 14px; font-size: 13px; font-weight: 800;
+  cursor: pointer; transition: transform .15s ease, opacity .15s ease, border-color .15s ease;
+}
+.action-button:hover { transform: translateY(-1px); border-color: rgba(56,189,248,.45); }
+.action-button:disabled { opacity: .6; cursor: progress; transform: none; }
+.helper-text { color: var(--muted); font-size: 12px; line-height: 1.4; }
 .table-wrap { overflow:auto; border-radius: 16px; border: 1px solid var(--border); }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: top; }
@@ -1003,6 +1040,11 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
       </div>
       <div class="panel">
         <div class="panel-head"><h2>Network Devices</h2><p>LAN inventory derived from the latest Nmap export. Devices are grouped by category for a quick visual sweep.</p></div>
+        <div id="inventoryMeta" class="chart-meta"></div>
+        <div class="action-row">
+          <button id="nmapScanButton" class="action-button" type="button">Run Nmap Scan</button>
+          <div id="nmapScanStatus" class="helper-text"></div>
+        </div>
         <div id="deviceMap" class="device-map"></div>
         <div id="deviceMapEmpty" class="empty" style="display:none">No Nmap inventory data yet.</div>
       </div>
@@ -1241,6 +1283,32 @@ function renderTable(events) {
     body.appendChild(row);
   });
 }
+function renderInventoryMeta() {
+  const metaWrap = document.getElementById('inventoryMeta');
+  const status = document.getElementById('nmapScanStatus');
+  const button = document.getElementById('nmapScanButton');
+  clearNode(metaWrap);
+  const items = [];
+  if (inventory.scannedAt) items.push(`Scanned ${new Date(inventory.scannedAt).toLocaleString()}`);
+  if (inventory.network) items.push(`Network ${inventory.network}`);
+  items.push(`${inventory.deviceCount || 0} discovered`);
+  if (inventory.scanTargets) items.push(`Targets ${inventory.scanTargets}`);
+  if (inventory.scanMinutes) items.push(`Schedule ${inventory.scanMinutes} min`);
+  items.forEach(label => {
+    const chip = document.createElement('div');
+    chip.className = 'legend-chip';
+    chip.textContent = label;
+    metaWrap.appendChild(chip);
+  });
+  button.disabled = !(window.location.protocol.startsWith('http') && inventory.actionsEnabled);
+  if (!window.location.protocol.startsWith('http')) {
+    status.textContent = 'Serve the dashboard to enable Nmap scan actions.';
+  } else if (!inventory.actionsEnabled) {
+    status.textContent = inventory.scanArguments ? `Configured scan: nmap ${inventory.scanArguments} ${inventory.scanTargets}` : 'Nmap scan actions are unavailable for this dashboard.';
+  } else if (!status.textContent) {
+    status.textContent = inventory.scanArguments ? `Configured scan: nmap ${inventory.scanArguments} ${inventory.scanTargets}` : 'Run a fresh scan to update the device inventory.';
+  }
+}
 function renderDeviceMap() {
   const map = document.getElementById('deviceMap');
   const empty = document.getElementById('deviceMapEmpty');
@@ -1286,6 +1354,12 @@ function renderDeviceMap() {
       vendor.className = 'device-chip';
       vendor.textContent = device.vendor || 'Unknown vendor';
       meta.appendChild(vendor);
+      if (device.mac) {
+        const mac = document.createElement('span');
+        mac.className = 'device-chip';
+        mac.textContent = `MAC ${device.mac}`;
+        meta.appendChild(mac);
+      }
       const portCount = document.createElement('span');
       portCount.className = 'device-chip primary';
       portCount.textContent = `${device.portCount || 0} open port${(device.portCount || 0) === 1 ? '' : 's'}`;
@@ -1308,11 +1382,145 @@ function renderDeviceMap() {
       card.appendChild(ip);
       card.appendChild(meta);
       if (services.childNodes.length) card.appendChild(services);
+      if (inventory.actionsEnabled) card.appendChild(buildDeviceEditor(device));
       list.appendChild(card);
     });
     cluster.appendChild(list);
     map.appendChild(cluster);
   });
+}
+function buildDeviceEditor(device) {
+  const editor = document.createElement('form');
+  editor.className = 'device-editor';
+
+  const nameWrap = document.createElement('div');
+  const nameLabel = document.createElement('label');
+  nameLabel.textContent = 'Display name';
+  const nameInput = document.createElement('input');
+  nameInput.type = 'text';
+  nameInput.value = device.name || '';
+  nameWrap.appendChild(nameLabel);
+  nameWrap.appendChild(nameInput);
+
+  const categoryWrap = document.createElement('div');
+  const categoryLabel = document.createElement('label');
+  categoryLabel.textContent = 'Category';
+  const categorySelect = document.createElement('select');
+  const categories = [
+    ['infrastructure', 'Infrastructure'],
+    ['servers', 'Servers'],
+    ['computers', 'Computers'],
+    ['mobile', 'Mobile'],
+    ['media', 'Media'],
+    ['iot', 'IoT'],
+    ['unknown', 'Unknown'],
+  ];
+  categories.forEach(([value, label]) => {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = label;
+    option.selected = device.category === value;
+    categorySelect.appendChild(option);
+  });
+  categoryWrap.appendChild(categoryLabel);
+  categoryWrap.appendChild(categorySelect);
+
+  const status = document.createElement('div');
+  status.className = 'device-status';
+  status.textContent = device.hostname ? `Host ${device.hostname}` : 'Edit override';
+
+  const actions = document.createElement('div');
+  actions.className = 'device-actions';
+  const save = document.createElement('button');
+  save.type = 'submit';
+  save.className = 'mini-button primary';
+  save.textContent = 'Save';
+  const clear = document.createElement('button');
+  clear.type = 'button';
+  clear.className = 'mini-button warn';
+  clear.textContent = 'Clear override';
+  actions.appendChild(save);
+  actions.appendChild(clear);
+
+  editor.appendChild(nameWrap);
+  editor.appendChild(categoryWrap);
+  editor.appendChild(actions);
+  editor.appendChild(status);
+
+  editor.addEventListener('submit', async event => {
+    event.preventDefault();
+    save.disabled = true;
+    clear.disabled = true;
+    status.textContent = 'Saving device override...';
+    const response = await submitDeviceOverride(device, {
+      action: 'set',
+      name: nameInput.value.trim(),
+      category: categorySelect.value,
+    });
+    status.textContent = response.message;
+    if (response.ok) window.location.reload();
+    save.disabled = false;
+    clear.disabled = false;
+  });
+
+  clear.addEventListener('click', async () => {
+    save.disabled = true;
+    clear.disabled = true;
+    status.textContent = 'Clearing device override...';
+    const response = await submitDeviceOverride(device, { action: 'clear' });
+    status.textContent = response.message;
+    if (response.ok) window.location.reload();
+    save.disabled = false;
+    clear.disabled = false;
+  });
+
+  return editor;
+}
+async function submitDeviceOverride(device, changes) {
+  try {
+    const response = await fetch('/api/nmap/override', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        selector: {
+          ip: device.ip || '',
+          mac: device.mac || '',
+          hostname: device.hostname || '',
+        },
+        ...changes,
+      }),
+    });
+    const result = await response.json();
+    return {
+      ok: Boolean(response.ok && result.ok),
+      message: result.message || 'Override request completed.',
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      message: `Override failed: ${error instanceof Error ? error.message : 'request error'}`,
+    };
+  }
+}
+async function triggerNmapScan() {
+  const button = document.getElementById('nmapScanButton');
+  const status = document.getElementById('nmapScanStatus');
+  if (button.disabled) return;
+  button.disabled = true;
+  status.textContent = 'Running Nmap scan and refreshing dashboard...';
+  try {
+    const response = await fetch('/api/nmap/scan', { method: 'POST' });
+    const result = await response.json();
+    status.textContent = result.message || 'Nmap scan finished.';
+    if (!response.ok || !result.ok) {
+      button.disabled = false;
+      return;
+    }
+    window.location.reload();
+  } catch (error) {
+    status.textContent = `Nmap scan failed: ${error instanceof Error ? error.message : 'request error'}`;
+    button.disabled = false;
+  }
 }
 function heatmapColor(value, maxValue) {
   if (value === null || value === undefined) return 'rgba(148,163,184,.20)';
@@ -1567,6 +1775,7 @@ function render() {
   renderScatter(data);
   renderDnsCorrelation(data);
   renderTable(events);
+  renderInventoryMeta();
   renderDeviceMap();
   renderScore();
 }
@@ -1580,6 +1789,7 @@ document.getElementById('threshold').addEventListener('input', render);
 document.getElementById('dayFilter').addEventListener('change', render);
 document.getElementById('severityFilter').addEventListener('change', render);
 document.getElementById('eventTypeFilter').addEventListener('change', render);
+document.getElementById('nmapScanButton').addEventListener('click', triggerNmapScan);
 initFilters();
 applyTheme(getThemeChoice());
 </script>
@@ -1603,7 +1813,7 @@ def generate_premium_dashboard(history: dict[str, list[dict[str, Any]]], now: da
     ]
     thresholds = _build_thresholds(None)
     classified_rows = _rows_from_run_records(data_rows, history, now, thresholds, days=30)
-    payload = _build_dashboard_payload(classified_rows, [], [], thresholds, output_path=chart_path)
+    payload = _build_dashboard_payload(classified_rows, [], [], [], {}, thresholds, output_path=chart_path)
     stats = payload["stats"]
     figure = plt.figure(figsize=(16, 10), facecolor="#111827")
     gs = figure.add_gridspec(3, 12, height_ratios=[1.0, 2.2, 2.0], hspace=0.28, wspace=0.42)
@@ -1759,6 +1969,83 @@ def _version_string() -> str:
         return "unknown"
 
 
+def run_dashboard_nmap_scan(output_path: str) -> dict[str, Any]:
+    from .config import load_config
+    from .nmap_inventory import run_nmap_inventory_scan
+    from .pihole_hourly import export_pihole_hourly_csv
+    from .storage import load_history_from_db, load_probe_runs_from_db
+
+    config = load_config()
+    now = datetime.now().astimezone()
+    scan_ok, scan_message = run_nmap_inventory_scan(config, now)
+    response: dict[str, Any] = {
+        "ok": False,
+        "scanOk": scan_ok,
+        "refreshOk": False,
+        "message": scan_message,
+    }
+    if not scan_ok:
+        return response
+
+    history = load_history_from_db(config, now)
+    run_rows = load_probe_runs_from_db(config, now, days=30)
+    export_pihole_hourly_csv(config, now, days=30)
+    refresh_ok, refresh_message = generate_interactive_dashboard(
+        history,
+        now,
+        output_path,
+        config=config,
+        run_rows=run_rows,
+    )
+    response["refreshOk"] = refresh_ok
+    response["ok"] = refresh_ok
+    response["message"] = refresh_message if refresh_ok else f"{scan_message}; dashboard refresh failed: {refresh_message}"
+    return response
+
+
+def apply_dashboard_nmap_override(output_path: str, payload: dict[str, Any]) -> dict[str, Any]:
+    from .config import load_config
+    from .nmap_inventory import remove_nmap_override, upsert_nmap_override
+    from .pihole_hourly import export_pihole_hourly_csv
+    from .storage import load_history_from_db, load_probe_runs_from_db
+
+    config = load_config()
+    selector = payload.get("selector") if isinstance(payload.get("selector"), dict) else {}
+    ip = str(selector.get("ip") or "").strip()
+    mac = str(selector.get("mac") or "").strip()
+    hostname = str(selector.get("hostname") or "").strip()
+    action = str(payload.get("action") or "set").strip().lower()
+    try:
+        if action == "clear":
+            message = remove_nmap_override(config, ip=ip, mac=mac, hostname=hostname)
+        else:
+            message = upsert_nmap_override(
+                config,
+                ip=ip,
+                mac=mac,
+                hostname=hostname,
+                name=str(payload.get("name") or "").strip(),
+                category=str(payload.get("category") or "").strip(),
+            )
+    except RuntimeError as exc:
+        return {"ok": False, "message": str(exc)}
+
+    now = datetime.now().astimezone()
+    history = load_history_from_db(config, now)
+    run_rows = load_probe_runs_from_db(config, now, days=30)
+    export_pihole_hourly_csv(config, now, days=30)
+    refresh_ok, refresh_message = generate_interactive_dashboard(
+        history,
+        now,
+        output_path,
+        config=config,
+        run_rows=run_rows,
+    )
+    if not refresh_ok:
+        return {"ok": False, "message": f"{message}; dashboard refresh failed: {refresh_message}"}
+    return {"ok": True, "message": message}
+
+
 def serve_interactive_dashboard(
     output_path: str,
     host: str,
@@ -1775,6 +2062,14 @@ def serve_interactive_dashboard(
     class DashboardHandler(SimpleHTTPRequestHandler):
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             super().__init__(*args, directory=str(directory), **kwargs)
+
+        def _send_json(self, status: HTTPStatus, payload: dict[str, Any]) -> None:
+            body = json.dumps(payload).encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
 
         def do_GET(self) -> None:  # noqa: N802
             if self.path == "/healthz":
@@ -1809,6 +2104,29 @@ def serve_interactive_dashboard(
             if self.path in {"/", ""}:
                 self.path = f"/{file_path.name}"
             return super().do_GET()
+
+        def do_POST(self) -> None:  # noqa: N802
+            if self.path == "/api/nmap/scan":
+                result = run_dashboard_nmap_scan(str(file_path))
+                status = HTTPStatus.OK if result.get("ok") else HTTPStatus.INTERNAL_SERVER_ERROR
+                self._send_json(status, result)
+                return
+            if self.path == "/api/nmap/override":
+                try:
+                    content_length = int(self.headers.get("Content-Length", "0"))
+                except ValueError:
+                    content_length = 0
+                try:
+                    raw = self.rfile.read(content_length) if content_length > 0 else b"{}"
+                    payload = json.loads(raw.decode("utf-8"))
+                except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                    self._send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "message": "Invalid JSON payload"})
+                    return
+                result = apply_dashboard_nmap_override(str(file_path), payload if isinstance(payload, dict) else {})
+                status = HTTPStatus.OK if result.get("ok") else HTTPStatus.BAD_REQUEST
+                self._send_json(status, result)
+                return
+            self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "message": "Not found"})
 
     server = ThreadingHTTPServer((host, port), DashboardHandler)
     scheme = "http"
