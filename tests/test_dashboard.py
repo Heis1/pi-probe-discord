@@ -219,6 +219,7 @@ class DashboardTests(unittest.TestCase):
             config = make_config(base)
             with patch("pi_probe_discord.config.load_config", return_value=config), \
                  patch("pi_probe_discord.nmap_inventory.upsert_nmap_override", return_value="override saved") as upsert_mock, \
+                 patch("pi_probe_discord.nmap_inventory.export_nmap_inventory_json", return_value=(True, "inventory refreshed")), \
                  patch("pi_probe_discord.storage.load_history_from_db", return_value={"download": [], "upload": [], "ping": []}), \
                  patch("pi_probe_discord.storage.load_probe_runs_from_db", return_value=[]), \
                  patch("pi_probe_discord.pihole_hourly.export_pihole_hourly_csv", return_value=(True, "exported")), \
@@ -244,6 +245,7 @@ class DashboardTests(unittest.TestCase):
             config = make_config(base)
             with patch("pi_probe_discord.config.load_config", return_value=config), \
                  patch("pi_probe_discord.nmap_inventory.upsert_nmap_override", return_value="override saved") as upsert_mock, \
+                 patch("pi_probe_discord.nmap_inventory.export_nmap_inventory_json", return_value=(True, "inventory refreshed")), \
                  patch("pi_probe_discord.storage.load_history_from_db", return_value={"download": [], "upload": [], "ping": []}), \
                  patch("pi_probe_discord.storage.load_probe_runs_from_db", return_value=[]), \
                  patch("pi_probe_discord.pihole_hourly.export_pihole_hourly_csv", return_value=(True, "exported")), \

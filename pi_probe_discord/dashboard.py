@@ -2008,7 +2008,7 @@ def run_dashboard_nmap_scan(output_path: str) -> dict[str, Any]:
 
 def apply_dashboard_nmap_override(output_path: str, payload: dict[str, Any]) -> dict[str, Any]:
     from .config import load_config
-    from .nmap_inventory import remove_nmap_override, upsert_nmap_override
+    from .nmap_inventory import export_nmap_inventory_json, remove_nmap_override, upsert_nmap_override
     from .pihole_hourly import export_pihole_hourly_csv
     from .storage import load_history_from_db, load_probe_runs_from_db
 
@@ -2034,6 +2034,9 @@ def apply_dashboard_nmap_override(output_path: str, payload: dict[str, Any]) -> 
         return {"ok": False, "message": str(exc)}
 
     now = datetime.now().astimezone()
+    export_ok, export_message = export_nmap_inventory_json(config, now)
+    if not export_ok:
+        return {"ok": False, "message": f"{message}; inventory refresh failed: {export_message}"}
     history = load_history_from_db(config, now)
     run_rows = load_probe_runs_from_db(config, now, days=30)
     export_pihole_hourly_csv(config, now, days=30)
