@@ -1,3 +1,11 @@
+pi-probe-discord (1.1.7-1) unstable; urgency=medium
+
+  * Ignore impossible ping outliers in dashboard summaries and charts.
+  * Restore the full network device inventory in the interactive dashboard.
+  * Clarify dashboard health headings, score labels, and layout balance.
+
+ -- Codex Builder <noreply@example.invalid>  Tue, 23 Jun 2026 17:18:09 +0930
+
 pi-probe-discord (1.1.6-1) unstable; urgency=medium
 
   * Auto-regenerate the interactive dashboard when live SNMP traps arrive.

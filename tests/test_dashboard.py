@@ -107,6 +107,19 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(stats["longestOutageStreak"], 2)
         self.assertGreater(summary["score"]["total"], 0)
 
+    def test_build_dashboard_summary_ignores_impossible_ping_outlier(self) -> None:
+        now = datetime(2026, 6, 6, 12, 0, 0)
+        config = make_config(Path(tempfile.mkdtemp()))
+        run_rows = [
+            {"recorded_at": (now - timedelta(hours=2)).isoformat(), "speed_ok": True, "download_mbps": 320.0, "upload_mbps": 44.0, "ping_ms": 4.0},
+            {"recorded_at": (now - timedelta(hours=1)).isoformat(), "speed_ok": True, "download_mbps": 318.0, "upload_mbps": 43.0, "ping_ms": 8250.06},
+        ]
+        summary = build_dashboard_summary({"download": [], "upload": [], "ping": []}, now, config=config, run_rows=run_rows)
+        stats = summary["stats"]
+        self.assertEqual(stats["avgPing"], 4.0)
+        self.assertEqual(stats["failedCount"], 1)
+        self.assertEqual(stats["outageCount"], 1)
+
     def test_generate_dashboard_writes_status_and_optional_data(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)

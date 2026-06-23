@@ -31,6 +31,7 @@ except ImportError:
 DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 STATUS_FILE_NAME = "status.json"
 SERVICE_NAME = "pi-probe-discord-dashboard"
+MAX_REASONABLE_PING_MS = 1000.0
 
 
 @dataclass
@@ -136,6 +137,15 @@ def _safe_float(value: Any) -> float | None:
         return None
 
 
+def _sanitize_ping_ms(value: Any) -> float | None:
+    ping = _safe_float(value)
+    if ping is None:
+        return None
+    if ping < 0 or ping > MAX_REASONABLE_PING_MS:
+        return None
+    return ping
+
+
 def _coerce_datetime(value: Any) -> datetime | None:
     if isinstance(value, datetime):
         return value
@@ -215,6 +225,8 @@ def _merge_history(history: dict[str, list[dict[str, Any]]], now: datetime, days
             if row is None:
                 row = DashboardRow(timestamp=moment, download=None, upload=None, ping=None)
                 merged[key] = row
+            if metric_name == "ping":
+                value = _sanitize_ping_ms(value)
             setattr(row, metric_name, value)
     return sorted(merged.values(), key=lambda row: row.timestamp)
 
@@ -240,7 +252,7 @@ def _rows_from_run_records(
                     timestamp=recorded_at,
                     download=_safe_float(item.get("download_mbps")),
                     upload=_safe_float(item.get("upload_mbps")),
-                    ping=_safe_float(item.get("ping_ms")),
+                    ping=_sanitize_ping_ms(item.get("ping_ms")),
                     speed_ok=bool(item.get("speed_ok", True)),
                     speed_summary=str(item.get("speed_summary") or ""),
                     speed_warnings=str(item.get("speed_warnings") or ""),
@@ -839,7 +851,7 @@ body {
   min-height: 100vh;
 }
 body.theme-clean { background: linear-gradient(180deg, #f8fafc, var(--bg)); }
-.wrap { max-width: 1560px; margin: 0 auto; padding: 24px; }
+.wrap { max-width: 1720px; margin: 0 auto; padding: 24px; }
 .hero { display:grid; grid-template-columns: 1.2fr .8fr; gap: 18px; margin-bottom: 18px; }
 .hero, .panel, .kpi { backdrop-filter: blur(12px); }
 .panel, .kpi, .controls {
@@ -857,7 +869,32 @@ body.theme-clean { background: linear-gradient(180deg, #f8fafc, var(--bg)); }
 .kpi .value { margin-top: 10px; font-size: 30px; font-weight: 900; letter-spacing: -.05em; }
 .kpi .sub { margin-top: 8px; color: var(--muted); font-size: 12px; line-height: 1.35; }
 .hero-side { padding: 20px 22px; display:flex; flex-direction:column; gap: 14px; }
-.hero-side .verdict { font-size: 22px; font-weight: 900; letter-spacing: -.03em; }
+.hero-side.status-normal {
+  border-color: rgba(34,197,94,.42);
+  box-shadow: 0 24px 70px rgba(34,197,94,.10);
+}
+.hero-side.status-degraded {
+  border-color: rgba(245,158,11,.42);
+  box-shadow: 0 24px 70px rgba(245,158,11,.10);
+}
+.hero-side.status-outage, .hero-side.status-failed {
+  border-color: rgba(239,68,68,.42);
+  box-shadow: 0 24px 70px rgba(239,68,68,.12);
+}
+.hero-side.status-no_data {
+  border-color: rgba(148,163,184,.28);
+}
+.verdict-badge {
+  display:inline-flex; align-items:center; align-self:flex-start;
+  padding: 7px 12px; border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: 12px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase;
+}
+.hero-side.status-normal .verdict-badge { background: rgba(34,197,94,.14); color: #86efac; }
+.hero-side.status-degraded .verdict-badge { background: rgba(245,158,11,.16); color: #fcd34d; }
+.hero-side.status-outage .verdict-badge, .hero-side.status-failed .verdict-badge { background: rgba(239,68,68,.16); color: #fca5a5; }
+.hero-side.status-no_data .verdict-badge { background: rgba(148,163,184,.14); color: #cbd5e1; }
+.hero-side .verdict { font-size: 26px; font-weight: 900; letter-spacing: -.03em; line-height: 1.1; }
 .hero-side .copy { color: var(--muted); font-size: 14px; line-height: 1.45; }
 .hero-side .chiprow { display:flex; flex-wrap:wrap; gap: 10px; }
 .chip { padding: 9px 12px; border-radius: 999px; background: var(--panel-2); border: 1px solid var(--border); font-size: 13px; }
@@ -865,9 +902,10 @@ body.theme-clean { background: linear-gradient(180deg, #f8fafc, var(--bg)); }
 label { display:block; color: var(--muted); font-size: 12px; font-weight: 700; margin-bottom: 6px; text-transform: uppercase; letter-spacing: .06em; }
 select, input { width: 100%; border: 1px solid var(--border); background: rgba(2,6,23,.28); color: var(--text); border-radius: 12px; padding: 10px 11px; }
 body.theme-clean select, body.theme-clean input { background: rgba(255,255,255,.72); }
-.grid { display:grid; grid-template-columns: 1.65fr .9fr; gap: 18px; }
+.grid { display:grid; grid-template-columns: minmax(0, 1.3fr) minmax(360px, .95fr); gap: 18px; align-items:start; }
 .stack { display:grid; gap: 18px; }
 .panel { padding: 18px; }
+.score-section { margin-top: 18px; }
 .panel-head { margin-bottom: 12px; }
 .panel-head h2 { margin: 0; font-size: 24px; letter-spacing: -.03em; }
 .panel-head p { margin: 4px 0 0; color: var(--muted); font-size: 13px; line-height: 1.4; }
@@ -982,6 +1020,12 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
 .score-grid { display:grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 14px; }
 .score-card { padding: 14px; border: 1px solid var(--border); border-radius: 16px; background: var(--panel-2); }
 .score-card b { display:block; font-size: 26px; margin-top: 6px; }
+.score-card .mini { margin-top: 6px; color: var(--muted); font-size: 12px; line-height: 1.35; }
+.score-card.total-card {
+  background: linear-gradient(135deg, rgba(56,189,248,.12), rgba(34,197,94,.10));
+  border-color: rgba(56,189,248,.28);
+}
+.score-card.total-card b { font-size: 34px; }
 .note-list { margin: 0; padding-left: 18px; color: var(--muted); font-size: 13px; line-height: 1.45; }
 .empty { color: var(--muted); font-size: 14px; padding: 18px; border: 1px dashed var(--border); border-radius: 16px; }
 .linkline { margin-top: auto; }
@@ -1005,6 +1049,7 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
       </div>
     </div>
     <div class="hero-side panel">
+      <div class="verdict-badge" id="verdictBadge"></div>
       <div class="verdict" id="verdict"></div>
       <div class="copy" id="verdictCopy"></div>
       <div class="chiprow">
@@ -1049,39 +1094,51 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
         <div id="deviceMapEmpty" class="empty" style="display:none">No Nmap inventory data yet.</div>
       </div>
       <div class="panel">
+        <div class="panel-head"><h2>Traffic-Light Heatmap</h2><p>Hourly average download. Green exceeds the good threshold, amber is acceptable, red is below target.</p></div>
+        <div id="heatmap" class="chart-small"></div>
+      </div>
+    </div>
+    <div class="stack">
+      <div class="panel">
+        <div class="panel-head"><h2>Latency Relationship</h2><p>Scatter of download versus ping. Failed, degraded, and outage tests are emphasised.</p></div>
+        <div id="scatter" class="chart-small"></div>
+      </div>
+      <div class="panel">
         <div class="panel-head"><h2>DNS Activity Correlation</h2><p>Hourly DNS load and blocked requests plotted against average download when Pi-hole hourly data exists.</p></div>
         <div id="dnsCorrelation" class="chart-small"></div>
         <div id="dnsLegend" class="chart-meta"></div>
         <div id="dnsEmpty" class="empty" style="display:none">No Pi-hole hourly data yet.</div>
       </div>
     </div>
-    <div class="stack">
-      <div class="panel">
-        <div class="panel-head"><h2>Traffic-Light Heatmap</h2><p>Hourly average download. Green exceeds the good threshold, amber is acceptable, red is below target.</p></div>
-        <div id="heatmap" class="chart-small"></div>
-      </div>
-      <div class="panel">
-        <div class="panel-head"><h2>Latency Relationship</h2><p>Scatter of download versus ping. Failed, degraded, and outage tests are emphasised.</p></div>
-        <div id="scatter" class="chart-small"></div>
-      </div>
-      <div class="panel">
-        <div class="panel-head"><h2>Score Breakdown</h2><p>Explainable score with speed, upload, latency, and stability components.</p></div>
-        <div class="score-grid">
-          <div class="score-card"><div class="label">Speed</div><b id="scoreSpeed"></b></div>
-          <div class="score-card"><div class="label">Upload</div><b id="scoreUpload"></b></div>
-          <div class="score-card"><div class="label">Latency</div><b id="scoreLatency"></b></div>
-          <div class="score-card"><div class="label">Stability</div><b id="scoreStability"></b></div>
-        </div>
-        <div class="score-card" style="margin-bottom:12px"><div class="label">Total quality score</div><b id="scoreTotal"></b></div>
-        <ul class="note-list" id="scoreNotes"></ul>
-      </div>
+  </section>
+  <section class="panel score-section">
+    <div class="panel-head"><h2>Connection Score</h2><p>One overall score plus four plain-English components so you can see what is actually dragging the connection down.</p></div>
+    <div class="score-grid">
+      <div class="score-card"><div class="label">Download Strength</div><b id="scoreSpeed"></b><div class="mini" id="scoreSpeedNote"></div></div>
+      <div class="score-card"><div class="label">Upload Consistency</div><b id="scoreUpload"></b><div class="mini" id="scoreUploadNote"></div></div>
+      <div class="score-card"><div class="label">Latency</div><b id="scoreLatency"></b><div class="mini" id="scoreLatencyNote"></div></div>
+      <div class="score-card"><div class="label">Reliability</div><b id="scoreStability"></b><div class="mini" id="scoreStabilityNote"></div></div>
     </div>
+    <div class="score-card total-card" style="margin-bottom:12px"><div class="label">Overall Connection Score</div><b id="scoreTotal"></b><div class="mini" id="scoreSummary"></div></div>
+    <ul class="note-list" id="scoreNotes"></ul>
   </section>
 </div>
 <script id="dashboard-payload" type="application/json">__PAYLOAD_JSON__</script>
 <script>
 const payload = JSON.parse(document.getElementById('dashboard-payload').textContent);
-const rawData = payload.data;
+function sanitizePing(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return null;
+  const ping = Number(value);
+  if (ping < 0 || ping > 1000) return null;
+  return ping;
+}
+function normalizeDashboardRows(rows) {
+  return rows.map(row => ({
+    ...row,
+    ping: sanitizePing(row.ping)
+  }));
+}
+const rawData = normalizeDashboardRows(payload.data);
 const rawEvents = payload.events;
 const piholeRows = payload.pihole;
 const deviceRows = payload.devices;
@@ -1124,6 +1181,12 @@ function svgEl(name, attrs = {}) {
 }
 function clearNode(node) {
   while (node.firstChild) node.removeChild(node.firstChild);
+}
+function setStatusClass(node, prefix, value) {
+  Array.from(node.classList)
+    .filter(name => name.startsWith(prefix))
+    .forEach(name => node.classList.remove(name));
+  node.classList.add(prefix + value);
 }
 function chartTheme() {
   const dark = !document.body.classList.contains('theme-clean');
@@ -1339,7 +1402,7 @@ function renderDeviceMap() {
     cluster.appendChild(head);
     const list = document.createElement('div');
     list.className = 'device-list';
-    rows.slice(0, 8).forEach(device => {
+    rows.forEach(device => {
       const card = document.createElement('article');
       card.className = `device-card ${device.accent || 'slate'}`;
       const name = document.createElement('div');
@@ -1725,6 +1788,15 @@ function renderScore() {
   setText('scoreLatency', score.latency.toFixed(1) + ' / 20');
   setText('scoreStability', score.stability.toFixed(1) + ' / 20');
   setText('scoreTotal', score.total.toFixed(1) + ' / 100');
+  setText('scoreSpeedNote', `Median ${stats.medianDown.toFixed(1)} Mbps, ${stats.pctThreshold.toFixed(1)}% at target`);
+  setText('scoreUploadNote', `Average ${stats.avgUp.toFixed(1)} Mbps across valid tests`);
+  setText('scoreLatencyNote', `Average ${stats.avgPing.toFixed(2)} ms, high-ping threshold ${thresholds.highPingMs.toFixed(0)} ms`);
+  setText('scoreStabilityNote', `${stats.failedCount} failed, ${stats.outageCount} outage, ${stats.degradedCount} degraded`);
+  let summary = 'Healthy overall. No obvious recurring problem in the current window.';
+  if (score.total < 55) summary = 'Poor overall. Multiple signals are outside the expected range.';
+  else if (score.total < 70) summary = 'Below normal overall. One or more components need attention.';
+  else if (score.total < 85) summary = 'Usable overall, but not especially clean or consistent.';
+  setText('scoreSummary', summary);
   const notes = document.getElementById('scoreNotes');
   clearNode(notes);
   score.explanation.forEach(line => {
@@ -1736,6 +1808,7 @@ function renderScore() {
 function renderSummary(data) {
   const threshold = Number(document.getElementById('threshold').value || thresholds.degradedDownloadMbps);
   const downloads = data.map(item => item.download).filter(v => v !== null);
+  const heroSide = document.querySelector('.hero-side');
   setText('subtitle', `Interactive history view · dataset ${stats.start} – ${stats.end} · generated ${meta.generated_at}`);
   setText('kpiMedian', (quantile(downloads, .5) || 0).toFixed(1) + ' Mbps');
   setText('kpiUpload', average(data.map(item => item.upload)).toFixed(1) + ' Mbps');
@@ -1755,8 +1828,37 @@ function renderSummary(data) {
     return best;
   })();
   setText('kpiStreak', `${longest} longest outage streak`);
-  setText('verdict', stats.verdictLabel);
-  setText('verdictCopy', `Latest result: ${stats.latestDownload ?? 'n/a'} Mbps down, ${stats.latestUpload ?? 'n/a'} Mbps up, ${stats.latestPing ?? 'n/a'} ms ping.`);
+  if (heroSide) setStatusClass(heroSide, 'status-', stats.verdict || 'no_data');
+  const verdictBadgeMap = {
+    normal: 'Healthy',
+    degraded: 'Below Normal',
+    outage: 'Problem',
+    failed: 'Failed Test',
+    no_data: 'No Data'
+  };
+  const verdictHeadlineMap = {
+    normal: 'Connection is performing normally',
+    degraded: 'Connection is slower than expected',
+    outage: 'Connection problem detected',
+    failed: 'Latest connection test failed',
+    no_data: 'No connection data yet'
+  };
+  const latestDown = stats.latestDownload !== null && stats.latestDownload !== undefined ? `${Number(stats.latestDownload).toFixed(1)} Mbps down` : 'download n/a';
+  const latestUp = stats.latestUpload !== null && stats.latestUpload !== undefined ? `${Number(stats.latestUpload).toFixed(1)} Mbps up` : 'upload n/a';
+  const latestPing = stats.latestPing !== null && stats.latestPing !== undefined ? `${Number(stats.latestPing).toFixed(2)} ms ping` : 'ping n/a';
+  setText('verdictBadge', verdictBadgeMap[stats.verdict] || 'Status');
+  setText('verdict', verdictHeadlineMap[stats.verdict] || stats.verdictLabel);
+  if (stats.verdict === 'normal') {
+    setText('verdictCopy', `Latest result: ${latestDown}, ${latestUp}, ${latestPing}. Average ping is ${stats.avgPing.toFixed(2)} ms and ${stats.pctThreshold.toFixed(1)}% of tests met the ${threshold} Mbps target.`);
+  } else if (stats.verdict === 'degraded') {
+    setText('verdictCopy', `Latest result: ${latestDown}, ${latestUp}, ${latestPing}. The line is usable, but recent performance is under the ${threshold} Mbps target more often than it should be.`);
+  } else if (stats.verdict === 'outage') {
+    setText('verdictCopy', `Latest result: ${latestDown}, ${latestUp}, ${latestPing}. Recent results include outage-level behaviour or very high latency.`);
+  } else if (stats.verdict === 'failed') {
+    setText('verdictCopy', `The latest scheduled test did not complete. Recent window still shows ${stats.failedCount} failed tests and ${stats.outageCount} outage-classified results.`);
+  } else {
+    setText('verdictCopy', 'The dashboard does not have enough recent data to judge the line yet.');
+  }
   setText('worstWindow', `Worst window: ${stats.worstWindow}`);
   const linkWrap = document.getElementById('dashboardLinkWrap');
   clearNode(linkWrap);
