@@ -8,6 +8,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from importlib import metadata as importlib_metadata
 import json
 from pathlib import Path
+import re
 import sqlite3
 import ssl
 from typing import Any
@@ -2069,9 +2070,26 @@ def generate_premium_dashboard(history: dict[str, list[dict[str, Any]]], now: da
 
 def _version_string() -> str:
     try:
+        from .version_check import current_version
+
+        package_version = current_version()
+    except Exception:
+        package_version = None
+    if package_version:
+        return package_version
+    try:
         return importlib_metadata.version("pi-probe-discord")
     except importlib_metadata.PackageNotFoundError:
+        pass
+    changelog_path = Path(__file__).resolve().parents[1] / "debian" / "changelog"
+    try:
+        first_line = changelog_path.read_text(encoding="utf-8").splitlines()[0]
+    except (OSError, IndexError):
         return "unknown"
+    match = re.search(r"\(([^)]+)\)", first_line)
+    if not match:
+        return "unknown"
+    return match.group(1)
 
 
 def run_dashboard_nmap_scan(output_path: str) -> dict[str, Any]:

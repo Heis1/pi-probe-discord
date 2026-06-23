@@ -14,6 +14,7 @@ from unittest.mock import patch
 from urllib.request import urlopen
 
 from pi_probe_discord.dashboard import (
+    _version_string,
     apply_dashboard_nmap_override,
     build_dashboard_summary,
     generate_interactive_dashboard,
@@ -119,6 +120,10 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(stats["avgPing"], 4.0)
         self.assertEqual(stats["failedCount"], 1)
         self.assertEqual(stats["outageCount"], 1)
+
+    def test_version_string_falls_back_to_dpkg_version(self) -> None:
+        with patch("pi_probe_discord.version_check.current_version", return_value="1.1.7-1"):
+            self.assertEqual(_version_string(), "1.1.7-1")
 
     def test_generate_dashboard_writes_status_and_optional_data(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
