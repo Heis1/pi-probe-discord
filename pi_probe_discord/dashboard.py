@@ -1190,6 +1190,7 @@ body.theme-clean { background: linear-gradient(180deg, #f8fafc, var(--bg)); }
 label { display:block; color: var(--muted); font-size: 12px; font-weight: 700; margin-bottom: 6px; text-transform: uppercase; letter-spacing: .06em; }
 select, input { width: 100%; border: 1px solid var(--border); background: rgba(2,6,23,.28); color: var(--text); border-radius: 12px; padding: 10px 11px; }
 body.theme-clean select, body.theme-clean input { background: rgba(255,255,255,.72); }
+.diag-section { margin-bottom: 18px; }
 .grid { display:grid; grid-template-columns: minmax(0, 1.3fr) minmax(360px, .95fr); gap: 18px; align-items:start; }
 .stack { display:grid; gap: 18px; }
 .panel { padding: 18px; }
@@ -1334,48 +1335,44 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
 .score-card.total-card b { font-size: 34px; }
 .note-list { margin: 0; padding-left: 18px; color: var(--muted); font-size: 13px; line-height: 1.45; }
 .diag-shell { display:grid; gap: 14px; }
-.diag-topline {
-  display:grid;
-  grid-template-columns: minmax(0, 1.5fr) repeat(3, minmax(120px, .6fr));
-  gap: 12px;
-}
+.diag-topline { display:grid; grid-template-columns: minmax(0, 1.6fr) repeat(3, minmax(150px, .55fr)); gap: 12px; }
 .diag-hero {
   border: 1px solid var(--border);
-  border-radius: 18px;
-  padding: 14px 16px;
+  border-radius: 20px;
+  padding: 18px 20px;
   background: linear-gradient(135deg, rgba(56,189,248,.12), rgba(15,23,42,.10));
 }
 .diag-kicker { color: var(--muted); font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
-.diag-cause { margin-top: 6px; font-size: 22px; font-weight: 900; letter-spacing: -.03em; line-height: 1.1; }
-.diag-summary { margin-top: 8px; color: var(--muted); font-size: 14px; line-height: 1.45; }
+.diag-cause { margin-top: 8px; font-size: 28px; font-weight: 900; letter-spacing: -.04em; line-height: 1.05; max-width: 24ch; }
+.diag-summary { margin-top: 10px; color: var(--muted); font-size: 15px; line-height: 1.5; max-width: 72ch; }
 .diag-stat {
   border: 1px solid var(--border);
-  border-radius: 18px;
-  padding: 14px;
+  border-radius: 20px;
+  padding: 16px;
   background: var(--panel-2);
 }
 .diag-stat .label { color: var(--muted); font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
-.diag-stat .value { margin-top: 10px; font-size: 20px; font-weight: 900; letter-spacing: -.03em; line-height: 1.1; }
+.diag-stat .value { margin-top: 10px; font-size: 22px; font-weight: 900; letter-spacing: -.03em; line-height: 1.1; }
 .diag-stat .mini { margin-top: 6px; color: var(--muted); font-size: 12px; line-height: 1.35; }
 .diag-actions-row { display:flex; flex-wrap:wrap; gap: 10px; align-items:center; }
 .diag-toggle {
   appearance:none; border: 1px solid var(--border); border-radius: 999px;
-  background: var(--panel-2); color: var(--text); padding: 8px 12px;
+  background: var(--panel-2); color: var(--text); padding: 10px 14px;
   font-size: 12px; font-weight: 800; cursor: pointer;
 }
 .diag-toggle.active { background: rgba(56,189,248,.16); border-color: rgba(56,189,248,.40); }
-.diag-grid { display:grid; grid-template-columns: minmax(0, 1fr) minmax(260px, .8fr); gap: 14px; }
+.diag-grid { display:grid; grid-template-columns: minmax(0, 1.2fr) minmax(300px, .85fr); gap: 14px; }
 .diag-list { display:grid; gap: 10px; }
 .diag-item {
   border: 1px solid var(--border);
   border-radius: 16px;
-  padding: 12px 13px;
+  padding: 14px 15px;
   background: var(--panel-2);
 }
 .diag-item-head { display:flex; justify-content:space-between; gap: 10px; align-items:flex-start; }
-.diag-item-label { font-size: 13px; font-weight: 800; }
-.diag-item-value { margin-top: 6px; font-size: 14px; line-height: 1.45; }
-.diag-item-hint { margin-top: 6px; color: var(--muted); font-size: 12px; line-height: 1.4; }
+.diag-item-label { font-size: 14px; font-weight: 800; }
+.diag-item-value { margin-top: 7px; font-size: 15px; line-height: 1.5; }
+.diag-item-hint { margin-top: 7px; color: var(--muted); font-size: 13px; line-height: 1.45; }
 .diag-pill {
   display:inline-flex; align-items:center; justify-content:center;
   min-width: 72px; padding: 5px 10px; border-radius: 999px;
@@ -1443,6 +1440,48 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
     <div><label>Theme</label><select id="theme"><option value="auto">Auto / system</option><option value="premium">Premium dark</option><option value="clean">Clean light</option></select></div>
   </section>
 
+  <section class="panel diag-section">
+    <div class="panel-head"><div><h2>Network Fault Diagnosis</h2><p>Correlates router traps, device scan changes, and inventory freshness to highlight likely LAN-side failures.</p></div><div class="panel-stamp" id="diagnosisFreshness"></div></div>
+    <div class="diag-shell">
+      <div class="diag-topline">
+        <div class="diag-hero">
+          <div class="diag-kicker">Likely Cause</div>
+          <div class="diag-cause" id="diagCause"></div>
+          <div class="diag-summary" id="diagHeadline"></div>
+        </div>
+        <div class="diag-stat">
+          <div class="label">Confidence</div>
+          <div class="value" id="diagConfidence"></div>
+          <div class="mini" id="diagConfidenceNote"></div>
+        </div>
+        <div class="diag-stat">
+          <div class="label">Primary Suspect</div>
+          <div class="value" id="diagSuspect"></div>
+          <div class="mini" id="diagScanAge"></div>
+        </div>
+        <div class="diag-stat">
+          <div class="label">Evidence</div>
+          <div class="value" id="diagEvidenceSummary"></div>
+          <div class="mini" id="diagLinkDown"></div>
+        </div>
+      </div>
+      <div class="diag-actions-row">
+        <button id="diagEvidenceToggle" class="diag-toggle active" type="button">Evidence</button>
+        <button id="diagActionsToggle" class="diag-toggle" type="button">Next Actions</button>
+        <button id="diagFocusEvents" class="diag-toggle" type="button">Focus Related Events</button>
+        <button id="diagFocusExtender" class="diag-toggle" type="button">Show Suspect Device</button>
+      </div>
+      <div class="diag-grid">
+        <div id="diagPrimaryList" class="diag-list"></div>
+        <div class="diag-sidebox">
+          <h3 id="diagSideTitle"></h3>
+          <p id="diagSideIntro"></p>
+          <div id="diagSideBody" class="copyline"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <section class="grid">
     <div class="stack">
       <div class="panel">
@@ -1450,48 +1489,7 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
         <div id="timeline" class="chart"></div>
       </div>
       <div class="panel">
-        <div class="panel-head"><div><h2>Network Fault Diagnosis</h2><p>Correlates router traps, device scan changes, and inventory freshness to highlight likely LAN-side failures.</p></div><div class="panel-stamp" id="diagnosisFreshness"></div></div>
-        <div class="diag-shell">
-          <div class="diag-topline">
-            <div class="diag-hero">
-              <div class="diag-kicker">Likely Cause</div>
-              <div class="diag-cause" id="diagCause"></div>
-              <div class="diag-summary" id="diagHeadline"></div>
-            </div>
-            <div class="diag-stat">
-              <div class="label">Confidence</div>
-              <div class="value" id="diagConfidence"></div>
-              <div class="mini" id="diagConfidenceNote"></div>
-            </div>
-            <div class="diag-stat">
-              <div class="label">Primary Suspect</div>
-              <div class="value" id="diagSuspect"></div>
-              <div class="mini" id="diagScanAge"></div>
-            </div>
-            <div class="diag-stat">
-              <div class="label">Evidence</div>
-              <div class="value" id="diagEvidenceSummary"></div>
-              <div class="mini" id="diagLinkDown"></div>
-            </div>
-          </div>
-          <div class="diag-actions-row">
-            <button id="diagEvidenceToggle" class="diag-toggle active" type="button">Evidence</button>
-            <button id="diagActionsToggle" class="diag-toggle" type="button">Next Actions</button>
-            <button id="diagFocusEvents" class="diag-toggle" type="button">Focus Related Events</button>
-            <button id="diagFocusExtender" class="diag-toggle" type="button">Show Suspect Device</button>
-          </div>
-          <div class="diag-grid">
-            <div id="diagPrimaryList" class="diag-list"></div>
-            <div class="diag-sidebox">
-              <h3 id="diagSideTitle"></h3>
-              <p id="diagSideIntro"></p>
-              <div id="diagSideBody" class="copyline"></div>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div class="panel">
-        <div class="panel-head"><div><h2>Recent Router and Network Events</h2><p>Most recent 20 SNMP or imported overlay events available to the dashboard.</p></div><div class="panel-stamp" id="eventsFreshness"></div></div>
+        <div class="panel-head"><div><h2>Recent Router and Network Events</h2><p>Most recent 10 SNMP or imported overlay events available to the dashboard.</p></div><div class="panel-stamp" id="eventsFreshness"></div></div>
         <div class="table-wrap"><table><thead><tr><th>Time</th><th>Type</th><th>Severity</th><th>Source</th><th>Message</th></tr></thead><tbody id="eventRows"></tbody></table></div>
       </div>
       <div class="panel">
@@ -1769,7 +1767,7 @@ function renderTable(events) {
     body.appendChild(row);
     return;
   }
-  events.slice(-20).reverse().forEach(event => {
+  events.slice(-10).reverse().forEach(event => {
     const row = document.createElement('tr');
     const timeCell = document.createElement('td');
     timeCell.className = 'time-cell';
