@@ -27,6 +27,16 @@ ROUTER_REPORT_COMMAND = [
     "/usr/bin/pi-probe-discord",
     "router",
 ]
+NETWORK_DIAG_COMMAND = [
+    "/usr/bin/pi-probe-discord",
+    "network-diagnose",
+]
+START_NMAPSCAN_COMMAND = [
+    "/bin/systemctl",
+    "start",
+    "--no-block",
+    "pi-probe-discord-nmap.service",
+]
 START_FULLREPORT_COMMAND = [
     "/bin/systemctl",
     "start",
@@ -37,6 +47,7 @@ START_FULLREPORT_COMMAND = [
 UNAUTHORISED_MESSAGE = "You are not authorised to run this command."
 STARTED_MESSAGE = "Speed test started. Results will post shortly."
 FULLREPORT_STARTED_MESSAGE = "Full report started. Results will post shortly."
+NMAPSCAN_STARTED_MESSAGE = "LAN inventory scan started. The interactive dashboard will refresh after the scan completes."
 
 
 @dataclass
@@ -112,6 +123,14 @@ class PiProbeDiscordBot(discord.Client):
         async def router(interaction: discord.Interaction) -> None:
             await self.handle_router_report(interaction)
 
+        @self.tree.command(name="networkdiag", description="Summarise likely LAN-side fault indicators.")
+        async def networkdiag(interaction: discord.Interaction) -> None:
+            await self.handle_network_diagnosis(interaction)
+
+        @self.tree.command(name="nmapscan", description="Trigger a fresh LAN inventory scan.")
+        async def nmapscan(interaction: discord.Interaction) -> None:
+            await self.handle_service_start(interaction, START_NMAPSCAN_COMMAND, NMAPSCAN_STARTED_MESSAGE, "nmapscan")
+
         if self.config.command_guild_id is not None:
             guild = discord.Object(id=self.config.command_guild_id)
             self.tree.clear_commands(guild=guild)
@@ -119,10 +138,10 @@ class PiProbeDiscordBot(discord.Client):
             await self.tree.sync(guild=guild)
             self.tree.clear_commands(guild=None)
             await self.tree.sync()
-            self.logger.info("Synced /speedtest, /fullreport, /firewall, and /router to guild %s", self.config.command_guild_id)
+            self.logger.info("Synced /speedtest, /fullreport, /firewall, /router, /networkdiag, and /nmapscan to guild %s", self.config.command_guild_id)
         else:
             await self.tree.sync()
-            self.logger.info("Synced /speedtest, /fullreport, /firewall, and /router globally")
+            self.logger.info("Synced /speedtest, /fullreport, /firewall, /router, /networkdiag, and /nmapscan globally")
 
     def _startup_self_check(self) -> None:
         config_path = Path("/etc/pi-probe-discord/pihole-update-discord.env")
@@ -270,6 +289,38 @@ class PiProbeDiscordBot(discord.Client):
         except subprocess.TimeoutExpired:
             self.logger.error("Timed out rendering router report for %s", username)
             await interaction.followup.send("Router report timed out.", ephemeral=True)
+            return
+
+        if len(report) > 1900:
+            report = report[:1900] + "\n..."
+        await interaction.followup.send(f"```text\n{report}\n```")
+
+    async def handle_network_diagnosis(self, interaction: discord.Interaction) -> None:
+        user = interaction.user
+        username = f"{user} ({user.id})"
+        if user.id not in self.config.allowed_user_ids:
+            self.logger.warning("Unauthorized /networkdiag attempt by %s", username)
+            await interaction.response.send_message(UNAUTHORISED_MESSAGE, ephemeral=True)
+            return
+
+        self.logger.info("Authorized /networkdiag request by %s", username)
+        await interaction.response.defer(thinking=False)
+        try:
+            completed = subprocess.run(
+                NETWORK_DIAG_COMMAND,
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=25,
+            )
+            report = completed.stdout.strip() or "No network diagnosis output."
+        except subprocess.CalledProcessError as exc:
+            self.logger.error("Failed to render network diagnosis for %s: returncode=%s stderr=%s", username, exc.returncode, exc.stderr.strip())
+            await interaction.followup.send("Network diagnosis is unavailable right now.", ephemeral=True)
+            return
+        except subprocess.TimeoutExpired:
+            self.logger.error("Timed out rendering network diagnosis for %s", username)
+            await interaction.followup.send("Network diagnosis timed out.", ephemeral=True)
             return
 
         if len(report) > 1900:

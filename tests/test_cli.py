@@ -41,6 +41,11 @@ class CliTests(unittest.TestCase):
         self.assertEqual(mode, "nmap-override")
         self.assertIsNone(extra)
 
+    def test_parse_mode_network_diagnose(self) -> None:
+        mode, extra = parse_mode(["pi-probe-discord", "network-diagnose"])
+        self.assertEqual(mode, "network-diagnose")
+        self.assertIsNone(extra)
+
 
 if __name__ == "__main__":
     unittest.main()

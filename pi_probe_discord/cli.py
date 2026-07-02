@@ -9,6 +9,7 @@ from .app import (
     render_dashboard_html,
     render_firewall_chart,
     render_firewall_report,
+    render_network_diagnosis,
     run_nmap_scan,
     render_report,
     render_router_report,
@@ -43,6 +44,7 @@ def parse_mode(argv: list[str]) -> tuple[str, int | None]:
         "nmap-scan",
         "nmap-devices",
         "nmap-override",
+        "network-diagnose",
     }:
         return argv[1], None
     if len(argv) >= 2 and argv[1] == "dashboard-html":
@@ -55,7 +57,7 @@ def parse_mode(argv: list[str]) -> tuple[str, int | None]:
         return "doctor", None
     if len(argv) >= 2:
         raise ValueError(
-            "Usage: pihole_update_report.py [full|speedtest-only|update-only|install|firewall|firewall-chart|router|router-listener|doctor|dashboard-html|dashboard-serve|dashboard-check|nmap-scan|nmap-devices|nmap-override] | report [days]"
+            "Usage: pihole_update_report.py [full|speedtest-only|update-only|install|firewall|firewall-chart|router|router-listener|doctor|dashboard-html|dashboard-serve|dashboard-check|nmap-scan|nmap-devices|nmap-override|network-diagnose] | report [days]"
         )
     return "full", None
 
@@ -176,6 +178,17 @@ def main(argv: list[str] | None = None) -> int:
     if mode == "nmap-devices":
         try:
             print(render_nmap_devices())
+        except RuntimeError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        return 0
+    if mode == "network-diagnose":
+        as_json = len(args) >= 3 and args[2] == "--json"
+        if len(args) >= 3 and not as_json:
+            print("Usage: pihole_update_report.py network-diagnose [--json]", file=sys.stderr)
+            return 1
+        try:
+            print(render_network_diagnosis(as_json=as_json))
         except RuntimeError as exc:
             print(str(exc), file=sys.stderr)
             return 1

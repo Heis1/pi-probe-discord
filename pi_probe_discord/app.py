@@ -11,9 +11,12 @@ import requests
 from .charts import generate_chart
 from .config import load_config
 from .dashboard import (
+    build_network_diagnosis,
     build_dashboard_summary,
     generate_interactive_dashboard,
     generate_premium_dashboard,
+    load_dashboard_events,
+    load_dashboard_nmap_inventory,
     serve_interactive_dashboard,
 )
 from .discord_client import build_embed, post_webhook_file, post_webhook_json
@@ -353,6 +356,67 @@ def render_router_report(window_hours: int | None = None, as_json: bool = False)
     if as_json:
         return format_router_snapshot_json(snapshot)
     return format_router_snapshot_text(snapshot)
+
+
+def render_network_diagnosis(as_json: bool = False) -> str:
+    config = load_config(require_webhook=False)
+    now = datetime.now().astimezone()
+    if not Path(config.nmap_inventory_json).exists() and Path(config.nmap_inventory_xml).exists():
+        export_nmap_inventory_json(config, now)
+    router_source = (
+        f"udp://{config.router_snmp_bind_host}:{config.router_snmp_bind_port}"
+        if config.router_snmp_listener_enabled
+        else config.router_snmp_log_path
+    )
+    if config.router_snmp_enabled and config.router_snmp_listener_enabled:
+        router_source = f"{router_source} + {config.router_snmp_log_path}"
+    router_snapshot = load_router_snapshot(
+        config.db_path,
+        enabled=(config.router_snmp_enabled or config.router_snmp_listener_enabled),
+        ingest_source=router_source,
+        window_hours=config.router_snmp_window_hours,
+        top_n=config.router_snmp_top_n,
+        now=now,
+        oid_severity_map=config.router_snmp_oid_severity_map,
+    )
+    event_rows = load_dashboard_events(config)
+    nmap_rows, nmap_meta = load_dashboard_nmap_inventory(config)
+    diagnosis = build_network_diagnosis(
+        event_rows,
+        nmap_rows,
+        nmap_meta,
+        now=now,
+        router_snapshot=router_snapshot,
+        config=config,
+    )
+    if as_json:
+        return json.dumps(diagnosis, indent=2)
+
+    lines = [
+        f"Network diagnosis: {diagnosis['headline']}",
+        f"Inventory age: {diagnosis['scanAge']}",
+        f"Visible devices: {diagnosis['inventoryDeviceCount']}",
+        f"Infrastructure devices: {diagnosis['infrastructureCount']}",
+        f"Recent host-missing events: {diagnosis['hostMissingCount']}",
+        f"Recent port-closed events: {diagnosis['portClosedCount']}",
+        f"Recent linkDown traps: {diagnosis['linkDownCount']}",
+        f"Recent router restart traps: {diagnosis['restartCount']}",
+    ]
+    suspect_devices = diagnosis.get("suspectDevices", [])
+    if suspect_devices:
+        rendered = ", ".join(
+            device.get("name") or device.get("hostname") or device.get("ip") or "unknown"
+            for device in suspect_devices
+            if isinstance(device, dict)
+        )
+        lines.append(f"Suspect extender-like devices: {rendered}")
+    lines.append("")
+    lines.append("Indicators:")
+    lines.extend(f"- {item}" for item in diagnosis.get("indicators", []))
+    lines.append("")
+    lines.append("Recommended actions:")
+    lines.extend(f"- {item}" for item in diagnosis.get("recommendations", []))
+    return "\n".join(lines)
 
 
 def run_router_listener() -> int:

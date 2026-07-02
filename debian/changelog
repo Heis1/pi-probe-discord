@@ -1,3 +1,11 @@
+pi-probe-discord (1.1.9-1) unstable; urgency=medium
+
+  * Add a shared network diagnosis report to the dashboard, CLI, and Discord bot.
+  * Add /networkdiag and /nmapscan bot commands for faster LAN fault triage.
+  * Allow AF_NETLINK in packaged dashboard and Nmap scan services so Nmap inventory scans work under systemd hardening.
+
+ -- Codex Builder <noreply@example.invalid>  Thu, 02 Jul 2026 18:02:00 +0930
+
 pi-probe-discord (1.1.8-1) unstable; urgency=medium
 
   * Make the SNMP listener installable and auto-enable it when listener mode

@@ -14,14 +14,17 @@ from unittest.mock import patch
 from urllib.request import urlopen
 
 from pi_probe_discord.dashboard import (
+    NmapDeviceRow,
+    RouterEvent,
     _version_string,
     apply_dashboard_nmap_override,
+    build_network_diagnosis,
     build_dashboard_summary,
     generate_interactive_dashboard,
     run_dashboard_nmap_scan,
     serve_interactive_dashboard,
 )
-from pi_probe_discord.models import AppConfig
+from pi_probe_discord.models import AppConfig, RouterSnapshot
 
 
 def make_config(base_dir: Path) -> AppConfig:
@@ -334,6 +337,60 @@ class DashboardTests(unittest.TestCase):
             html = Path(config.interactive_dashboard_file).read_text(encoding="utf-8")
             self.assertIn("SNMPv2-MIB::warmStart", html)
             self.assertIn("192.168.1.1", html)
+
+    def test_build_network_diagnosis_flags_extender_disappearance(self) -> None:
+        now = datetime(2026, 7, 2, 17, 0, 0)
+        diagnosis = build_network_diagnosis(
+            [
+                RouterEvent(
+                    timestamp=now - timedelta(minutes=30),
+                    event_type="host_missing",
+                    message="Host missing from latest scan: D-Link Range Extender",
+                    severity="warning",
+                    source="192.168.1.55",
+                ),
+                RouterEvent(
+                    timestamp=now - timedelta(minutes=25),
+                    event_type="port_closed",
+                    message="Closed port(s): 80 on D-Link Range Extender",
+                    severity="info",
+                    source="192.168.1.55",
+                ),
+            ],
+            [
+                NmapDeviceRow(
+                    device_id="192.168.1.1",
+                    name="Archer Router",
+                    hostname="archer-router",
+                    ip="192.168.1.1",
+                    mac="AA:BB:CC:DD:EE:FF",
+                    vendor="TP-Link",
+                    status="up",
+                    category="infrastructure",
+                    category_label="Infrastructure",
+                    accent="cyan",
+                    ports=[],
+                    open_ports=[],
+                    services=[],
+                    port_count=0,
+                    last_seen=(now - timedelta(hours=1)).isoformat(),
+                ),
+            ],
+            {"scannedAt": (now - timedelta(minutes=20)).isoformat(), "deviceCount": 1, "network": "192.168.1.0/24"},
+            now=now,
+            router_snapshot=RouterSnapshot(
+                enabled=True,
+                ingest_source="udp://0.0.0.0:162",
+                ingested_events=0,
+                window_hours=24,
+                recent_events=2,
+                link_down_events=1,
+                auth_fail_events=0,
+            ),
+        )
+        self.assertEqual(diagnosis["status"], "critical")
+        self.assertEqual(diagnosis["hostMissingCount"], 1)
+        self.assertIn("extender", diagnosis["headline"].lower())
 
     def test_dashboard_server_health_and_status_endpoints(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

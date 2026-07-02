@@ -44,6 +44,7 @@ pi-probe-discord speedtest-only
 pi-probe-discord report 7
 pi-probe-discord firewall
 pi-probe-discord router
+pi-probe-discord network-diagnose
 pi-probe-discord dashboard-html
 pi-probe-discord dashboard-serve
 pi-probe-discord dashboard-check
@@ -206,6 +207,8 @@ The optional bot supports:
 - `/fullreport`
 - `/firewall` (visual snapshot when chart rendering is available, text fallback otherwise)
 - `/router`
+- `/networkdiag`
+- `/nmapscan`
 
 Bot env file:
 

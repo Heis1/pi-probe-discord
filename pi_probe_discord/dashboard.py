@@ -14,7 +14,7 @@ import ssl
 from typing import Any
 
 from .baselines import average, history_points_for_window
-from .models import AppConfig, SpeedResult
+from .models import AppConfig, RouterSnapshot, SpeedResult
 
 try:
     import matplotlib
@@ -94,6 +94,176 @@ class NmapDeviceRow:
     services: list[str]
     port_count: int
     last_seen: str
+
+
+def _format_relative_age(now: datetime, timestamp: datetime | None) -> str:
+    if timestamp is None:
+        return "unknown"
+    if now.tzinfo is not None and timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=now.tzinfo)
+    elif now.tzinfo is None and timestamp.tzinfo is not None:
+        now = now.replace(tzinfo=timestamp.tzinfo)
+    delta = now - timestamp
+    total_minutes = max(0, int(delta.total_seconds() // 60))
+    if total_minutes < 1:
+        return "just now"
+    if total_minutes < 60:
+        return f"{total_minutes} min ago"
+    hours, minutes = divmod(total_minutes, 60)
+    if hours < 24:
+        return f"{hours}h {minutes}m ago" if minutes else f"{hours}h ago"
+    days, rem_hours = divmod(hours, 24)
+    return f"{days}d {rem_hours}h ago" if rem_hours else f"{days}d ago"
+
+
+def _is_extender_hint(text: str) -> bool:
+    lowered = text.lower()
+    return any(
+        token in lowered
+        for token in ("d-link", "dlink", "extender", "repeater", "range extender", "mesh", "access point")
+    )
+
+
+def build_network_diagnosis(
+    events: list[RouterEvent],
+    nmap_rows: list[NmapDeviceRow],
+    nmap_meta: dict[str, Any],
+    *,
+    now: datetime,
+    router_snapshot: RouterSnapshot | None = None,
+    config: AppConfig | None = None,
+) -> dict[str, Any]:
+    scanned_at = _coerce_datetime(nmap_meta.get("scannedAt"))
+    scan_age_label = _format_relative_age(now, scanned_at)
+    scan_age_minutes = None
+    if scanned_at is not None:
+        if now.tzinfo is not None and scanned_at.tzinfo is None:
+            scanned_at = scanned_at.replace(tzinfo=now.tzinfo)
+        elif now.tzinfo is None and scanned_at.tzinfo is not None:
+            now = now.replace(tzinfo=scanned_at.tzinfo)
+        scan_age_minutes = max(0, int((now - scanned_at).total_seconds() // 60))
+    issue_window = now - timedelta(hours=48)
+    recent_events: list[RouterEvent] = []
+    for event in events:
+        event_time = event.timestamp
+        if now.tzinfo is not None and event_time.tzinfo is None:
+            event_time = event_time.replace(tzinfo=now.tzinfo)
+        elif now.tzinfo is None and event_time.tzinfo is not None:
+            event_time = event_time.replace(tzinfo=None)
+        if event_time >= issue_window:
+            recent_events.append(event)
+    host_missing = [event for event in recent_events if event.event_type == "host_missing"]
+    port_closed = [event for event in recent_events if event.event_type == "port_closed"]
+    restart_events = [
+        event
+        for event in recent_events
+        if event.event_type.lower() in {"snmpv2-mib::warmstart", "snmpv2-mib::coldstart"}
+    ]
+    link_events = [event for event in recent_events if "linkdown" in event.event_type.lower()]
+    auth_events = [event for event in recent_events if "authenticationfailure" in event.event_type.lower()]
+    suspect_events = [
+        event
+        for event in recent_events
+        if _is_extender_hint(f"{event.source} {event.message} {event.event_type}")
+    ]
+    suspect_devices = [
+        row
+        for row in nmap_rows
+        if _is_extender_hint(f"{row.name} {row.hostname} {row.vendor}")
+    ]
+    infra_count = sum(1 for row in nmap_rows if row.category == "infrastructure")
+
+    indicators: list[str] = []
+    if not nmap_rows:
+        indicators.append("No Nmap inventory is available yet, so the dashboard cannot confirm whether the extender is currently visible.")
+    elif scanned_at is None:
+        indicators.append("The latest Nmap inventory file does not include a valid scan time.")
+    elif config is not None and scan_age_minutes is not None and scan_age_minutes > max(config.nmap_scan_minutes * 2, 90):
+        indicators.append(f"The latest Nmap inventory is stale ({scan_age_label}); run a fresh scan before trusting device-presence conclusions.")
+    else:
+        indicators.append(f"The latest Nmap inventory is {scan_age_label} and shows {len(nmap_rows)} visible device(s).")
+
+    if host_missing:
+        indicators.append(f"{len(host_missing)} host-missing event(s) were recorded in the last 48 hours, which suggests one or more LAN devices disappeared between scans.")
+    if port_closed:
+        indicators.append(f"{len(port_closed)} port-closed event(s) were recorded in the last 48 hours, which can indicate an uplink or switch-port flap.")
+    if router_snapshot is not None and router_snapshot.link_down_events:
+        indicators.append(f"Router SNMP recorded {router_snapshot.link_down_events} linkDown trap(s) in the last {router_snapshot.window_hours} hours.")
+    elif link_events:
+        indicators.append(f"{len(link_events)} recent linkDown trap(s) were recorded by router telemetry.")
+    if restart_events:
+        indicators.append(f"{len(restart_events)} router restart-related trap(s) were recorded, so the router or an upstream component may have rebooted.")
+    if auth_events:
+        indicators.append(f"{len(auth_events)} SNMP authentication-failure trap(s) were recorded; this is usually secondary noise, not the primary link fault.")
+    if suspect_events:
+        latest = suspect_events[-1]
+        indicators.append(f"Most relevant extender clue: {latest.message}")
+    if suspect_devices:
+        visible = ", ".join(
+            sorted({row.name or row.hostname or row.ip for row in suspect_devices if (row.name or row.hostname or row.ip)})
+        )
+        indicators.append(f"Extender-like device(s) currently visible in inventory: {visible}.")
+    elif nmap_rows:
+        indicators.append("No currently visible device in the Nmap inventory looks like a D-Link extender or access point.")
+
+    recommendations = [
+        "Run a fresh Nmap scan and compare whether the extender reappears with the same IP, MAC, and open ports.",
+        "Review the Recent Router and Network Events table for host-missing, port-closed, linkDown, warmStart, or coldStart events around the outage time.",
+        "Capture a /networkdiag report before power-cycling gear if the fault repeats, so disappearance and trap evidence is preserved.",
+    ]
+    if not suspect_devices:
+        recommendations.insert(0, "Add an Nmap override naming the extender clearly once it is back online, so future disappearance events are easier to identify.")
+
+    status = "healthy"
+    headline = "No strong extender fault indicators are visible in the saved telemetry."
+    if suspect_events or host_missing or port_closed or link_events or (router_snapshot is not None and router_snapshot.link_down_events):
+        status = "warning"
+        headline = "Saved telemetry shows LAN fault indicators that match a device disappearance or uplink flap."
+    if suspect_events and any(event.event_type in {"host_missing", "port_closed"} for event in suspect_events):
+        status = "critical"
+        headline = "The saved telemetry strongly suggests the extender or its uplink disappeared from the LAN during the fault."
+
+    return {
+        "status": status,
+        "headline": headline,
+        "scanAge": scan_age_label,
+        "scanAgeMinutes": scan_age_minutes,
+        "inventoryDeviceCount": len(nmap_rows),
+        "infrastructureCount": infra_count,
+        "hostMissingCount": len(host_missing),
+        "portClosedCount": len(port_closed),
+        "linkDownCount": (
+            router_snapshot.link_down_events
+            if router_snapshot is not None
+            else len(link_events)
+        ),
+        "restartCount": len(restart_events),
+        "authFailCount": (
+            router_snapshot.auth_fail_events
+            if router_snapshot is not None
+            else len(auth_events)
+        ),
+        "suspectDevices": [
+            {
+                "name": row.name,
+                "hostname": row.hostname,
+                "ip": row.ip,
+                "vendor": row.vendor,
+            }
+            for row in suspect_devices
+        ],
+        "recentIndicators": [
+            {
+                "time": event.timestamp.strftime("%d %b %Y %H:%M"),
+                "eventType": event.event_type,
+                "source": event.source,
+                "message": event.message,
+            }
+            for event in (suspect_events or host_missing or port_closed or link_events or restart_events)[-5:]
+        ],
+        "indicators": indicators,
+        "recommendations": recommendations,
+    }
 
 
 def _format_metric(value: float | None, suffix: str, precision: int = 1) -> str:
@@ -459,6 +629,14 @@ def _load_nmap_inventory_rows(config: AppConfig | None) -> tuple[list[NmapDevice
     }
 
 
+def load_dashboard_events(config: AppConfig | None) -> list[RouterEvent]:
+    return _load_router_events(config)
+
+
+def load_dashboard_nmap_inventory(config: AppConfig | None) -> tuple[list[NmapDeviceRow], dict[str, Any]]:
+    return _load_nmap_inventory_rows(config)
+
+
 def _hour_label(hour: int | None) -> str:
     if hour is None:
         return "n/a"
@@ -681,6 +859,13 @@ def _build_dashboard_payload(
         "dashboard_file": Path(output_path).name,
         "version": _version_string(),
     }
+    diagnosis = build_network_diagnosis(
+        events,
+        nmap_rows,
+        nmap_meta,
+        now=datetime.now().astimezone(),
+        config=config,
+    )
 
     return {
         "data": data,
@@ -728,6 +913,7 @@ def _build_dashboard_payload(
             "verdictLabel": verdict_label,
         },
         "score": score,
+        "diagnosis": diagnosis,
         "thresholds": {
             "outageDownloadMbps": thresholds.outage_download_mbps,
             "degradedDownloadMbps": thresholds.degraded_download_mbps,
@@ -1081,6 +1267,26 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
         <div id="timeline" class="chart"></div>
       </div>
       <div class="panel">
+        <div class="panel-head"><h2>Network Fault Diagnosis</h2><p>Correlates router traps, device scan changes, and inventory freshness to highlight likely LAN-side failures.</p></div>
+        <div class="chiprow">
+          <div class="chip" id="diagStatus"></div>
+          <div class="chip" id="diagScanAge"></div>
+          <div class="chip" id="diagMissing"></div>
+          <div class="chip" id="diagLinkDown"></div>
+        </div>
+        <div class="copy" id="diagHeadline"></div>
+        <div class="score-grid">
+          <div>
+            <div class="panel-head"><h2>Indicators</h2><p>Signals already captured by the probe.</p></div>
+            <ul id="diagIndicators" class="note-list"></ul>
+          </div>
+          <div>
+            <div class="panel-head"><h2>Recommended Actions</h2><p>Fastest next checks when the fault repeats.</p></div>
+            <ul id="diagActions" class="note-list"></ul>
+          </div>
+        </div>
+      </div>
+      <div class="panel">
         <div class="panel-head"><h2>Recent Router and Network Events</h2><p>Most recent 20 SNMP or imported overlay events available to the dashboard.</p></div>
         <div class="table-wrap"><table><thead><tr><th>Time</th><th>Type</th><th>Severity</th><th>Source</th><th>Message</th></tr></thead><tbody id="eventRows"></tbody></table></div>
       </div>
@@ -1146,6 +1352,7 @@ const deviceRows = payload.devices;
 const inventory = payload.inventory;
 const stats = payload.stats;
 const score = payload.score;
+const diagnosis = payload.diagnosis || {};
 const thresholds = payload.thresholds;
 const meta = payload.meta;
 const themeKey = 'pi_probe_dashboard_theme';
@@ -1372,6 +1579,34 @@ function renderInventoryMeta() {
   } else if (!status.textContent) {
     status.textContent = inventory.scanArguments ? `Configured scan: nmap ${inventory.scanArguments} ${inventory.scanTargets}` : 'Run a fresh scan to update the device inventory.';
   }
+}
+function renderDiagnosis() {
+  const statusMap = {
+    healthy: 'Telemetry calm',
+    warning: 'Fault indicators found',
+    critical: 'Strong extender fault signal'
+  };
+  setText('diagStatus', statusMap[diagnosis.status] || 'Diagnosis');
+  setText('diagScanAge', `Inventory ${diagnosis.scanAge || 'unknown'}`);
+  setText('diagMissing', `${diagnosis.hostMissingCount || 0} missing-host event(s)`);
+  setText('diagLinkDown', `${diagnosis.linkDownCount || 0} linkDown trap(s)`);
+  setText('diagHeadline', diagnosis.headline || 'No diagnosis summary available.');
+
+  const indicators = document.getElementById('diagIndicators');
+  const actions = document.getElementById('diagActions');
+  clearNode(indicators);
+  clearNode(actions);
+
+  (diagnosis.indicators || ['No saved indicators yet.']).forEach(item => {
+    const li = document.createElement('li');
+    li.textContent = item;
+    indicators.appendChild(li);
+  });
+  (diagnosis.recommendations || ['No recommended actions available.']).forEach(item => {
+    const li = document.createElement('li');
+    li.textContent = item;
+    actions.appendChild(li);
+  });
 }
 function renderDeviceMap() {
   const map = document.getElementById('deviceMap');
@@ -1880,6 +2115,7 @@ function render() {
   renderHeatmap(data);
   renderScatter(data);
   renderDnsCorrelation(data);
+  renderDiagnosis();
   renderTable(events);
   renderInventoryMeta();
   renderDeviceMap();

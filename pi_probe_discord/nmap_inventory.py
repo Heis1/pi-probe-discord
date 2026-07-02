@@ -449,8 +449,6 @@ def run_nmap_inventory_scan(config: AppConfig, now: datetime) -> tuple[bool, str
     xml_path = Path(config.nmap_inventory_xml)
     xml_path.parent.mkdir(parents=True, exist_ok=True)
     nmap_args = shlex.split(config.nmap_arguments)
-    if not any(arg in {"-v", "-vv", "-vvv"} or arg.startswith("--stats-every") for arg in nmap_args):
-        nmap_args = [*nmap_args, "-v", "--stats-every", "30s"]
     args = ["nmap", *nmap_args, config.nmap_targets, "-oX", str(xml_path)]
     print(f"Running nmap inventory scan: {' '.join(args)}", file=sys.stderr, flush=True)
     try:

@@ -22,22 +22,35 @@ def run_doctor() -> tuple[int, str]:
     if config_path.exists():
         readable = os.access(config_path, os.R_OK)
         checks.append(_check("config file readable", readable, str(config_path)))
-        load_dotenv_style(config_path)
+        if readable:
+            load_dotenv_style(config_path)
 
-    checks.append(_check("data dir exists", db_path.parent.exists(), str(db_path.parent)))
-    if db_path.parent.exists():
+    data_dir_exists = False
+    try:
+        data_dir_exists = db_path.parent.exists()
+    except PermissionError:
+        data_dir_exists = False
+    checks.append(_check("data dir exists", data_dir_exists, str(db_path.parent)))
+    if data_dir_exists:
         writable = os.access(db_path.parent, os.W_OK)
         checks.append(_check("data dir writable", writable, str(db_path.parent)))
 
     db_ok = False
-    if db_path.exists():
+    db_exists = False
+    try:
+        db_exists = db_path.exists()
+    except PermissionError:
+        checks.append(_check("database exists", False, f"{db_path} (permission denied)"))
+    if db_exists:
         try:
             with sqlite3.connect(db_path) as conn:
                 conn.execute("SELECT 1").fetchone()
             db_ok = True
+        except PermissionError:
+            checks.append(_check("database open", False, f"{db_path} (permission denied)"))
         except sqlite3.Error as exc:
             checks.append(_check("database open", False, f"{db_path} ({exc})"))
-    else:
+    elif not any("database exists" in line for _, line in checks):
         checks.append(_check("database exists", False, str(db_path)))
     if db_ok:
         checks.append(_check("database open", True, str(db_path)))

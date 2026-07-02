@@ -7,3 +7,4 @@ Wants=network-online.target
 Type=oneshot
 WorkingDirectory=/opt/pi-probe-discord
 ExecStart=/usr/bin/pi-probe-discord nmap-scan
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK AF_PACKET
