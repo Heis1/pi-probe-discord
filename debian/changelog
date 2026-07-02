@@ -1,3 +1,9 @@
+pi-probe-discord (1.1.12-1) unstable; urgency=medium
+
+  * Move the network fault diagnosis to the top of the dashboard, enlarge the incident summary, and trim the default event table so fault triage is easier to scan.
+
+ -- Codex Builder <noreply@example.invalid>  Thu, 02 Jul 2026 19:35:25 +0930
+
 pi-probe-discord (1.1.11-1) unstable; urgency=medium
 
   * Fix the dashboard freshness timestamp crash so the interactive server starts reliably with mixed timestamp formats.
