@@ -1,3 +1,9 @@
+pi-probe-discord (1.1.11-1) unstable; urgency=medium
+
+  * Fix the dashboard freshness timestamp crash so the interactive server starts reliably with mixed timestamp formats.
+
+ -- Codex Builder <noreply@example.invalid>  Thu, 02 Jul 2026 19:24:35 +0930
+
 pi-probe-discord (1.1.10-1) unstable; urgency=medium
 
   * Refine the interactive dashboard diagnosis panel with clearer triage, per-card freshness stamps, and visible probe version.
