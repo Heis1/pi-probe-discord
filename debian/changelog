@@ -1,3 +1,14 @@
+pi-probe-discord (1.1.8-1) unstable; urgency=medium
+
+  * Make the SNMP listener installable and auto-enable it when listener mode
+    is configured.
+  * Preserve speedtest and full-report timer enablement across package
+    reinstalls for override-based installs.
+  * Update doctor to require the SNMP listener only when listener mode is
+    enabled.
+
+ -- Codex Builder <noreply@example.invalid>  Thu, 02 Jul 2026 17:31:19 +0930
+
 pi-probe-discord (1.1.7-1) unstable; urgency=medium
 
   * Ignore impossible ping outliers in dashboard summaries and charts.

@@ -10,3 +10,6 @@ Environment=MPLCONFIGDIR=/var/lib/pi-probe-discord/.config/matplotlib
 ExecStart=/usr/bin/pi-probe-discord router-listener
 Restart=always
 RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

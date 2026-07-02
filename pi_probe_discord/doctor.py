@@ -5,7 +5,7 @@ import sqlite3
 import subprocess
 from pathlib import Path
 
-from .config import DEFAULT_CONFIG_FILE, DEFAULT_DB_PATH
+from .config import DEFAULT_CONFIG_FILE, DEFAULT_DB_PATH, load_dotenv_style
 
 
 def _check(name: str, ok: bool, detail: str) -> tuple[bool, str]:
@@ -22,6 +22,7 @@ def run_doctor() -> tuple[int, str]:
     if config_path.exists():
         readable = os.access(config_path, os.R_OK)
         checks.append(_check("config file readable", readable, str(config_path)))
+        load_dotenv_style(config_path)
 
     checks.append(_check("data dir exists", db_path.parent.exists(), str(db_path.parent)))
     if db_path.parent.exists():
@@ -43,10 +44,11 @@ def run_doctor() -> tuple[int, str]:
 
     services = [
         "pi-probe-discord-bot.service",
-        "pi-probe-discord-snmp-listener.service",
         "pi-probe-discord-speedtest.timer",
         "pi-probe-discord-full.timer",
     ]
+    if os.environ.get("PI_PROBE_ROUTER_SNMP_LISTENER_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}:
+        services.append("pi-probe-discord-snmp-listener.service")
     for service in services:
         result = subprocess.run(["systemctl", "is-enabled", service], capture_output=True, text=True, check=False)
         enabled = result.returncode == 0

@@ -65,6 +65,29 @@ restart_if_enabled() {
     fi
 }
 
+enable_if_file_exists() {
+    unit="$1"
+    path="$2"
+    if [ -f "$path" ]; then
+        systemctl enable --now "$unit" || true
+    fi
+}
+
+env_flag_enabled() {
+    key="$1"
+    file="/etc/pi-probe-discord/pihole-update-discord.env"
+    if [ ! -f "$file" ]; then
+        return 1
+    fi
+    value="$(sed -n "s/^${key}=//p" "$file" | tail -n 1 | sed "s/[\"']//g" | tr '[:upper:]' '[:lower:]')"
+    case "$value" in
+        1|true|yes|on)
+            return 0
+            ;;
+    esac
+    return 1
+}
+
 if command -v systemctl >/dev/null 2>&1; then
     systemctl daemon-reload || true
     restart_if_enabled pi-probe-discord-speedtest.timer
@@ -72,6 +95,11 @@ if command -v systemctl >/dev/null 2>&1; then
     restart_if_enabled pi-probe-discord-bot.service
     restart_if_enabled pi-probe-discord-dashboard.service
     restart_if_enabled pi-probe-discord-snmp-listener.service
+    enable_if_file_exists pi-probe-discord-speedtest.timer /etc/systemd/system/pi-probe-discord-speedtest.timer.d/override.conf
+    enable_if_file_exists pi-probe-discord-full.timer /etc/systemd/system/pi-probe-discord-full.timer.d/override.conf
+    if env_flag_enabled PI_PROBE_ROUTER_SNMP_LISTENER_ENABLED; then
+        systemctl enable --now pi-probe-discord-snmp-listener.service || true
+    fi
 fi
 
 echo "pi-probe-discord installed."
