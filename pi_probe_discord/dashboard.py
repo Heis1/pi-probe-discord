@@ -208,8 +208,8 @@ def build_network_diagnosis(
 
     recommendations = [
         "Run a fresh Nmap scan and compare whether the extender reappears with the same IP, MAC, and open ports.",
-        "Review the Recent Router and Network Events table for host-missing, port-closed, linkDown, warmStart, or coldStart events around the outage time.",
-        "Capture a /networkdiag report before power-cycling gear if the fault repeats, so disappearance and trap evidence is preserved.",
+        "Review the event table around the outage time for host-missing, linkDown, warmStart, or coldStart entries.",
+        "Capture a /networkdiag report before power-cycling gear if the fault repeats.",
     ]
     if not suspect_devices:
         recommendations.insert(0, "Add an Nmap override naming the extender clearly once it is back online, so future disappearance events are easier to identify.")
@@ -223,9 +223,81 @@ def build_network_diagnosis(
         status = "critical"
         headline = "The saved telemetry strongly suggests the extender or its uplink disappeared from the LAN during the fault."
 
+    likely_cause = "No specific LAN-side fault is strongly indicated."
+    confidence = "low"
+    confidence_label = "Low confidence"
+    if host_missing and suspect_events:
+        likely_cause = "The extender likely dropped off the LAN or lost its uplink during the incident."
+        confidence = "high"
+        confidence_label = "High confidence"
+    elif host_missing or port_closed or link_events:
+        likely_cause = "A LAN-side device disappearance or uplink flap is more likely than a pure internet outage."
+        confidence = "medium"
+        confidence_label = "Medium confidence"
+    elif restart_events:
+        likely_cause = "Router restart evidence exists, but there is not enough device-level evidence to isolate the extender."
+        confidence = "medium"
+        confidence_label = "Medium confidence"
+
+    suspect_names = sorted(
+        {
+            row.name or row.hostname or row.ip
+            for row in suspect_devices
+            if (row.name or row.hostname or row.ip)
+        }
+    )
+    primary_suspect = suspect_names[0] if suspect_names else "No obvious extender-like device in current inventory"
+
+    evidence_items: list[dict[str, str]] = []
+    if suspect_events:
+        latest = suspect_events[-1]
+        evidence_items.append(
+            {
+                "label": "Extender clue",
+                "value": latest.message,
+                "hint": f"{latest.event_type} from {latest.source or 'unknown source'} at {latest.timestamp.strftime('%d %b %H:%M')}",
+            }
+        )
+    if host_missing:
+        evidence_items.append(
+            {
+                "label": "Missing devices",
+                "value": f"{len(host_missing)} host-missing event(s) in the last 48 hours",
+                "hint": "These are emitted when devices vanish between Nmap scans.",
+            }
+        )
+    if port_closed:
+        evidence_items.append(
+            {
+                "label": "Port changes",
+                "value": f"{len(port_closed)} port-closed event(s) in the last 48 hours",
+                "hint": "Useful when an uplink or switch-port flaps instead of a full reboot.",
+            }
+        )
+    if restart_events:
+        evidence_items.append(
+            {
+                "label": "Router restart",
+                "value": f"{len(restart_events)} warmStart/coldStart trap(s)",
+                "hint": "Suggests the router or nearby infrastructure rebooted around the incident window.",
+            }
+        )
+    if not evidence_items:
+        evidence_items.append(
+            {
+                "label": "No strong evidence",
+                "value": "Saved telemetry does not yet isolate a specific device-level failure.",
+                "hint": "Run a scan during or immediately after the next outage.",
+            }
+        )
+
     return {
         "status": status,
         "headline": headline,
+        "likelyCause": likely_cause,
+        "confidence": confidence,
+        "confidenceLabel": confidence_label,
+        "primarySuspect": primary_suspect,
         "scanAge": scan_age_label,
         "scanAgeMinutes": scan_age_minutes,
         "inventoryDeviceCount": len(nmap_rows),
@@ -261,6 +333,7 @@ def build_network_diagnosis(
             }
             for event in (suspect_events or host_missing or port_closed or link_events or restart_events)[-5:]
         ],
+        "evidenceItems": evidence_items,
         "indicators": indicators,
         "recommendations": recommendations,
     }
@@ -332,6 +405,11 @@ def _coerce_datetime(value: Any) -> datetime | None:
             except ValueError:
                 continue
     return None
+
+
+def _latest_timestamp(values: list[datetime | None]) -> datetime | None:
+    present = [value for value in values if value is not None]
+    return max(present) if present else None
 
 
 def _build_thresholds(config: AppConfig | None) -> DashboardThresholds:
@@ -850,14 +928,29 @@ def _build_dashboard_payload(
     for row in nmap_rows:
         device_counts[row.category_label] = device_counts.get(row.category_label, 0) + 1
 
+    generated_at = datetime.now().astimezone()
+    latest_speed_at = rows[-1].timestamp if rows else None
+    latest_event_at = events[-1].timestamp if events else None
+    latest_pihole_at = pihole_rows[-1].timestamp if pihole_rows else None
+    inventory_scanned_at = _coerce_datetime(nmap_meta.get("scannedAt"))
+    diagnosis_updated_at = _latest_timestamp([latest_event_at, inventory_scanned_at, latest_pihole_at, latest_speed_at]) or generated_at
+
     metadata = {
         "service": SERVICE_NAME,
-        "generated_at": datetime.now().astimezone().isoformat(),
+        "generated_at": generated_at.isoformat(),
         "dataset_start": rows[0].timestamp.isoformat() if rows else "",
         "dataset_end": rows[-1].timestamp.isoformat() if rows else "",
         "test_count": len(rows),
         "dashboard_file": Path(output_path).name,
         "version": _version_string(),
+        "refreshed": {
+            "dashboard": generated_at.isoformat(),
+            "speed": latest_speed_at.isoformat() if latest_speed_at is not None else "",
+            "events": latest_event_at.isoformat() if latest_event_at is not None else "",
+            "inventory": inventory_scanned_at.isoformat() if inventory_scanned_at is not None else "",
+            "pihole": latest_pihole_at.isoformat() if latest_pihole_at is not None else "",
+            "diagnosis": diagnosis_updated_at.isoformat(),
+        },
     }
     diagnosis = build_network_diagnosis(
         events,
@@ -1050,6 +1143,7 @@ body.theme-clean { background: linear-gradient(180deg, #f8fafc, var(--bg)); }
 .hero-main { padding: 20px 22px; }
 .hero-main h1 { margin: 0; font-size: clamp(28px, 4vw, 48px); letter-spacing: -.04em; }
 .hero-main .sub { margin-top: 6px; color: var(--muted); font-size: 15px; }
+.hero-meta { display:flex; flex-wrap:wrap; gap: 10px; margin-top: 12px; }
 .hero-grid { display:grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 18px; }
 .kpi { padding: 16px; min-height: 112px; }
 .kpi .label { color: var(--muted); font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
@@ -1093,9 +1187,27 @@ body.theme-clean select, body.theme-clean input { background: rgba(255,255,255,.
 .stack { display:grid; gap: 18px; }
 .panel { padding: 18px; }
 .score-section { margin-top: 18px; }
-.panel-head { margin-bottom: 12px; }
+.panel-head {
+  margin-bottom: 12px;
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap: 12px;
+}
 .panel-head h2 { margin: 0; font-size: 24px; letter-spacing: -.03em; }
 .panel-head p { margin: 4px 0 0; color: var(--muted); font-size: 13px; line-height: 1.4; }
+.panel-stamp {
+  flex: 0 0 auto;
+  align-self:flex-start;
+  padding: 7px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
 .chart { height: 390px; }
 .chart-small { height: 320px; }
 .device-map {
@@ -1214,11 +1326,71 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
 }
 .score-card.total-card b { font-size: 34px; }
 .note-list { margin: 0; padding-left: 18px; color: var(--muted); font-size: 13px; line-height: 1.45; }
+.diag-shell { display:grid; gap: 14px; }
+.diag-topline {
+  display:grid;
+  grid-template-columns: minmax(0, 1.5fr) repeat(3, minmax(120px, .6fr));
+  gap: 12px;
+}
+.diag-hero {
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 14px 16px;
+  background: linear-gradient(135deg, rgba(56,189,248,.12), rgba(15,23,42,.10));
+}
+.diag-kicker { color: var(--muted); font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
+.diag-cause { margin-top: 6px; font-size: 22px; font-weight: 900; letter-spacing: -.03em; line-height: 1.1; }
+.diag-summary { margin-top: 8px; color: var(--muted); font-size: 14px; line-height: 1.45; }
+.diag-stat {
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 14px;
+  background: var(--panel-2);
+}
+.diag-stat .label { color: var(--muted); font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
+.diag-stat .value { margin-top: 10px; font-size: 20px; font-weight: 900; letter-spacing: -.03em; line-height: 1.1; }
+.diag-stat .mini { margin-top: 6px; color: var(--muted); font-size: 12px; line-height: 1.35; }
+.diag-actions-row { display:flex; flex-wrap:wrap; gap: 10px; align-items:center; }
+.diag-toggle {
+  appearance:none; border: 1px solid var(--border); border-radius: 999px;
+  background: var(--panel-2); color: var(--text); padding: 8px 12px;
+  font-size: 12px; font-weight: 800; cursor: pointer;
+}
+.diag-toggle.active { background: rgba(56,189,248,.16); border-color: rgba(56,189,248,.40); }
+.diag-grid { display:grid; grid-template-columns: minmax(0, 1fr) minmax(260px, .8fr); gap: 14px; }
+.diag-list { display:grid; gap: 10px; }
+.diag-item {
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 12px 13px;
+  background: var(--panel-2);
+}
+.diag-item-head { display:flex; justify-content:space-between; gap: 10px; align-items:flex-start; }
+.diag-item-label { font-size: 13px; font-weight: 800; }
+.diag-item-value { margin-top: 6px; font-size: 14px; line-height: 1.45; }
+.diag-item-hint { margin-top: 6px; color: var(--muted); font-size: 12px; line-height: 1.4; }
+.diag-pill {
+  display:inline-flex; align-items:center; justify-content:center;
+  min-width: 72px; padding: 5px 10px; border-radius: 999px;
+  border: 1px solid var(--border); font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase;
+}
+.diag-pill.high { color: #fca5a5; background: rgba(239,68,68,.14); }
+.diag-pill.medium { color: #fbbf24; background: rgba(245,158,11,.14); }
+.diag-pill.low { color: #7dd3fc; background: rgba(56,189,248,.14); }
+.diag-sidebox {
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 14px;
+  background: var(--panel-2);
+}
+.diag-sidebox h3 { margin: 0 0 8px; font-size: 16px; letter-spacing: -.02em; }
+.diag-sidebox p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.45; }
+.diag-sidebox .copyline { margin-top: 10px; color: var(--text); font-size: 14px; line-height: 1.45; }
 .empty { color: var(--muted); font-size: 14px; padding: 18px; border: 1px dashed var(--border); border-radius: 16px; }
 .linkline { margin-top: auto; }
 .linkline a { color: var(--accent); text-decoration: none; font-weight: 700; }
 @media (max-width: 1180px) {
-  .hero, .grid, .controls, .hero-grid, .score-grid { grid-template-columns: 1fr; }
+  .hero, .grid, .controls, .hero-grid, .score-grid, .diag-topline, .diag-grid { grid-template-columns: 1fr; }
 }
 </style>
 </head>
@@ -1228,11 +1400,15 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
     <div class="hero-main panel">
       <h1>Pi Probe Interactive Dashboard</h1>
       <div class="sub" id="subtitle"></div>
+      <div class="hero-meta">
+        <div class="chip" id="dashboardVersion"></div>
+        <div class="chip" id="dashboardFreshness"></div>
+      </div>
       <div class="hero-grid">
-        <div class="kpi"><div class="label">Median download</div><div class="value" id="kpiMedian"></div><div class="sub">Typical observed downstream performance</div></div>
-        <div class="kpi"><div class="label">Average upload</div><div class="value" id="kpiUpload"></div><div class="sub">Mean upload across visible tests</div></div>
-        <div class="kpi"><div class="label">Average ping</div><div class="value" id="kpiPing"></div><div class="sub">Mean latency across visible tests</div></div>
-        <div class="kpi"><div class="label">Reliability floor</div><div class="value" id="kpiFloor"></div><div class="sub">5th percentile download result</div></div>
+        <div class="kpi"><div class="label">Median download</div><div class="value" id="kpiMedian"></div><div class="sub">Typical observed downstream performance</div><div class="sub" id="kpiMedianFreshness"></div></div>
+        <div class="kpi"><div class="label">Average upload</div><div class="value" id="kpiUpload"></div><div class="sub">Mean upload across visible tests</div><div class="sub" id="kpiUploadFreshness"></div></div>
+        <div class="kpi"><div class="label">Average ping</div><div class="value" id="kpiPing"></div><div class="sub">Mean latency across visible tests</div><div class="sub" id="kpiPingFreshness"></div></div>
+        <div class="kpi"><div class="label">Reliability floor</div><div class="value" id="kpiFloor"></div><div class="sub">5th percentile download result</div><div class="sub" id="kpiFloorFreshness"></div></div>
       </div>
     </div>
     <div class="hero-side panel">
@@ -1263,35 +1439,56 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
   <section class="grid">
     <div class="stack">
       <div class="panel">
-        <div class="panel-head"><h2>Performance Timeline</h2><p>Normal, degraded, outage, and failed tests are separated. Router event markers can be filtered by severity and type.</p></div>
+        <div class="panel-head"><div><h2>Performance Timeline</h2><p>Normal, degraded, outage, and failed tests are separated. Router event markers can be filtered by severity and type.</p></div><div class="panel-stamp" id="timelineFreshness"></div></div>
         <div id="timeline" class="chart"></div>
       </div>
       <div class="panel">
-        <div class="panel-head"><h2>Network Fault Diagnosis</h2><p>Correlates router traps, device scan changes, and inventory freshness to highlight likely LAN-side failures.</p></div>
-        <div class="chiprow">
-          <div class="chip" id="diagStatus"></div>
-          <div class="chip" id="diagScanAge"></div>
-          <div class="chip" id="diagMissing"></div>
-          <div class="chip" id="diagLinkDown"></div>
-        </div>
-        <div class="copy" id="diagHeadline"></div>
-        <div class="score-grid">
-          <div>
-            <div class="panel-head"><h2>Indicators</h2><p>Signals already captured by the probe.</p></div>
-            <ul id="diagIndicators" class="note-list"></ul>
+        <div class="panel-head"><div><h2>Network Fault Diagnosis</h2><p>Correlates router traps, device scan changes, and inventory freshness to highlight likely LAN-side failures.</p></div><div class="panel-stamp" id="diagnosisFreshness"></div></div>
+        <div class="diag-shell">
+          <div class="diag-topline">
+            <div class="diag-hero">
+              <div class="diag-kicker">Likely Cause</div>
+              <div class="diag-cause" id="diagCause"></div>
+              <div class="diag-summary" id="diagHeadline"></div>
+            </div>
+            <div class="diag-stat">
+              <div class="label">Confidence</div>
+              <div class="value" id="diagConfidence"></div>
+              <div class="mini" id="diagConfidenceNote"></div>
+            </div>
+            <div class="diag-stat">
+              <div class="label">Primary Suspect</div>
+              <div class="value" id="diagSuspect"></div>
+              <div class="mini" id="diagScanAge"></div>
+            </div>
+            <div class="diag-stat">
+              <div class="label">Evidence</div>
+              <div class="value" id="diagEvidenceSummary"></div>
+              <div class="mini" id="diagLinkDown"></div>
+            </div>
           </div>
-          <div>
-            <div class="panel-head"><h2>Recommended Actions</h2><p>Fastest next checks when the fault repeats.</p></div>
-            <ul id="diagActions" class="note-list"></ul>
+          <div class="diag-actions-row">
+            <button id="diagEvidenceToggle" class="diag-toggle active" type="button">Evidence</button>
+            <button id="diagActionsToggle" class="diag-toggle" type="button">Next Actions</button>
+            <button id="diagFocusEvents" class="diag-toggle" type="button">Focus Related Events</button>
+            <button id="diagFocusExtender" class="diag-toggle" type="button">Show Suspect Device</button>
+          </div>
+          <div class="diag-grid">
+            <div id="diagPrimaryList" class="diag-list"></div>
+            <div class="diag-sidebox">
+              <h3 id="diagSideTitle"></h3>
+              <p id="diagSideIntro"></p>
+              <div id="diagSideBody" class="copyline"></div>
+            </div>
           </div>
         </div>
       </div>
       <div class="panel">
-        <div class="panel-head"><h2>Recent Router and Network Events</h2><p>Most recent 20 SNMP or imported overlay events available to the dashboard.</p></div>
+        <div class="panel-head"><div><h2>Recent Router and Network Events</h2><p>Most recent 20 SNMP or imported overlay events available to the dashboard.</p></div><div class="panel-stamp" id="eventsFreshness"></div></div>
         <div class="table-wrap"><table><thead><tr><th>Time</th><th>Type</th><th>Severity</th><th>Source</th><th>Message</th></tr></thead><tbody id="eventRows"></tbody></table></div>
       </div>
       <div class="panel">
-        <div class="panel-head"><h2>Network Devices</h2><p>LAN inventory derived from the latest Nmap export. Devices are grouped by category for a quick visual sweep.</p></div>
+        <div class="panel-head"><div><h2>Network Devices</h2><p>LAN inventory derived from the latest Nmap export. Devices are grouped by category for a quick visual sweep.</p></div><div class="panel-stamp" id="inventoryFreshness"></div></div>
         <div id="inventoryMeta" class="chart-meta"></div>
         <div class="action-row">
           <button id="nmapScanButton" class="action-button" type="button">Run Nmap Scan</button>
@@ -1301,17 +1498,17 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
         <div id="deviceMapEmpty" class="empty" style="display:none">No Nmap inventory data yet.</div>
       </div>
       <div class="panel">
-        <div class="panel-head"><h2>Traffic-Light Heatmap</h2><p>Hourly average download. Green exceeds the good threshold, amber is acceptable, red is below target.</p></div>
+        <div class="panel-head"><div><h2>Traffic-Light Heatmap</h2><p>Hourly average download. Green exceeds the good threshold, amber is acceptable, red is below target.</p></div><div class="panel-stamp" id="heatmapFreshness"></div></div>
         <div id="heatmap" class="chart-small"></div>
       </div>
     </div>
     <div class="stack">
       <div class="panel">
-        <div class="panel-head"><h2>Latency Relationship</h2><p>Scatter of download versus ping. Failed, degraded, and outage tests are emphasised.</p></div>
+        <div class="panel-head"><div><h2>Latency Relationship</h2><p>Scatter of download versus ping. Failed, degraded, and outage tests are emphasised.</p></div><div class="panel-stamp" id="scatterFreshness"></div></div>
         <div id="scatter" class="chart-small"></div>
       </div>
       <div class="panel">
-        <div class="panel-head"><h2>DNS Activity Correlation</h2><p>Hourly DNS load and blocked requests plotted against average download when Pi-hole hourly data exists.</p></div>
+        <div class="panel-head"><div><h2>DNS Activity Correlation</h2><p>Hourly DNS load and blocked requests plotted against average download when Pi-hole hourly data exists.</p></div><div class="panel-stamp" id="dnsFreshness"></div></div>
         <div id="dnsCorrelation" class="chart-small"></div>
         <div id="dnsLegend" class="chart-meta"></div>
         <div id="dnsEmpty" class="empty" style="display:none">No Pi-hole hourly data yet.</div>
@@ -1319,7 +1516,7 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
     </div>
   </section>
   <section class="panel score-section">
-    <div class="panel-head"><h2>Connection Score</h2><p>One overall score plus four plain-English components so you can see what is actually dragging the connection down.</p></div>
+    <div class="panel-head"><div><h2>Connection Score</h2><p>One overall score plus four plain-English components so you can see what is actually dragging the connection down.</p></div><div class="panel-stamp" id="scoreFreshness"></div></div>
     <div class="score-grid">
       <div class="score-card"><div class="label">Download Strength</div><b id="scoreSpeed"></b><div class="mini" id="scoreSpeedNote"></div></div>
       <div class="score-card"><div class="label">Upload Consistency</div><b id="scoreUpload"></b><div class="mini" id="scoreUploadNote"></div></div>
@@ -1355,7 +1552,9 @@ const score = payload.score;
 const diagnosis = payload.diagnosis || {};
 const thresholds = payload.thresholds;
 const meta = payload.meta;
+const refreshed = meta.refreshed || {};
 const themeKey = 'pi_probe_dashboard_theme';
+let diagView = 'evidence';
 
 function average(values) {
   const clean = values.filter(v => v !== null && v !== undefined && !Number.isNaN(v));
@@ -1482,6 +1681,46 @@ function pathFromPoints(points) {
 function setText(elementId, value) {
   document.getElementById(elementId).textContent = value;
 }
+function formatFreshness(value) {
+  if (!value) return 'Refresh unknown';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Refresh unknown';
+  const diffMs = Date.now() - date.getTime();
+  const diffMinutes = Math.max(0, Math.floor(diffMs / 60000));
+  let relative = 'just now';
+  if (diffMinutes >= 60 * 24) {
+    const days = Math.floor(diffMinutes / (60 * 24));
+    const hours = Math.floor((diffMinutes % (60 * 24)) / 60);
+    relative = hours ? `${days}d ${hours}h ago` : `${days}d ago`;
+  } else if (diffMinutes >= 60) {
+    const hours = Math.floor(diffMinutes / 60);
+    const minutes = diffMinutes % 60;
+    relative = minutes ? `${hours}h ${minutes}m ago` : `${hours}h ago`;
+  } else if (diffMinutes > 0) {
+    relative = `${diffMinutes}m ago`;
+  }
+  return `${relative} · ${date.toLocaleString()}`;
+}
+function setFreshness(elementId, value, prefix = 'Updated') {
+  const node = document.getElementById(elementId);
+  if (!node) return;
+  node.textContent = `${prefix} ${formatFreshness(value)}`;
+}
+function renderFreshness() {
+  setText('dashboardVersion', `Version ${meta.version || 'unknown'}`);
+  setFreshness('dashboardFreshness', refreshed.dashboard || meta.generated_at, 'Built');
+  ['kpiMedianFreshness', 'kpiUploadFreshness', 'kpiPingFreshness', 'kpiFloorFreshness'].forEach(id => {
+    setFreshness(id, refreshed.speed, 'Data');
+  });
+  setFreshness('timelineFreshness', refreshed.speed, 'Data');
+  setFreshness('diagnosisFreshness', refreshed.diagnosis, 'Data');
+  setFreshness('eventsFreshness', refreshed.events, 'Data');
+  setFreshness('inventoryFreshness', refreshed.inventory, 'Scan');
+  setFreshness('heatmapFreshness', refreshed.speed, 'Data');
+  setFreshness('scatterFreshness', refreshed.speed, 'Data');
+  setFreshness('dnsFreshness', refreshed.pihole, 'Data');
+  setFreshness('scoreFreshness', refreshed.speed, 'Data');
+}
 function initFilters() {
   const severitySelect = document.getElementById('severityFilter');
   const typeSelect = document.getElementById('eventTypeFilter');
@@ -1581,32 +1820,97 @@ function renderInventoryMeta() {
   }
 }
 function renderDiagnosis() {
-  const statusMap = {
-    healthy: 'Telemetry calm',
-    warning: 'Fault indicators found',
-    critical: 'Strong extender fault signal'
-  };
-  setText('diagStatus', statusMap[diagnosis.status] || 'Diagnosis');
-  setText('diagScanAge', `Inventory ${diagnosis.scanAge || 'unknown'}`);
-  setText('diagMissing', `${diagnosis.hostMissingCount || 0} missing-host event(s)`);
-  setText('diagLinkDown', `${diagnosis.linkDownCount || 0} linkDown trap(s)`);
+  setText('diagCause', diagnosis.likelyCause || diagnosis.headline || 'No diagnosis summary available.');
   setText('diagHeadline', diagnosis.headline || 'No diagnosis summary available.');
+  setText('diagConfidence', diagnosis.confidenceLabel || 'Unknown');
+  setText('diagConfidenceNote', `${diagnosis.hostMissingCount || 0} missing-host, ${diagnosis.portClosedCount || 0} port-change, ${diagnosis.restartCount || 0} restart event(s)`);
+  setText('diagSuspect', diagnosis.primarySuspect || 'Unknown');
+  setText('diagScanAge', `Inventory ${diagnosis.scanAge || 'unknown'}`);
+  setText('diagEvidenceSummary', `${diagnosis.inventoryDeviceCount || 0} visible / ${diagnosis.infrastructureCount || 0} infra`);
+  setText('diagLinkDown', `${diagnosis.linkDownCount || 0} linkDown trap(s)`);
 
-  const indicators = document.getElementById('diagIndicators');
-  const actions = document.getElementById('diagActions');
-  clearNode(indicators);
-  clearNode(actions);
+  const list = document.getElementById('diagPrimaryList');
+  clearNode(list);
+  const sideTitle = document.getElementById('diagSideTitle');
+  const sideIntro = document.getElementById('diagSideIntro');
+  const sideBody = document.getElementById('diagSideBody');
+  clearNode(sideBody);
 
-  (diagnosis.indicators || ['No saved indicators yet.']).forEach(item => {
-    const li = document.createElement('li');
-    li.textContent = item;
-    indicators.appendChild(li);
+  const evidenceItems = diagnosis.evidenceItems || [];
+  const actionItems = diagnosis.recommendations || [];
+  const showingEvidence = diagView === 'evidence';
+  const items = showingEvidence
+    ? evidenceItems
+    : actionItems.map(item => ({ label: 'Action', value: item, hint: 'Use this on the next recurrence or after restoring connectivity.' }));
+
+  sideTitle.textContent = showingEvidence ? 'What This Is Using' : 'How To Use This';
+  sideIntro.textContent = showingEvidence
+    ? 'These are the strongest pieces of telemetry currently driving the diagnosis.'
+    : 'Keep the response short and decisive when the fault happens again.';
+  sideBody.textContent = showingEvidence
+    ? `Current confidence: ${diagnosis.confidenceLabel || 'Unknown'}. Primary suspect: ${diagnosis.primarySuspect || 'Unknown'}.`
+    : 'Start with a fresh scan, then compare the suspect device MAC, IP, and open ports before rebooting anything.';
+
+  if (!items.length) {
+    const empty = document.createElement('div');
+    empty.className = 'diag-item';
+    empty.textContent = showingEvidence ? 'No evidence items available yet.' : 'No action items available yet.';
+    list.appendChild(empty);
+  } else {
+    items.forEach((item, index) => {
+      const card = document.createElement('article');
+      card.className = 'diag-item';
+      const head = document.createElement('div');
+      head.className = 'diag-item-head';
+      const label = document.createElement('div');
+      label.className = 'diag-item-label';
+      label.textContent = item.label || `Item ${index + 1}`;
+      head.appendChild(label);
+      if (showingEvidence && index === 0) {
+        const pill = document.createElement('span');
+        pill.className = `diag-pill ${diagnosis.confidence || 'low'}`;
+        pill.textContent = diagnosis.confidenceLabel || 'Signal';
+        head.appendChild(pill);
+      }
+      card.appendChild(head);
+      const value = document.createElement('div');
+      value.className = 'diag-item-value';
+      value.textContent = item.value || '';
+      card.appendChild(value);
+      if (item.hint) {
+        const hint = document.createElement('div');
+        hint.className = 'diag-item-hint';
+        hint.textContent = item.hint;
+        card.appendChild(hint);
+      }
+      list.appendChild(card);
+    });
+  }
+
+  document.getElementById('diagEvidenceToggle').classList.toggle('active', showingEvidence);
+  document.getElementById('diagActionsToggle').classList.toggle('active', !showingEvidence);
+}
+function focusDiagnosisEvents() {
+  const typeFilter = document.getElementById('eventTypeFilter');
+  const preferred = ['host_missing', 'port_closed', 'SNMPv2-MIB::warmStart', 'SNMPv2-MIB::coldStart'];
+  const optionValues = Array.from(typeFilter.options).map(option => option.value);
+  const match = preferred.find(value => optionValues.includes(value));
+  if (match) typeFilter.value = match;
+  document.getElementById('severityFilter').value = 'all';
+  render();
+  document.getElementById('eventRows').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+function focusSuspectDevice() {
+  const suspect = (diagnosis.primarySuspect || '').toLowerCase();
+  if (!suspect) return;
+  const cards = Array.from(document.querySelectorAll('.device-card'));
+  cards.forEach(card => {
+    const text = card.textContent.toLowerCase();
+    card.style.outline = text.includes(suspect) ? '2px solid rgba(56,189,248,.65)' : 'none';
+    card.style.outlineOffset = text.includes(suspect) ? '2px' : '0';
   });
-  (diagnosis.recommendations || ['No recommended actions available.']).forEach(item => {
-    const li = document.createElement('li');
-    li.textContent = item;
-    actions.appendChild(li);
-  });
+  const match = cards.find(card => card.textContent.toLowerCase().includes(suspect));
+  if (match) match.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 function renderDeviceMap() {
   const map = document.getElementById('deviceMap');
@@ -2045,7 +2349,8 @@ function renderSummary(data) {
   const threshold = Number(document.getElementById('threshold').value || thresholds.degradedDownloadMbps);
   const downloads = data.map(item => item.download).filter(v => v !== null);
   const heroSide = document.querySelector('.hero-side');
-  setText('subtitle', `Interactive history view · dataset ${stats.start} – ${stats.end} · generated ${meta.generated_at}`);
+  const builtAt = meta.generated_at ? new Date(meta.generated_at).toLocaleString() : 'unknown';
+  setText('subtitle', `Interactive history view · dataset ${stats.start} – ${stats.end} · built ${builtAt}`);
   setText('kpiMedian', (quantile(downloads, .5) || 0).toFixed(1) + ' Mbps');
   setText('kpiUpload', average(data.map(item => item.upload)).toFixed(1) + ' Mbps');
   setText('kpiPing', average(data.map(item => item.ping)).toFixed(2) + ' ms');
@@ -2110,6 +2415,7 @@ function renderSummary(data) {
 function render() {
   const data = filteredData();
   const events = filteredEvents();
+  renderFreshness();
   renderSummary(data);
   renderTimeline(data, events);
   renderHeatmap(data);
@@ -2132,6 +2438,10 @@ document.getElementById('dayFilter').addEventListener('change', render);
 document.getElementById('severityFilter').addEventListener('change', render);
 document.getElementById('eventTypeFilter').addEventListener('change', render);
 document.getElementById('nmapScanButton').addEventListener('click', triggerNmapScan);
+document.getElementById('diagEvidenceToggle').addEventListener('click', () => { diagView = 'evidence'; renderDiagnosis(); });
+document.getElementById('diagActionsToggle').addEventListener('click', () => { diagView = 'actions'; renderDiagnosis(); });
+document.getElementById('diagFocusEvents').addEventListener('click', focusDiagnosisEvents);
+document.getElementById('diagFocusExtender').addEventListener('click', focusSuspectDevice);
 initFilters();
 applyTheme(getThemeChoice());
 </script>
@@ -2455,6 +2765,14 @@ def serve_interactive_dashboard(
                             "test_count": 0,
                             "dashboard_file": file_path.name,
                             "version": _version_string(),
+                            "refreshed": {
+                                "dashboard": "",
+                                "speed": "",
+                                "events": "",
+                                "inventory": "",
+                                "pihole": "",
+                                "diagnosis": "",
+                            },
                         }
                     ).encode("utf-8")
                 self.send_response(HTTPStatus.OK)
