@@ -409,6 +409,13 @@ def _coerce_datetime(value: Any) -> datetime | None:
 
 def _latest_timestamp(values: list[datetime | None]) -> datetime | None:
     present = [value for value in values if value is not None]
+    normalized: list[datetime] = []
+    for value in present:
+        if value.tzinfo is None:
+            normalized.append(value.replace(tzinfo=datetime.now().astimezone().tzinfo))
+        else:
+            normalized.append(value)
+    present = normalized
     return max(present) if present else None
 
 
