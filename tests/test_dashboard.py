@@ -94,6 +94,69 @@ def make_config(base_dir: Path) -> AppConfig:
 
 
 class DashboardTests(unittest.TestCase):
+    def test_network_diagnosis_marks_recently_recovered_when_suspect_is_back(self) -> None:
+        now = datetime(2026, 7, 3, 15, 0, 0)
+        config = make_config(Path(tempfile.mkdtemp()))
+        diagnosis = build_network_diagnosis(
+            events=[
+                RouterEvent(
+                    timestamp=now - timedelta(hours=2),
+                    event_type="host_missing",
+                    message="Host missing from latest scan: D-Link International",
+                    severity="warning",
+                    source="192.168.1.101",
+                )
+            ],
+            nmap_rows=[
+                NmapDeviceRow(
+                    device_id="192.168.1.101",
+                    name="D-Link International",
+                    hostname="dlink-extender",
+                    ip="192.168.1.101",
+                    mac="AA:BB:CC:DD:EE:10",
+                    vendor="D-Link International",
+                    status="up",
+                    category="infrastructure",
+                    category_label="Infrastructure",
+                    accent="cyan",
+                    ports=[],
+                    open_ports=[],
+                    services=[],
+                    port_count=0,
+                    last_seen=now.isoformat(),
+                )
+            ],
+            nmap_meta={"scannedAt": (now - timedelta(minutes=10)).isoformat()},
+            now=now,
+            config=config,
+        )
+        self.assertEqual(diagnosis["status"], "resolved")
+        self.assertEqual(diagnosis["statusLabel"], "Recently Recovered")
+        self.assertTrue(diagnosis["inventoryFresh"])
+        self.assertEqual(diagnosis["eventWindowHours"], 24)
+
+    def test_network_diagnosis_marks_stale_when_inventory_is_old(self) -> None:
+        now = datetime(2026, 7, 3, 15, 0, 0)
+        config = make_config(Path(tempfile.mkdtemp()))
+        diagnosis = build_network_diagnosis(
+            events=[
+                RouterEvent(
+                    timestamp=now - timedelta(hours=3),
+                    event_type="host_missing",
+                    message="Host missing from latest scan: D-Link International",
+                    severity="warning",
+                    source="192.168.1.101",
+                )
+            ],
+            nmap_rows=[],
+            nmap_meta={"scannedAt": (now - timedelta(hours=13)).isoformat()},
+            now=now,
+            config=config,
+        )
+        self.assertEqual(diagnosis["status"], "stale")
+        self.assertEqual(diagnosis["statusLabel"], "Stale Incident")
+        self.assertFalse(diagnosis["inventoryFresh"])
+
     def test_build_dashboard_summary_classifies_rows(self) -> None:
         now = datetime(2026, 6, 6, 12, 0, 0)
         config = make_config(Path(tempfile.mkdtemp()))

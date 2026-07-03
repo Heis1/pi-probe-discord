@@ -33,6 +33,7 @@ DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday",
 STATUS_FILE_NAME = "status.json"
 SERVICE_NAME = "pi-probe-discord-dashboard"
 MAX_REASONABLE_PING_MS = 1000.0
+DIAGNOSIS_EVENT_WINDOW_HOURS = 24
 
 
 @dataclass
@@ -142,7 +143,7 @@ def build_network_diagnosis(
         elif now.tzinfo is None and scanned_at.tzinfo is not None:
             now = now.replace(tzinfo=scanned_at.tzinfo)
         scan_age_minutes = max(0, int((now - scanned_at).total_seconds() // 60))
-    issue_window = now - timedelta(hours=48)
+    issue_window = now - timedelta(hours=DIAGNOSIS_EVENT_WINDOW_HOURS)
     recent_events: list[RouterEvent] = []
     for event in events:
         event_time = event.timestamp
@@ -171,7 +172,16 @@ def build_network_diagnosis(
         for row in nmap_rows
         if _is_extender_hint(f"{row.name} {row.hostname} {row.vendor}")
     ]
+    visible_suspect = bool(suspect_devices)
+    inventory_fresh = bool(
+        scanned_at is not None
+        and scan_age_minutes is not None
+        and (config is None or scan_age_minutes <= max(config.nmap_scan_minutes * 2, 90))
+    )
     infra_count = sum(1 for row in nmap_rows if row.category == "infrastructure")
+    fault_events = host_missing + port_closed + restart_events + link_events + suspect_events
+    latest_fault_event = max(fault_events, key=lambda event: event.timestamp) if fault_events else None
+    latest_fault_age = _format_relative_age(now, latest_fault_event.timestamp if latest_fault_event else None)
 
     indicators: list[str] = []
     if not nmap_rows:
@@ -184,9 +194,13 @@ def build_network_diagnosis(
         indicators.append(f"The latest Nmap inventory is {scan_age_label} and shows {len(nmap_rows)} visible device(s).")
 
     if host_missing:
-        indicators.append(f"{len(host_missing)} host-missing event(s) were recorded in the last 48 hours, which suggests one or more LAN devices disappeared between scans.")
+        indicators.append(
+            f"{len(host_missing)} host-missing event(s) were recorded in the last {DIAGNOSIS_EVENT_WINDOW_HOURS} hours, which suggests one or more LAN devices disappeared between scans."
+        )
     if port_closed:
-        indicators.append(f"{len(port_closed)} port-closed event(s) were recorded in the last 48 hours, which can indicate an uplink or switch-port flap.")
+        indicators.append(
+            f"{len(port_closed)} port-closed event(s) were recorded in the last {DIAGNOSIS_EVENT_WINDOW_HOURS} hours, which can indicate an uplink or switch-port flap."
+        )
     if router_snapshot is not None and router_snapshot.link_down_events:
         indicators.append(f"Router SNMP recorded {router_snapshot.link_down_events} linkDown trap(s) in the last {router_snapshot.window_hours} hours.")
     elif link_events:
@@ -215,26 +229,58 @@ def build_network_diagnosis(
         recommendations.insert(0, "Add an Nmap override naming the extender clearly once it is back online, so future disappearance events are easier to identify.")
 
     status = "healthy"
-    headline = "No strong extender fault indicators are visible in the saved telemetry."
-    if suspect_events or host_missing or port_closed or link_events or (router_snapshot is not None and router_snapshot.link_down_events):
-        status = "warning"
-        headline = "Saved telemetry shows LAN fault indicators that match a device disappearance or uplink flap."
-    if suspect_events and any(event.event_type in {"host_missing", "port_closed"} for event in suspect_events):
-        status = "critical"
-        headline = "The saved telemetry strongly suggests the extender or its uplink disappeared from the LAN during the fault."
-
+    status_label = "Resolved"
+    headline = "No strong extender fault indicators are visible in the recent telemetry."
     likely_cause = "No specific LAN-side fault is strongly indicated."
     confidence = "low"
     confidence_label = "Low confidence"
-    if host_missing and suspect_events:
+
+    active_fault = bool((host_missing or port_closed or link_events) and not visible_suspect)
+    recovered_fault = bool((host_missing or port_closed or suspect_events or restart_events or link_events) and visible_suspect and inventory_fresh)
+    stale_fault = bool((host_missing or port_closed or suspect_events or restart_events or link_events) and not inventory_fresh)
+
+    if stale_fault:
+        status = "stale"
+        status_label = "Stale Incident"
+        headline = "Older fault evidence exists, but the current inventory is not fresh enough to say whether the problem is still active."
+        likely_cause = "A previous LAN-side disappearance or reboot likely occurred, but the saved view is now stale."
+        confidence = "low"
+        confidence_label = "Stale data"
+        recommendations = [
+            "Run a fresh Nmap scan before trusting the current diagnosis.",
+            "Use the refreshed inventory to confirm whether the extender is back online or still absent.",
+            "If this was a one-off event, the diagnosis will age out automatically after the recent-event window closes.",
+        ]
+    elif active_fault and host_missing and suspect_events:
+        status = "critical"
+        status_label = "Active Fault"
+        headline = "Recent telemetry strongly suggests the extender or its uplink is still disappearing from the LAN."
         likely_cause = "The extender likely dropped off the LAN or lost its uplink during the incident."
         confidence = "high"
         confidence_label = "High confidence"
-    elif host_missing or port_closed or link_events:
+    elif active_fault:
+        status = "warning"
+        status_label = "Active Fault"
+        headline = "Recent telemetry still points to an unresolved LAN-side disappearance or uplink flap."
         likely_cause = "A LAN-side device disappearance or uplink flap is more likely than a pure internet outage."
         confidence = "medium"
         confidence_label = "Medium confidence"
+    elif recovered_fault:
+        status = "resolved"
+        status_label = "Recently Recovered"
+        headline = "The earlier fault evidence is still recent, but the suspect device is back in the latest inventory."
+        likely_cause = "The extender appears to have recovered after dropping off the LAN or losing its uplink."
+        confidence = "medium"
+        confidence_label = "Recovered"
+        recommendations = [
+            "Keep monitoring for another recurrence before power-cycling anything again.",
+            "Compare the current extender IP, MAC, and open ports with the previous healthy scan to confirm it came back cleanly.",
+            "If the fault repeats, capture a /networkdiag report before resetting the extender or router.",
+        ]
     elif restart_events:
+        status = "warning"
+        status_label = "Needs Review"
+        headline = "Router restart evidence exists, but there is not enough recent device-level evidence to isolate the extender."
         likely_cause = "Router restart evidence exists, but there is not enough device-level evidence to isolate the extender."
         confidence = "medium"
         confidence_label = "Medium confidence"
@@ -262,7 +308,7 @@ def build_network_diagnosis(
         evidence_items.append(
             {
                 "label": "Missing devices",
-                "value": f"{len(host_missing)} host-missing event(s) in the last 48 hours",
+                "value": f"{len(host_missing)} host-missing event(s) in the last {DIAGNOSIS_EVENT_WINDOW_HOURS} hours",
                 "hint": "These are emitted when devices vanish between Nmap scans.",
             }
         )
@@ -270,7 +316,7 @@ def build_network_diagnosis(
         evidence_items.append(
             {
                 "label": "Port changes",
-                "value": f"{len(port_closed)} port-closed event(s) in the last 48 hours",
+                "value": f"{len(port_closed)} port-closed event(s) in the last {DIAGNOSIS_EVENT_WINDOW_HOURS} hours",
                 "hint": "Useful when an uplink or switch-port flaps instead of a full reboot.",
             }
         )
@@ -293,10 +339,14 @@ def build_network_diagnosis(
 
     return {
         "status": status,
+        "statusLabel": status_label,
         "headline": headline,
         "likelyCause": likely_cause,
         "confidence": confidence,
         "confidenceLabel": confidence_label,
+        "eventWindowHours": DIAGNOSIS_EVENT_WINDOW_HOURS,
+        "inventoryFresh": inventory_fresh,
+        "latestFaultAge": latest_fault_age,
         "primarySuspect": primary_suspect,
         "scanAge": scan_age_label,
         "scanAgeMinutes": scan_age_minutes,
@@ -1342,7 +1392,17 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
   padding: 18px 20px;
   background: linear-gradient(135deg, rgba(56,189,248,.12), rgba(15,23,42,.10));
 }
+.diag-hero-head { display:flex; align-items:center; justify-content:space-between; gap: 12px; }
 .diag-kicker { color: var(--muted); font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
+.diag-state-pill {
+  display:inline-flex; align-items:center; justify-content:center;
+  padding: 6px 10px; border-radius: 999px; border: 1px solid var(--border);
+  font-size: 11px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase;
+}
+.diag-state-pill.critical, .diag-state-pill.warning { color: #fca5a5; background: rgba(239,68,68,.12); }
+.diag-state-pill.resolved { color: #86efac; background: rgba(34,197,94,.12); }
+.diag-state-pill.stale { color: #fcd34d; background: rgba(245,158,11,.12); }
+.diag-state-pill.healthy { color: #7dd3fc; background: rgba(56,189,248,.12); }
 .diag-cause { margin-top: 8px; font-size: 28px; font-weight: 900; letter-spacing: -.04em; line-height: 1.05; max-width: 24ch; }
 .diag-summary { margin-top: 10px; color: var(--muted); font-size: 15px; line-height: 1.5; max-width: 72ch; }
 .diag-stat {
@@ -1445,7 +1505,10 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
     <div class="diag-shell">
       <div class="diag-topline">
         <div class="diag-hero">
-          <div class="diag-kicker">Likely Cause</div>
+          <div class="diag-hero-head">
+            <div class="diag-kicker">Likely Cause</div>
+            <div class="diag-state-pill" id="diagState"></div>
+          </div>
           <div class="diag-cause" id="diagCause"></div>
           <div class="diag-summary" id="diagHeadline"></div>
         </div>
@@ -1825,14 +1888,17 @@ function renderInventoryMeta() {
   }
 }
 function renderDiagnosis() {
+  const stateNode = document.getElementById('diagState');
   setText('diagCause', diagnosis.likelyCause || diagnosis.headline || 'No diagnosis summary available.');
   setText('diagHeadline', diagnosis.headline || 'No diagnosis summary available.');
   setText('diagConfidence', diagnosis.confidenceLabel || 'Unknown');
-  setText('diagConfidenceNote', `${diagnosis.hostMissingCount || 0} missing-host, ${diagnosis.portClosedCount || 0} port-change, ${diagnosis.restartCount || 0} restart event(s)`);
+  setText('diagConfidenceNote', `${diagnosis.hostMissingCount || 0} missing-host, ${diagnosis.portClosedCount || 0} port-change, ${diagnosis.restartCount || 0} restart event(s) in ${diagnosis.eventWindowHours || 24}h`);
   setText('diagSuspect', diagnosis.primarySuspect || 'Unknown');
-  setText('diagScanAge', `Inventory ${diagnosis.scanAge || 'unknown'}`);
+  setText('diagScanAge', `Inventory ${diagnosis.scanAge || 'unknown'}${diagnosis.inventoryFresh ? '' : ' · stale'}`);
   setText('diagEvidenceSummary', `${diagnosis.inventoryDeviceCount || 0} visible / ${diagnosis.infrastructureCount || 0} infra`);
-  setText('diagLinkDown', `${diagnosis.linkDownCount || 0} linkDown trap(s)`);
+  setText('diagLinkDown', `${diagnosis.linkDownCount || 0} linkDown trap(s) · last fault ${diagnosis.latestFaultAge || 'unknown'}`);
+  stateNode.textContent = diagnosis.statusLabel || 'Resolved';
+  stateNode.className = `diag-state-pill ${diagnosis.status || 'healthy'}`;
 
   const list = document.getElementById('diagPrimaryList');
   clearNode(list);
@@ -1853,7 +1919,7 @@ function renderDiagnosis() {
     ? 'These are the strongest pieces of telemetry currently driving the diagnosis.'
     : 'Keep the response short and decisive when the fault happens again.';
   sideBody.textContent = showingEvidence
-    ? `Current confidence: ${diagnosis.confidenceLabel || 'Unknown'}. Primary suspect: ${diagnosis.primarySuspect || 'Unknown'}.`
+    ? `${diagnosis.statusLabel || 'Resolved'}. Current confidence: ${diagnosis.confidenceLabel || 'Unknown'}. Primary suspect: ${diagnosis.primarySuspect || 'Unknown'}.`
     : 'Start with a fresh scan, then compare the suspect device MAC, IP, and open ports before rebooting anything.';
 
   if (!items.length) {
