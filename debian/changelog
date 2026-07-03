@@ -1,3 +1,9 @@
+pi-probe-discord (1.1.13-1) unstable; urgency=medium
+
+  * Shorten the diagnosis event window, downgrade recovered extender faults immediately when inventory is fresh, and label stale incidents explicitly so resolved issues stop reading like active outages.
+
+ -- Codex Builder <noreply@example.invalid>  Fri, 03 Jul 2026 15:08:18 +0930
+
 pi-probe-discord (1.1.12-1) unstable; urgency=medium
 
   * Move the network fault diagnosis to the top of the dashboard, enlarge the incident summary, and trim the default event table so fault triage is easier to scan.
