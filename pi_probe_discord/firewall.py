@@ -314,10 +314,10 @@ def collect_firewall_snapshot(config: FirewallConfig) -> FirewallSnapshot:
 
 
 def format_firewall_snapshot_text(snapshot: FirewallSnapshot, detailed: bool = True) -> str:
-    status_text = "✅ UFW active" if snapshot.status.active else "⚪ UFW inactive"
+    status_text = "UFW active" if snapshot.status.active else "UFW inactive"
     policy = f"{snapshot.status.default_incoming} incoming / {snapshot.status.default_outgoing} outgoing"
     lines = [
-        "🧱 Firewall Snapshot",
+        "Firewall Snapshot",
         f"Status: {status_text}",
         f"Default: {policy}",
         f"Logging: {snapshot.status.logging}",
@@ -329,10 +329,10 @@ def format_firewall_snapshot_text(snapshot: FirewallSnapshot, detailed: bool = T
 
     if snapshot.top_sources:
         src, count = snapshot.top_sources[0]
-        lines.append(f"Top source: {src} — {count} events")
+        lines.append(f"Top source: {src} - {count} events")
     if snapshot.top_ports:
         port, count = snapshot.top_ports[0]
-        lines.append(f"Top port: {port} — {count} events")
+        lines.append(f"Top port: {port} - {count} events")
 
     if snapshot.notes:
         lines.append(f"Notes: {snapshot.notes[0]}")

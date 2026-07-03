@@ -93,7 +93,7 @@ def _build_firewall_alert_payload(
     return {
         "embeds": [
             {
-                "title": "🚨 Firewall Attack Alert",
+                "title": "Firewall Attack Alert",
                 "description": "Suspicious firewall activity crossed configured alert thresholds.",
                 "color": 15158332,
                 "fields": [

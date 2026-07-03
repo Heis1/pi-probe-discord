@@ -133,7 +133,7 @@ def build_embed(
             )
 
     if firewall_snapshot is not None:
-        status_value = "✅ UFW active" if firewall_snapshot.status.active else "⚪ UFW inactive"
+        status_value = "UFW active" if firewall_snapshot.status.active else "UFW inactive"
         policy_value = f"{firewall_snapshot.status.default_incoming} in / {firewall_snapshot.status.default_outgoing} out"
         top_sources = ", ".join(f"{src} ({count})" for src, count in firewall_snapshot.top_sources[:3]) or "None"
         top_ports = ", ".join(f"{port} ({count})" for port, count in firewall_snapshot.top_ports[:3]) or "None"
