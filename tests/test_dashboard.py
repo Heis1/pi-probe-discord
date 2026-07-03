@@ -21,6 +21,7 @@ from pi_probe_discord.dashboard import (
     build_network_diagnosis,
     build_dashboard_summary,
     generate_interactive_dashboard,
+    ping_dashboard_device,
     run_dashboard_nmap_scan,
     serve_interactive_dashboard,
 )
@@ -454,6 +455,12 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(diagnosis["status"], "critical")
         self.assertEqual(diagnosis["hostMissingCount"], 1)
         self.assertIn("extender", diagnosis["headline"].lower())
+
+    def test_ping_dashboard_device_reports_latency(self) -> None:
+        with patch("pi_probe_discord.dashboard._run_optional_command", return_value=(True, "64 bytes from 192.168.1.1: icmp_seq=1 ttl=64 time=2.31 ms")):
+            result = ping_dashboard_device({"ip": "192.168.1.1", "name": "Router"})
+        self.assertTrue(result["ok"])
+        self.assertIn("2.31 ms", result["message"])
 
     def test_dashboard_server_health_and_status_endpoints(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

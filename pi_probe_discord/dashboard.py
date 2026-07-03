@@ -11,6 +11,7 @@ from pathlib import Path
 import re
 import sqlite3
 import ssl
+import subprocess
 from typing import Any
 
 from .baselines import average, history_points_for_window
@@ -467,6 +468,15 @@ def _latest_timestamp(values: list[datetime | None]) -> datetime | None:
             normalized.append(value)
     present = normalized
     return max(present) if present else None
+
+
+def _run_optional_command(command: list[str], *, timeout: int = 6) -> tuple[bool, str]:
+    try:
+        completed = subprocess.run(command, capture_output=True, text=True, timeout=timeout, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return False, ""
+    output = (completed.stdout or completed.stderr or "").strip()
+    return completed.returncode == 0, output
 
 
 def _build_thresholds(config: AppConfig | None) -> DashboardThresholds:
@@ -1318,6 +1328,9 @@ body.theme-clean select, body.theme-clean input { background: rgba(255,255,255,.
   font-size: 11px; color: var(--muted); font-weight: 700;
 }
 .device-chip.primary { color: var(--text); }
+.device-chip.fresh { color: #86efac; }
+.device-chip.aging { color: #fcd34d; }
+.device-chip.stale { color: #fca5a5; }
 .device-editor {
   margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border);
   display:grid; grid-template-columns: 1fr 1fr; gap: 8px;
@@ -1331,6 +1344,7 @@ body.theme-clean select, body.theme-clean input { background: rgba(255,255,255,.
 }
 .device-editor .span-2 { grid-column: 1 / -1; }
 .device-actions { display:flex; gap: 8px; grid-column: 1 / -1; }
+.device-tool-row { display:flex; gap: 8px; grid-column: 1 / -1; }
 .mini-button {
   appearance:none; border: 1px solid var(--border); border-radius: 10px;
   background: var(--panel-2); color: var(--text); padding: 8px 10px; font-size: 12px; font-weight: 800; cursor: pointer;
@@ -1786,6 +1800,29 @@ function formatFreshness(value) {
   }
   return `${relative} · ${date.toLocaleString()}`;
 }
+function relativeFreshness(value) {
+  if (!value) return 'unknown';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'unknown';
+  const diffMinutes = Math.max(0, Math.floor((Date.now() - date.getTime()) / 60000));
+  if (diffMinutes < 1) return 'just now';
+  if (diffMinutes < 60) return `${diffMinutes}m ago`;
+  const hours = Math.floor(diffMinutes / 60);
+  const minutes = diffMinutes % 60;
+  if (hours < 24) return minutes ? `${hours}h ${minutes}m ago` : `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  const remHours = hours % 24;
+  return remHours ? `${days}d ${remHours}h ago` : `${days}d ago`;
+}
+function freshnessClass(value) {
+  if (!value) return 'stale';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'stale';
+  const diffMinutes = Math.max(0, Math.floor((Date.now() - date.getTime()) / 60000));
+  if (diffMinutes <= 30) return 'fresh';
+  if (diffMinutes <= 180) return 'aging';
+  return 'stale';
+}
 function setFreshness(elementId, value, prefix = 'Updated') {
   const node = document.getElementById(elementId);
   if (!node) return;
@@ -2051,6 +2088,12 @@ function renderDeviceMap() {
         mac.textContent = `MAC ${device.mac}`;
         meta.appendChild(mac);
       }
+      if (device.lastSeen) {
+        const seen = document.createElement('span');
+        seen.className = `device-chip ${freshnessClass(device.lastSeen)}`;
+        seen.textContent = `Seen ${relativeFreshness(device.lastSeen)}`;
+        meta.appendChild(seen);
+      }
       const portCount = document.createElement('span');
       portCount.className = 'device-chip primary';
       portCount.textContent = `${device.portCount || 0} open port${(device.portCount || 0) === 1 ? '' : 's'}`;
@@ -2073,7 +2116,7 @@ function renderDeviceMap() {
       card.appendChild(ip);
       card.appendChild(meta);
       if (services.childNodes.length) card.appendChild(services);
-      if (inventory.actionsEnabled) card.appendChild(buildDeviceEditor(device));
+      card.appendChild(buildDeviceEditor(device));
       list.appendChild(card);
     });
     cluster.appendChild(list);
@@ -2133,10 +2176,26 @@ function buildDeviceEditor(device) {
   actions.appendChild(save);
   actions.appendChild(clear);
 
+  const tools = document.createElement('div');
+  tools.className = 'device-tool-row';
+  const ping = document.createElement('button');
+  ping.type = 'button';
+  ping.className = 'mini-button';
+  ping.textContent = 'Ping';
+  tools.appendChild(ping);
+
   editor.appendChild(nameWrap);
   editor.appendChild(categoryWrap);
+  editor.appendChild(tools);
   editor.appendChild(actions);
   editor.appendChild(status);
+
+  save.disabled = !inventory.actionsEnabled;
+  clear.disabled = !inventory.actionsEnabled;
+  if (!inventory.actionsEnabled) {
+    nameInput.disabled = true;
+    categorySelect.disabled = true;
+  }
 
   editor.addEventListener('submit', async event => {
     event.preventDefault();
@@ -2165,7 +2224,42 @@ function buildDeviceEditor(device) {
     clear.disabled = false;
   });
 
+  ping.addEventListener('click', async () => {
+    ping.disabled = true;
+    status.textContent = `Pinging ${device.ip || device.hostname || device.name || 'device'}...`;
+    const response = await pingDashboardDevice(device);
+    status.textContent = response.message;
+    ping.disabled = false;
+  });
+
+  if (!inventory.actionsEnabled) {
+    status.textContent = device.hostname ? `Host ${device.hostname} · ping available` : 'Ping available';
+  }
+
   return editor;
+}
+async function pingDashboardDevice(device) {
+  try {
+    const response = await fetch('/api/device/ping', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ip: device.ip || '',
+        hostname: device.hostname || '',
+        name: device.name || '',
+      }),
+    });
+    const result = await response.json();
+    return {
+      ok: Boolean(response.ok && result.ok),
+      message: result.message || 'Ping request completed.',
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      message: `Ping failed: ${error instanceof Error ? error.message : 'request error'}`,
+    };
+  }
 }
 async function submitDeviceOverride(device, changes) {
   const selector = device.mac
@@ -2897,6 +2991,25 @@ def apply_dashboard_nmap_override(output_path: str, payload: dict[str, Any]) -> 
     return {"ok": True, "message": message}
 
 
+def ping_dashboard_device(payload: dict[str, Any]) -> dict[str, Any]:
+    target = str(payload.get("ip") or payload.get("hostname") or "").strip()
+    label = str(payload.get("name") or target or "device").strip()
+    if not target:
+        return {"ok": False, "message": "Ping target missing."}
+    if not re.fullmatch(r"[A-Za-z0-9_.:-]+", target):
+        return {"ok": False, "message": "Ping target contains unsupported characters."}
+
+    ok, output = _run_optional_command(["ping", "-c", "1", "-W", "1", target], timeout=3)
+    if ok:
+        latency_match = re.search(r"time=([0-9.]+)\s*ms", output)
+        if latency_match:
+            return {"ok": True, "message": f"{label} reachable: {latency_match.group(1)} ms"}
+        return {"ok": True, "message": f"{label} reachable"}
+    if output:
+        return {"ok": False, "message": f"{label} unreachable: {output.splitlines()[-1][:160]}"}
+    return {"ok": False, "message": f"{label} unreachable"}
+
+
 def serve_interactive_dashboard(
     output_path: str,
     host: str,
@@ -2982,6 +3095,21 @@ def serve_interactive_dashboard(
                     self._send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "message": "Invalid JSON payload"})
                     return
                 result = apply_dashboard_nmap_override(str(file_path), payload if isinstance(payload, dict) else {})
+                status = HTTPStatus.OK if result.get("ok") else HTTPStatus.BAD_REQUEST
+                self._send_json(status, result)
+                return
+            if self.path == "/api/device/ping":
+                try:
+                    content_length = int(self.headers.get("Content-Length", "0"))
+                except ValueError:
+                    content_length = 0
+                try:
+                    raw = self.rfile.read(content_length) if content_length > 0 else b"{}"
+                    payload = json.loads(raw.decode("utf-8"))
+                except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                    self._send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "message": "Invalid JSON payload"})
+                    return
+                result = ping_dashboard_device(payload if isinstance(payload, dict) else {})
                 status = HTTPStatus.OK if result.get("ok") else HTTPStatus.BAD_REQUEST
                 self._send_json(status, result)
                 return
