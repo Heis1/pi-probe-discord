@@ -1,3 +1,9 @@
+pi-probe-discord (1.1.14-1) unstable; urgency=medium
+
+  * Add a clearer heatmap legend, short summary cards, and plain-language takeaway text so the hourly performance heatmap is easier to read.
+
+ -- Codex Builder <noreply@example.invalid>  Fri, 03 Jul 2026 15:12:39 +0930
+
 pi-probe-discord (1.1.13-1) unstable; urgency=medium
 
   * Shorten the diagnosis event window, downgrade recovered extender faults immediately when inventory is fresh, and label stale incidents explicitly so resolved issues stop reading like active outages.
