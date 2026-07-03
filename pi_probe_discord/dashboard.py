@@ -1339,6 +1339,21 @@ body.theme-clean select, body.theme-clean input { background: rgba(255,255,255,.
 .mini-button.warn { background: rgba(245,158,11,.14); }
 .device-status { grid-column: 1 / -1; color: var(--muted); font-size: 11px; line-height: 1.4; min-height: 16px; }
 .chart-meta { display:flex; flex-wrap:wrap; gap: 10px; margin: 10px 0 0; }
+.chart-summary {
+  display:grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 12px 0 10px;
+}
+.summary-card {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--panel-2);
+  padding: 12px 13px;
+}
+.summary-card .label { color: var(--muted); font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
+.summary-card .value { margin-top: 7px; font-size: 16px; font-weight: 900; letter-spacing: -.02em; }
+.summary-card .mini { margin-top: 5px; color: var(--muted); font-size: 12px; line-height: 1.4; }
 .legend-chip {
   display:inline-flex; align-items:center; gap: 8px;
   padding: 7px 11px; border-radius: 999px;
@@ -1454,7 +1469,7 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
 .linkline { margin-top: auto; }
 .linkline a { color: var(--accent); text-decoration: none; font-weight: 700; }
 @media (max-width: 1180px) {
-  .hero, .grid, .controls, .hero-grid, .score-grid, .diag-topline, .diag-grid { grid-template-columns: 1fr; }
+  .hero, .grid, .controls, .hero-grid, .score-grid, .diag-topline, .diag-grid, .chart-summary { grid-template-columns: 1fr; }
 }
 </style>
 </head>
@@ -1567,7 +1582,9 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
       </div>
       <div class="panel">
         <div class="panel-head"><div><h2>Traffic-Light Heatmap</h2><p>Hourly average download. Green exceeds the good threshold, amber is acceptable, red is below target.</p></div><div class="panel-stamp" id="heatmapFreshness"></div></div>
+        <div id="heatmapSummary" class="chart-summary"></div>
         <div id="heatmap" class="chart-small"></div>
+        <div id="heatmapLegend" class="chart-meta"></div>
       </div>
     </div>
     <div class="stack">
@@ -2205,6 +2222,70 @@ function heatmapColor(value, maxValue) {
   if (value >= thresholds.heatmapWarnMbps) return '#f59e0b';
   return value >= thresholds.outageDownloadMbps ? '#ef4444' : '#b91c1c';
 }
+function heatmapBand(value) {
+  if (value === null || value === undefined) return 'No data';
+  if (value >= thresholds.heatmapGoodMbps) return 'Strong';
+  if (value >= thresholds.heatmapWarnMbps) return 'Acceptable';
+  if (value >= thresholds.outageDownloadMbps) return 'Weak';
+  return 'Severely weak';
+}
+function renderHeatmapLegend(summary) {
+  const wrap = document.getElementById('heatmapLegend');
+  clearNode(wrap);
+  [
+    { color: '#15803d', label: `Strong ≥ ${thresholds.heatmapGoodMbps.toFixed(0)} Mbps` },
+    { color: '#f59e0b', label: `Acceptable ${thresholds.heatmapWarnMbps.toFixed(0)}-${(thresholds.heatmapGoodMbps - 0.1).toFixed(0)} Mbps` },
+    { color: '#ef4444', label: `Weak ${thresholds.outageDownloadMbps.toFixed(0)}-${(thresholds.heatmapWarnMbps - 0.1).toFixed(0)} Mbps` },
+    { color: '#b91c1c', label: `Severely weak < ${thresholds.outageDownloadMbps.toFixed(0)} Mbps` },
+    { color: 'rgba(148,163,184,.35)', label: `${summary.coverage}% hourly cells have data` },
+  ].forEach(item => {
+    const chip = document.createElement('div');
+    chip.className = 'legend-chip';
+    const swatch = document.createElement('span');
+    swatch.className = 'legend-swatch';
+    swatch.style.background = item.color;
+    chip.appendChild(swatch);
+    chip.appendChild(document.createTextNode(item.label));
+    wrap.appendChild(chip);
+  });
+}
+function renderHeatmapSummary(summary) {
+  const wrap = document.getElementById('heatmapSummary');
+  clearNode(wrap);
+  [
+    {
+      label: 'Best Window',
+      value: summary.bestLabel,
+      note: summary.bestValue === null ? 'No strong period identified yet.' : `${summary.bestValue.toFixed(0)} Mbps average download`,
+    },
+    {
+      label: 'Weakest Window',
+      value: summary.worstLabel,
+      note: summary.worstValue === null ? 'No weak period identified yet.' : `${summary.worstValue.toFixed(0)} Mbps average download`,
+    },
+    {
+      label: 'Reading',
+      value: summary.takeaway,
+      note: `${summary.goodCells} strong, ${summary.warnCells} acceptable, ${summary.badCells + summary.severeCells} weak cells`,
+    },
+  ].forEach(item => {
+    const card = document.createElement('div');
+    card.className = 'summary-card';
+    const label = document.createElement('div');
+    label.className = 'label';
+    label.textContent = item.label;
+    const value = document.createElement('div');
+    value.className = 'value';
+    value.textContent = item.value;
+    const note = document.createElement('div');
+    note.className = 'mini';
+    note.textContent = item.note;
+    card.appendChild(label);
+    card.appendChild(value);
+    card.appendChild(note);
+    wrap.appendChild(card);
+  });
+}
 function renderTimeline(data, events) {
   const metric = document.getElementById('metric').value;
   const surface = chartSurface('timeline', 390);
@@ -2263,6 +2344,7 @@ function renderHeatmap(data) {
   const maxValue = Math.max(thresholds.heatmapGoodMbps * 1.15, ...rawData.map(item => item.download || 0), thresholds.heatmapWarnMbps + 1);
   const cellWidth = (surface.width - surface.left - surface.right) / 24;
   const cellHeight = (surface.height - surface.top - surface.bottom) / 7;
+  const hourlyCells = [];
   days.forEach((day, rowIndex) => {
     const label = svgEl('text', { x: surface.left - 10, y: surface.top + rowIndex * cellHeight + cellHeight / 2 + 4, 'text-anchor': 'end', fill: chartTheme().muted, 'font-size': 11 });
     label.textContent = day.slice(0, 3);
@@ -2270,6 +2352,7 @@ function renderHeatmap(data) {
     Array.from({ length: 24 }, (_, hour) => hour).forEach(hour => {
       const values = data.filter(item => item.day === day && item.hour === hour).map(item => item.download).filter(v => v !== null);
       const avgValue = values.length ? average(values) : null;
+      hourlyCells.push({ day, hour, avgValue, band: heatmapBand(avgValue) });
       const rect = svgEl('rect', {
         x: surface.left + hour * cellWidth,
         y: surface.top + rowIndex * cellHeight,
@@ -2279,7 +2362,7 @@ function renderHeatmap(data) {
         fill: heatmapColor(avgValue, maxValue)
       });
       const title = svgEl('title');
-      title.textContent = `${day} ${String(hour).padStart(2, '0')}:00 • ${avgValue === null ? 'No data' : `${avgValue.toFixed(1)} Mbps`}`;
+      title.textContent = `${day} ${String(hour).padStart(2, '0')}:00 • ${avgValue === null ? 'No data' : `${avgValue.toFixed(1)} Mbps`} • ${heatmapBand(avgValue)}`;
       rect.appendChild(title);
       surface.svg.appendChild(rect);
     });
@@ -2290,6 +2373,31 @@ function renderHeatmap(data) {
     label.textContent = String(hour);
     surface.svg.appendChild(label);
   });
+  const populatedCells = hourlyCells.filter(item => item.avgValue !== null);
+  const bestCell = populatedCells.length ? populatedCells.reduce((best, item) => (best === null || (item.avgValue || 0) > (best.avgValue || 0) ? item : best), null) : null;
+  const worstCell = populatedCells.length ? populatedCells.reduce((best, item) => (best === null || (item.avgValue || 0) < (best.avgValue || 0) ? item : best), null) : null;
+  const goodCells = populatedCells.filter(item => item.band === 'Strong').length;
+  const warnCells = populatedCells.filter(item => item.band === 'Acceptable').length;
+  const badCells = populatedCells.filter(item => item.band === 'Weak').length;
+  const severeCells = populatedCells.filter(item => item.band === 'Severely weak').length;
+  const coverage = Math.round((populatedCells.length / hourlyCells.length) * 100);
+  let takeaway = 'Mostly acceptable';
+  if (goodCells >= Math.max(warnCells + badCells + severeCells, 1)) takeaway = 'Consistently strong';
+  else if (badCells + severeCells > goodCells + warnCells) takeaway = 'Recurring weak periods';
+  else if (severeCells >= 4) takeaway = 'Severe evening slowdowns';
+  renderHeatmapSummary({
+    bestLabel: bestCell ? `${bestCell.day.slice(0, 3)} ${String(bestCell.hour).padStart(2, '0')}:00` : 'No data',
+    bestValue: bestCell ? bestCell.avgValue : null,
+    worstLabel: worstCell ? `${worstCell.day.slice(0, 3)} ${String(worstCell.hour).padStart(2, '0')}:00` : 'No data',
+    worstValue: worstCell ? worstCell.avgValue : null,
+    takeaway,
+    goodCells,
+    warnCells,
+    badCells,
+    severeCells,
+    coverage,
+  });
+  renderHeatmapLegend({ coverage, goodCells, warnCells, badCells, severeCells });
 }
 function renderScatter(data) {
   const surface = chartSurface('scatter', 320);
