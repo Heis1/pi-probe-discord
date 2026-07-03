@@ -1,3 +1,9 @@
+pi-probe-discord (1.1.15-1) unstable; urgency=medium
+
+  * Show per-device last-seen age in the dashboard inventory and add an on-demand ping action so device reachability can be checked directly from the dashboard.
+
+ -- Codex Builder <noreply@example.invalid>  Fri, 03 Jul 2026 15:19:47 +0930
+
 pi-probe-discord (1.1.14-1) unstable; urgency=medium
 
   * Add a clearer heatmap legend, short summary cards, and plain-language takeaway text so the hourly performance heatmap is easier to read.
