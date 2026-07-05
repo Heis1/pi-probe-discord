@@ -1,3 +1,9 @@
+pi-probe-discord (1.1.17-1) unstable; urgency=medium
+
+  * Enforce Unix line endings for Debian packaging and service files so release builds are reproducible from Windows checkouts.
+
+ -- Codex Builder <noreply@example.invalid>  Sun, 05 Jul 2026 15:23:00 +0930
+
 pi-probe-discord (1.1.16-1) unstable; urgency=medium
 
   * Polish the dashboard and firewall snapshot, add device detail for noisy firewall sources, focus LAN fault diagnosis on key devices, and lock dashboard actions behind an optional token.
