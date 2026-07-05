@@ -3358,14 +3358,14 @@ def generate_premium_dashboard(history: dict[str, list[dict[str, Any]]], now: da
     ax_band.xaxis.get_offset_text().set_visible(False)
     ax_band.legend(loc="lower right", frameon=False, labelcolor="#cbd5e1")
 
-    heat_values = [[None for _ in range(24)] for _ in range(7)]
+    heat_values = [[float("nan") for _ in range(24)] for _ in range(7)]
     for dow_idx, day_name in enumerate(DAY_NAMES):
         for hour in range(24):
             hour_values = [
                 row.download for row in classified_rows
                 if row.download is not None and row.timestamp.strftime("%A") == day_name and row.timestamp.hour == hour
             ]
-            heat_values[dow_idx][hour] = average(hour_values)
+            heat_values[dow_idx][hour] = average(hour_values) if hour_values else float("nan")
     ax_heat_panel = figure.add_subplot(gs[1, 7:])
     ax_heat = style_panel(ax_heat_panel, "Traffic-Light Speed Heatmap", "Average download by weekday and hour.")
     image = ax_heat.imshow(heat_values, aspect="auto", cmap="viridis")

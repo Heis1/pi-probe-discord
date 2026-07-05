@@ -21,11 +21,12 @@ from pi_probe_discord.dashboard import (
     build_network_diagnosis,
     build_dashboard_summary,
     generate_interactive_dashboard,
+    generate_premium_dashboard,
     ping_dashboard_device,
     run_dashboard_nmap_scan,
     serve_interactive_dashboard,
 )
-from pi_probe_discord.models import AppConfig, RouterSnapshot
+from pi_probe_discord.models import AppConfig, RouterSnapshot, SpeedResult
 
 
 def make_config(base_dir: Path) -> AppConfig:
@@ -43,6 +44,7 @@ def make_config(base_dir: Path) -> AppConfig:
         interactive_dashboard_tls_enabled=False,
         interactive_dashboard_tls_cert_file=str(base_dir / "dashboard-cert.pem"),
         interactive_dashboard_tls_key_file=str(base_dir / "dashboard-key.pem"),
+        interactive_dashboard_api_token="",
         public_dashboard_url="https://example.com/dashboard",
         dashboard_link_label="Open Interactive Dashboard",
         outage_download_mbps=50.0,
@@ -187,6 +189,35 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(stats["avgPing"], 4.0)
         self.assertEqual(stats["failedCount"], 1)
         self.assertEqual(stats["outageCount"], 1)
+
+    def test_generate_premium_dashboard_handles_sparse_heatmap(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            now = datetime(2026, 6, 6, 12, 0, 0)
+            history = {
+                "download": [
+                    {"x": (now - timedelta(hours=2)).isoformat(), "y": 320.0},
+                    {"x": (now - timedelta(hours=1)).isoformat(), "y": 240.0},
+                ],
+                "upload": [
+                    {"x": (now - timedelta(hours=2)).isoformat(), "y": 44.0},
+                    {"x": (now - timedelta(hours=1)).isoformat(), "y": 42.0},
+                ],
+                "ping": [
+                    {"x": (now - timedelta(hours=2)).isoformat(), "y": 4.0},
+                    {"x": (now - timedelta(hours=1)).isoformat(), "y": 5.0},
+                ],
+            }
+
+            ok, message = generate_premium_dashboard(
+                history,
+                now,
+                str(base / "speed_chart.png"),
+                SpeedResult(ok=True, summary="Download 240 Mbps | Upload 42 Mbps | Ping 5 ms", download_mbps=240.0, upload_mbps=42.0, ping_ms=5.0),
+            )
+
+            self.assertTrue(ok, message)
+            self.assertTrue((base / "speed_chart.png").exists())
 
     def test_version_string_falls_back_to_dpkg_version(self) -> None:
         with patch("pi_probe_discord.version_check.current_version", return_value="1.1.7-1"):
