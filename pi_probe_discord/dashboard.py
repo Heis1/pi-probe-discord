@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+import ipaddress
 from importlib import metadata as importlib_metadata
 import json
 from pathlib import Path
@@ -15,6 +16,7 @@ import subprocess
 from typing import Any
 
 from .baselines import average, history_points_for_window
+from .firewall import FirewallConfig, FirewallSnapshot, collect_firewall_snapshot
 from .models import AppConfig, RouterSnapshot, SpeedResult
 
 try:
@@ -35,6 +37,7 @@ STATUS_FILE_NAME = "status.json"
 SERVICE_NAME = "pi-probe-discord-dashboard"
 MAX_REASONABLE_PING_MS = 1000.0
 DIAGNOSIS_EVENT_WINDOW_HOURS = 24
+DIAGNOSIS_DECISION_WINDOW_HOURS = 8
 
 
 @dataclass
@@ -126,6 +129,35 @@ def _is_extender_hint(text: str) -> bool:
     )
 
 
+def _key_device_role(row: NmapDeviceRow) -> str:
+    text = f"{row.name} {row.hostname} {row.vendor} {row.ip}".lower()
+    if "pi-probe" in text:
+        return "pi-probe server"
+    if _is_extender_hint(text):
+        return "extender"
+    if row.ip.endswith(".1") or ("router" in text and row.category == "infrastructure"):
+        return "router"
+    return ""
+
+
+def _event_matches_key_device(event: RouterEvent, key_devices: list[dict[str, str]]) -> bool:
+    text = f"{event.source} {event.message} {event.event_type}".lower()
+    event_type = event.event_type.lower()
+    if "linkdown" in event_type or event_type in {"snmpv2-mib::warmstart", "snmpv2-mib::coldstart"}:
+        return True
+    for device in key_devices:
+        candidates = [
+            device.get("ip", ""),
+            device.get("name", ""),
+            device.get("hostname", ""),
+            device.get("vendor", ""),
+            device.get("role", ""),
+        ]
+        if any(candidate and candidate.lower() in text for candidate in candidates):
+            return True
+    return False
+
+
 def build_network_diagnosis(
     events: list[RouterEvent],
     nmap_rows: list[NmapDeviceRow],
@@ -145,7 +177,9 @@ def build_network_diagnosis(
             now = now.replace(tzinfo=scanned_at.tzinfo)
         scan_age_minutes = max(0, int((now - scanned_at).total_seconds() // 60))
     issue_window = now - timedelta(hours=DIAGNOSIS_EVENT_WINDOW_HOURS)
+    decision_window = now - timedelta(hours=DIAGNOSIS_DECISION_WINDOW_HOURS)
     recent_events: list[RouterEvent] = []
+    decision_events: list[RouterEvent] = []
     for event in events:
         event_time = event.timestamp
         if now.tzinfo is not None and event_time.tzinfo is None:
@@ -154,24 +188,89 @@ def build_network_diagnosis(
             event_time = event_time.replace(tzinfo=None)
         if event_time >= issue_window:
             recent_events.append(event)
-    host_missing = [event for event in recent_events if event.event_type == "host_missing"]
-    port_closed = [event for event in recent_events if event.event_type == "port_closed"]
-    restart_events = [
+        if event_time >= decision_window:
+            decision_events.append(event)
+    host_missing_context = [event for event in recent_events if event.event_type == "host_missing"]
+    port_closed_context = [event for event in recent_events if event.event_type == "port_closed"]
+    suspect_events_context = [
+        event
+        for event in recent_events
+        if _is_extender_hint(f"{event.source} {event.message} {event.event_type}")
+    ]
+    restart_events_context = [
         event
         for event in recent_events
         if event.event_type.lower() in {"snmpv2-mib::warmstart", "snmpv2-mib::coldstart"}
     ]
-    link_events = [event for event in recent_events if "linkdown" in event.event_type.lower()]
-    auth_events = [event for event in recent_events if "authenticationfailure" in event.event_type.lower()]
+    link_events_context = [event for event in recent_events if "linkdown" in event.event_type.lower()]
+
+    host_missing = [event for event in decision_events if event.event_type == "host_missing"]
+    port_closed = [event for event in decision_events if event.event_type == "port_closed"]
+    restart_events = [
+        event
+        for event in decision_events
+        if event.event_type.lower() in {"snmpv2-mib::warmstart", "snmpv2-mib::coldstart"}
+    ]
+    link_events = [event for event in decision_events if "linkdown" in event.event_type.lower()]
+    auth_events = [event for event in decision_events if "authenticationfailure" in event.event_type.lower()]
     suspect_events = [
         event
-        for event in recent_events
+        for event in decision_events
         if _is_extender_hint(f"{event.source} {event.message} {event.event_type}")
     ]
     suspect_devices = [
         row
         for row in nmap_rows
         if _is_extender_hint(f"{row.name} {row.hostname} {row.vendor}")
+    ]
+    broad_context_fault_events = (
+        host_missing_context
+        + port_closed_context
+        + restart_events_context
+        + link_events_context
+        + suspect_events_context
+    )
+    key_devices = [
+        {
+            "role": role,
+            "name": row.name,
+            "hostname": row.hostname,
+            "ip": row.ip,
+            "vendor": row.vendor,
+        }
+        for row in nmap_rows
+        if (role := _key_device_role(row))
+    ]
+    key_context_events = [event for event in recent_events if _event_matches_key_device(event, key_devices)]
+    key_decision_events = [event for event in decision_events if _event_matches_key_device(event, key_devices)]
+    ignored_context_events = max(0, len(broad_context_fault_events) - len(key_context_events))
+    host_missing_context = [event for event in key_context_events if event.event_type == "host_missing"]
+    port_closed_context = [event for event in key_context_events if event.event_type == "port_closed"]
+    suspect_events_context = [
+        event
+        for event in key_context_events
+        if _is_extender_hint(f"{event.source} {event.message} {event.event_type}")
+    ]
+    restart_events_context = [
+        event
+        for event in key_context_events
+        if event.event_type.lower() in {"snmpv2-mib::warmstart", "snmpv2-mib::coldstart"}
+    ]
+    link_events_context = [event for event in key_context_events if "linkdown" in event.event_type.lower()]
+
+    host_missing = [event for event in key_decision_events if event.event_type == "host_missing"]
+    port_closed = [event for event in key_decision_events if event.event_type == "port_closed"]
+    restart_events = [
+        event
+        for event in key_decision_events
+        if event.event_type.lower() in {"snmpv2-mib::warmstart", "snmpv2-mib::coldstart"}
+    ]
+    link_events = [event for event in key_decision_events if "linkdown" in event.event_type.lower()]
+    auth_events = [event for event in key_decision_events if "authenticationfailure" in event.event_type.lower()]
+    suspect_events = [
+        event
+        for event in key_decision_events
+        if _is_extender_hint(f"{event.source} {event.message} {event.event_type}")
     ]
     visible_suspect = bool(suspect_devices)
     inventory_fresh = bool(
@@ -181,10 +280,31 @@ def build_network_diagnosis(
     )
     infra_count = sum(1 for row in nmap_rows if row.category == "infrastructure")
     fault_events = host_missing + port_closed + restart_events + link_events + suspect_events
+    context_fault_events = (
+        host_missing_context
+        + port_closed_context
+        + restart_events_context
+        + link_events_context
+        + suspect_events_context
+    )
     latest_fault_event = max(fault_events, key=lambda event: event.timestamp) if fault_events else None
+    latest_context_fault_event = max(context_fault_events, key=lambda event: event.timestamp) if context_fault_events else None
     latest_fault_age = _format_relative_age(now, latest_fault_event.timestamp if latest_fault_event else None)
+    latest_context_fault_age = _format_relative_age(
+        now,
+        latest_context_fault_event.timestamp if latest_context_fault_event else None,
+    )
+    has_historical_fault_context = bool(context_fault_events and not fault_events)
 
     indicators: list[str] = []
+    if key_devices:
+        monitored = ", ".join(
+            f"{device['role']}: {device['name'] or device['hostname'] or device['ip']}"
+            for device in key_devices
+        )
+        indicators.append(f"Diagnosis is scoped to key devices only: {monitored}.")
+    else:
+        indicators.append("Diagnosis is scoped to key devices only, but no router, pi-probe server, or extender was confidently identified in inventory.")
     if not nmap_rows:
         indicators.append("No Nmap inventory is available yet, so the dashboard cannot confirm whether the extender is currently visible.")
     elif scanned_at is None:
@@ -196,11 +316,19 @@ def build_network_diagnosis(
 
     if host_missing:
         indicators.append(
-            f"{len(host_missing)} host-missing event(s) were recorded in the last {DIAGNOSIS_EVENT_WINDOW_HOURS} hours, which suggests one or more LAN devices disappeared between scans."
+            f"{len(host_missing)} host-missing event(s) were recorded in the last {DIAGNOSIS_DECISION_WINDOW_HOURS} hours, which suggests one or more LAN devices disappeared between scans."
         )
     if port_closed:
         indicators.append(
-            f"{len(port_closed)} port-closed event(s) were recorded in the last {DIAGNOSIS_EVENT_WINDOW_HOURS} hours, which can indicate an uplink or switch-port flap."
+            f"{len(port_closed)} port-closed event(s) were recorded in the last {DIAGNOSIS_DECISION_WINDOW_HOURS} hours, which can indicate an uplink or switch-port flap."
+        )
+    if has_historical_fault_context:
+        indicators.append(
+            f"Older fault evidence exists in the {DIAGNOSIS_EVENT_WINDOW_HOURS}h context window, but the last relevant event was {latest_context_fault_age}, so it is not driving the current status."
+        )
+    if ignored_context_events:
+        indicators.append(
+            f"{ignored_context_events} non-key device event(s) were ignored because they did not involve the router, pi-probe server, or extender."
         )
     if router_snapshot is not None and router_snapshot.link_down_events:
         indicators.append(f"Router SNMP recorded {router_snapshot.link_down_events} linkDown trap(s) in the last {router_snapshot.window_hours} hours.")
@@ -278,6 +406,18 @@ def build_network_diagnosis(
             "Compare the current extender IP, MAC, and open ports with the previous healthy scan to confirm it came back cleanly.",
             "If the fault repeats, capture a /networkdiag report before resetting the extender or router.",
         ]
+    elif has_historical_fault_context:
+        status = "healthy"
+        status_label = "No Current Fault"
+        headline = f"No current LAN fault is detected. The last relevant fault event was {latest_context_fault_age}, so it is being treated as history."
+        likely_cause = "Previous device-disappearance evidence exists, but it is outside the current decision window."
+        confidence = "medium"
+        confidence_label = "Current view"
+        recommendations = [
+            "No immediate action is needed from the old event alone.",
+            "Run a fresh Nmap scan if the dashboard looks wrong or a device still seems missing.",
+            "If the fault repeats, capture /networkdiag before rebooting gear so the fresh evidence is preserved.",
+        ]
     elif restart_events:
         status = "warning"
         status_label = "Needs Review"
@@ -294,6 +434,8 @@ def build_network_diagnosis(
         }
     )
     primary_suspect = suspect_names[0] if suspect_names else "No obvious extender-like device in current inventory"
+    if has_historical_fault_context and status == "healthy":
+        primary_suspect = "None active"
 
     evidence_items: list[dict[str, str]] = []
     if suspect_events:
@@ -330,13 +472,22 @@ def build_network_diagnosis(
             }
         )
     if not evidence_items:
-        evidence_items.append(
-            {
-                "label": "No strong evidence",
-                "value": "Saved telemetry does not yet isolate a specific device-level failure.",
-                "hint": "Run a scan during or immediately after the next outage.",
-            }
-        )
+        if has_historical_fault_context:
+            evidence_items.append(
+                {
+                    "label": "Historical context",
+                    "value": f"Last relevant event was {latest_context_fault_age}, outside the {DIAGNOSIS_DECISION_WINDOW_HOURS}h decision window.",
+                    "hint": "It remains visible as context, but it no longer drives the diagnosis headline.",
+                }
+            )
+        else:
+            evidence_items.append(
+                {
+                    "label": "No strong evidence",
+                    "value": "Saved telemetry does not yet isolate a specific device-level failure.",
+                    "hint": "Run a scan during or immediately after the next outage.",
+                }
+            )
 
     return {
         "status": status,
@@ -346,8 +497,10 @@ def build_network_diagnosis(
         "confidence": confidence,
         "confidenceLabel": confidence_label,
         "eventWindowHours": DIAGNOSIS_EVENT_WINDOW_HOURS,
+        "decisionWindowHours": DIAGNOSIS_DECISION_WINDOW_HOURS,
         "inventoryFresh": inventory_fresh,
         "latestFaultAge": latest_fault_age,
+        "latestContextFaultAge": latest_context_fault_age,
         "primarySuspect": primary_suspect,
         "scanAge": scan_age_label,
         "scanAgeMinutes": scan_age_minutes,
@@ -355,6 +508,10 @@ def build_network_diagnosis(
         "infrastructureCount": infra_count,
         "hostMissingCount": len(host_missing),
         "portClosedCount": len(port_closed),
+        "historicalHostMissingCount": len(host_missing_context),
+        "historicalPortClosedCount": len(port_closed_context),
+        "historicalFaultCount": len(context_fault_events),
+        "ignoredNonKeyFaultCount": ignored_context_events,
         "linkDownCount": (
             router_snapshot.link_down_events
             if router_snapshot is not None
@@ -375,6 +532,7 @@ def build_network_diagnosis(
             }
             for row in suspect_devices
         ],
+        "keyDevices": key_devices,
         "recentIndicators": [
             {
                 "time": event.timestamp.strftime("%d %b %Y %H:%M"),
@@ -382,7 +540,7 @@ def build_network_diagnosis(
                 "source": event.source,
                 "message": event.message,
             }
-            for event in (suspect_events or host_missing or port_closed or link_events or restart_events)[-5:]
+            for event in (suspect_events or host_missing or port_closed or link_events or restart_events or context_fault_events)[-5:]
         ],
         "evidenceItems": evidence_items,
         "indicators": indicators,
@@ -782,6 +940,134 @@ def load_dashboard_nmap_inventory(config: AppConfig | None) -> tuple[list[NmapDe
     return _load_nmap_inventory_rows(config)
 
 
+def _ip_scope_label(ip: str) -> str:
+    try:
+        value = ipaddress.ip_address(ip)
+    except ValueError:
+        return "Unknown"
+    if value.is_loopback:
+        return "Loopback"
+    if value.is_link_local:
+        return "Link-local"
+    if value.is_private:
+        return "LAN/private"
+    if value.is_multicast:
+        return "Multicast"
+    return "External"
+
+
+def _source_risk_label(ip: str, count: int, snapshot: FirewallSnapshot) -> str:
+    scope = _ip_scope_label(ip)
+    if scope == "External":
+        return "External scan"
+    if snapshot.ssh_attempts and "22/" in " ".join(port for port, _ in snapshot.top_ports[:3]):
+        return "Check SSH noise"
+    if count >= max(snapshot.blocked_entries * 0.45, snapshot.window_hours * 20):
+        return "Dominant LAN noise"
+    if scope in {"LAN/private", "Link-local", "Multicast"}:
+        return "Contained LAN noise"
+    return "Review source"
+
+
+def _source_action_label(ip: str, matched: bool, risk: str) -> str:
+    scope = _ip_scope_label(ip)
+    if scope == "External":
+        return "Keep blocked; review only if this repeats across SSH or admin ports."
+    if matched:
+        return "Confirm the device role. If trusted, tune the firewall rule or suppress this known noise."
+    return "Identify this IP with a fresh scan or DHCP lease check before ignoring it."
+
+
+def _build_firewall_dashboard_payload(
+    snapshot: FirewallSnapshot | None,
+    nmap_rows: list[NmapDeviceRow],
+    *,
+    error: str = "",
+) -> dict[str, Any]:
+    if snapshot is None:
+        return {
+            "available": False,
+            "enabled": False,
+            "error": error,
+            "summary": "Firewall data unavailable",
+            "sources": [],
+            "ports": [],
+            "notes": [],
+        }
+
+    by_ip = {row.ip: row for row in nmap_rows if row.ip}
+    source_total = max(sum(count for _, count in snapshot.top_sources), snapshot.blocked_entries, 1)
+    noisy_source_count = len(snapshot.noisy_sources)
+    private_sources = sum(1 for ip, _ in snapshot.top_sources if _ip_scope_label(ip) != "External")
+    if snapshot.blocked_entries == 0:
+        summary = "No firewall noise in the current window"
+        tone = "quiet"
+    elif private_sources >= max(1, len(snapshot.top_sources) - 1) and snapshot.ssh_attempts == 0:
+        summary = "Mostly contained LAN noise"
+        tone = "contained"
+    elif snapshot.ssh_attempts:
+        summary = "Firewall is seeing SSH attempts"
+        tone = "attention"
+    else:
+        summary = "Firewall activity needs review"
+        tone = "review"
+
+    sources: list[dict[str, Any]] = []
+    for ip, count in snapshot.top_sources[:5]:
+        row = by_ip.get(ip)
+        risk = _source_risk_label(ip, count, snapshot)
+        ports = row.open_ports if row is not None else []
+        services = row.services if row is not None else []
+        sources.append(
+            {
+                "ip": ip,
+                "count": count,
+                "share": round((count / source_total) * 100.0, 1),
+                "scope": _ip_scope_label(ip),
+                "risk": risk,
+                "action": _source_action_label(ip, row is not None, risk),
+                "matched": row is not None,
+                "device": {
+                    "id": row.device_id if row is not None else "",
+                    "name": row.name if row is not None else "Unknown device",
+                    "hostname": row.hostname if row is not None else "",
+                    "mac": row.mac if row is not None else "",
+                    "vendor": row.vendor if row is not None else "",
+                    "category": row.category if row is not None else "unknown",
+                    "categoryLabel": row.category_label if row is not None else "Unknown",
+                    "accent": row.accent if row is not None else "slate",
+                    "lastSeen": row.last_seen if row is not None else "",
+                    "openPorts": ports,
+                    "services": services,
+                    "portCount": row.port_count if row is not None else 0,
+                },
+            }
+        )
+
+    return {
+        "available": True,
+        "enabled": snapshot.enabled,
+        "active": snapshot.status.active,
+        "tone": tone,
+        "summary": summary,
+        "windowHours": snapshot.window_hours,
+        "blocked": snapshot.blocked_entries,
+        "allowed": snapshot.allowed_entries,
+        "totalEntries": snapshot.total_entries,
+        "noisySources": noisy_source_count,
+        "sshAttempts": snapshot.ssh_attempts,
+        "dnsAttempts": snapshot.dns_attempts,
+        "policy": f"{snapshot.status.default_incoming} in / {snapshot.status.default_outgoing} out",
+        "logging": snapshot.status.logging,
+        "logSource": snapshot.log_source,
+        "logError": snapshot.log_error or "",
+        "sources": sources,
+        "ports": [{"port": port, "count": count} for port, count in snapshot.top_ports[:5]],
+        "interfaces": [{"name": name, "count": count} for name, count in snapshot.top_inbound_interfaces[:5]],
+        "notes": snapshot.notes,
+    }
+
+
 def _hour_label(hour: int | None) -> str:
     if hour is None:
         return "n/a"
@@ -875,6 +1161,7 @@ def _build_dashboard_payload(
     output_path: str,
     public_dashboard_url: str = "",
     config: AppConfig | None = None,
+    include_firewall: bool = False,
 ) -> dict[str, Any]:
     downloads: list[float] = []
     uploads: list[float] = []
@@ -1026,12 +1313,30 @@ def _build_dashboard_payload(
         now=datetime.now().astimezone(),
         config=config,
     )
+    firewall_snapshot: FirewallSnapshot | None = None
+    firewall_error = ""
+    if include_firewall and config is not None and config.firewall_enabled:
+        try:
+            firewall_snapshot = collect_firewall_snapshot(
+                FirewallConfig(
+                    enabled=config.firewall_enabled,
+                    window_hours=config.firewall_window_hours,
+                    top_n=config.firewall_top_n,
+                    noisy_source_threshold=config.firewall_noisy_source_threshold,
+                    include_allow=config.firewall_include_allow,
+                    log_paths=config.firewall_log_paths,
+                )
+            )
+        except Exception as exc:
+            firewall_error = str(exc)
+    firewall_data = _build_firewall_dashboard_payload(firewall_snapshot, nmap_rows, error=firewall_error)
 
     return {
         "data": data,
         "events": event_data,
         "pihole": pihole_data,
         "devices": device_data,
+        "firewall": firewall_data,
         "inventory": {
             "scannedAt": nmap_meta.get("scannedAt", ""),
             "network": nmap_meta.get("network", ""),
@@ -1139,6 +1444,7 @@ def generate_interactive_dashboard(
         output_path=output_path,
         public_dashboard_url=(config.public_dashboard_url if config else ""),
         config=config,
+        include_firewall=True,
     )
     html = _render_interactive_dashboard_html(payload)
     output = Path(output_path)
@@ -1250,10 +1556,16 @@ body.theme-clean { background: linear-gradient(180deg, #f8fafc, var(--bg)); }
 label { display:block; color: var(--muted); font-size: 12px; font-weight: 700; margin-bottom: 6px; text-transform: uppercase; letter-spacing: .06em; }
 select, input { width: 100%; border: 1px solid var(--border); background: rgba(2,6,23,.28); color: var(--text); border-radius: 12px; padding: 10px 11px; }
 body.theme-clean select, body.theme-clean input { background: rgba(255,255,255,.72); }
-.diag-section { margin-bottom: 18px; }
+.diag-section, .firewall-section { margin-bottom: 18px; }
 .grid { display:grid; grid-template-columns: minmax(0, 1.3fr) minmax(360px, .95fr); gap: 18px; align-items:start; }
 .stack { display:grid; gap: 18px; }
 .panel { padding: 18px; }
+.panel, .kpi, .controls, .device-cluster, .diag-hero, .diag-stat, .diag-item, .diag-sidebox, .summary-card, .score-card {
+  transition: border-color .18s ease, transform .18s ease, box-shadow .18s ease;
+}
+.panel:hover, .kpi:hover {
+  border-color: rgba(148, 163, 184, .26);
+}
 .score-section { margin-top: 18px; }
 .panel-head {
   margin-bottom: 12px;
@@ -1479,11 +1791,79 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
 .diag-sidebox h3 { margin: 0 0 8px; font-size: 16px; letter-spacing: -.02em; }
 .diag-sidebox p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.45; }
 .diag-sidebox .copyline { margin-top: 10px; color: var(--text); font-size: 14px; line-height: 1.45; }
+.firewall-shell { display:grid; gap: 14px; }
+.firewall-topline {
+  display:grid;
+  grid-template-columns: minmax(0, 1.25fr) repeat(4, minmax(140px, .45fr));
+  gap: 12px;
+}
+.firewall-hero {
+  border: 1px solid rgba(56,189,248,.24);
+  border-radius: 20px;
+  padding: 18px 20px;
+  background:
+    linear-gradient(135deg, rgba(56,189,248,.13), rgba(34,197,94,.08)),
+    var(--panel-2);
+}
+.firewall-hero.attention, .firewall-hero.review {
+  border-color: rgba(245,158,11,.34);
+  background:
+    linear-gradient(135deg, rgba(245,158,11,.14), rgba(56,189,248,.08)),
+    var(--panel-2);
+}
+.firewall-hero.quiet {
+  border-color: rgba(34,197,94,.30);
+}
+.firewall-kicker { color: var(--muted); font-size: 11px; font-weight: 900; text-transform: uppercase; letter-spacing: .08em; }
+.firewall-title { margin-top: 8px; font-size: 30px; font-weight: 900; letter-spacing: -.04em; line-height: 1.05; }
+.firewall-copy { margin-top: 10px; max-width: 74ch; color: var(--muted); font-size: 14px; line-height: 1.5; }
+.firewall-stat {
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 15px;
+  background: var(--panel-2);
+}
+.firewall-stat .label { color: var(--muted); font-size: 11px; font-weight: 900; text-transform: uppercase; letter-spacing: .08em; }
+.firewall-stat .value { margin-top: 9px; font-size: 22px; font-weight: 900; letter-spacing: -.03em; line-height: 1.1; }
+.firewall-stat .mini { margin-top: 6px; color: var(--muted); font-size: 12px; line-height: 1.35; }
+.firewall-source-grid { display:grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.firewall-source-card {
+  border: 1px solid var(--border);
+  border-top: 4px solid #94a3b8;
+  border-radius: 18px;
+  padding: 15px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.035), transparent),
+    var(--panel-2);
+}
+.firewall-source-card.cyan { border-top-color: #38bdf8; }
+.firewall-source-card.green { border-top-color: #22c55e; }
+.firewall-source-card.blue { border-top-color: #60a5fa; }
+.firewall-source-card.amber { border-top-color: #f59e0b; }
+.firewall-source-card.violet { border-top-color: #8b5cf6; }
+.firewall-source-card.orange { border-top-color: #f97316; }
+.firewall-source-card.slate { border-top-color: #94a3b8; }
+.firewall-source-head { display:flex; justify-content:space-between; gap: 12px; align-items:flex-start; }
+.firewall-device-name { font-size: 16px; font-weight: 900; line-height: 1.2; }
+.firewall-ip { margin-top: 4px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.firewall-count { text-align:right; font-variant-numeric: tabular-nums; }
+.firewall-count b { display:block; font-size: 24px; line-height: 1; }
+.firewall-count span { display:block; margin-top: 4px; color: var(--muted); font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; }
+.firewall-chiprow { display:flex; flex-wrap:wrap; gap: 6px; margin-top: 11px; }
+.firewall-action {
+  margin-top: 12px;
+  border-left: 3px solid rgba(56,189,248,.5);
+  padding-left: 10px;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.firewall-source-card.unmatched .firewall-action { border-left-color: rgba(245,158,11,.65); }
 .empty { color: var(--muted); font-size: 14px; padding: 18px; border: 1px dashed var(--border); border-radius: 16px; }
 .linkline { margin-top: auto; }
 .linkline a { color: var(--accent); text-decoration: none; font-weight: 700; }
 @media (max-width: 1180px) {
-  .hero, .grid, .controls, .hero-grid, .score-grid, .diag-topline, .diag-grid, .chart-summary { grid-template-columns: 1fr; }
+  .hero, .grid, .controls, .hero-grid, .score-grid, .diag-topline, .diag-grid, .chart-summary, .firewall-topline, .firewall-source-grid { grid-template-columns: 1fr; }
 }
 </style>
 </head>
@@ -1574,6 +1954,25 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
     </div>
   </section>
 
+  <section class="panel firewall-section">
+    <div class="panel-head"><div><h2>Firewall Noise Sources</h2><p>Matches blocked firewall sources to scanned LAN devices so repeated noise has a name, hardware context, and next action.</p></div><div class="panel-stamp" id="firewallFreshness"></div></div>
+    <div id="firewallShell" class="firewall-shell">
+      <div class="firewall-topline">
+        <div id="firewallHero" class="firewall-hero">
+          <div class="firewall-kicker">Current Assessment</div>
+          <div class="firewall-title" id="firewallSummary"></div>
+          <div class="firewall-copy" id="firewallCopy"></div>
+        </div>
+        <div class="firewall-stat"><div class="label">Blocked</div><div class="value" id="firewallBlocked"></div><div class="mini" id="firewallBlockedMini"></div></div>
+        <div class="firewall-stat"><div class="label">Noisy Sources</div><div class="value" id="firewallNoisySources"></div><div class="mini" id="firewallNoisyMini"></div></div>
+        <div class="firewall-stat"><div class="label">SSH Attempts</div><div class="value" id="firewallSsh"></div><div class="mini" id="firewallPolicy"></div></div>
+        <div class="firewall-stat"><div class="label">Top Port</div><div class="value" id="firewallTopPort"></div><div class="mini" id="firewallLogSource"></div></div>
+      </div>
+      <div id="firewallSources" class="firewall-source-grid"></div>
+    </div>
+    <div id="firewallEmpty" class="empty" style="display:none">Firewall data is not available for this dashboard yet.</div>
+  </section>
+
   <section class="grid">
     <div class="stack">
       <div class="panel">
@@ -1645,6 +2044,7 @@ const rawData = normalizeDashboardRows(payload.data);
 const rawEvents = payload.events;
 const piholeRows = payload.pihole;
 const deviceRows = payload.devices;
+const firewall = payload.firewall || {};
 const inventory = payload.inventory;
 const stats = payload.stats;
 const score = payload.score;
@@ -1836,6 +2236,7 @@ function renderFreshness() {
   });
   setFreshness('timelineFreshness', refreshed.speed, 'Data');
   setFreshness('diagnosisFreshness', refreshed.diagnosis, 'Data');
+  setFreshness('firewallFreshness', refreshed.dashboard || meta.generated_at, 'Built');
   setFreshness('eventsFreshness', refreshed.events, 'Data');
   setFreshness('inventoryFreshness', refreshed.inventory, 'Scan');
   setFreshness('heatmapFreshness', refreshed.speed, 'Data');
@@ -1946,11 +2347,11 @@ function renderDiagnosis() {
   setText('diagCause', diagnosis.likelyCause || diagnosis.headline || 'No diagnosis summary available.');
   setText('diagHeadline', diagnosis.headline || 'No diagnosis summary available.');
   setText('diagConfidence', diagnosis.confidenceLabel || 'Unknown');
-  setText('diagConfidenceNote', `${diagnosis.hostMissingCount || 0} missing-host, ${diagnosis.portClosedCount || 0} port-change, ${diagnosis.restartCount || 0} restart event(s) in ${diagnosis.eventWindowHours || 24}h`);
+  setText('diagConfidenceNote', `Current ${diagnosis.decisionWindowHours || 8}h: ${diagnosis.hostMissingCount || 0} missing-host, ${diagnosis.portClosedCount || 0} port-change, ${diagnosis.restartCount || 0} restart`);
   setText('diagSuspect', diagnosis.primarySuspect || 'Unknown');
   setText('diagScanAge', `Inventory ${diagnosis.scanAge || 'unknown'}${diagnosis.inventoryFresh ? '' : ' · stale'}`);
   setText('diagEvidenceSummary', `${diagnosis.inventoryDeviceCount || 0} visible / ${diagnosis.infrastructureCount || 0} infra`);
-  setText('diagLinkDown', `${diagnosis.linkDownCount || 0} linkDown trap(s) · last fault ${diagnosis.latestFaultAge || 'unknown'}`);
+  setText('diagLinkDown', `${diagnosis.linkDownCount || 0} linkDown now · context ${diagnosis.historicalFaultCount || 0} event(s), last ${diagnosis.latestContextFaultAge || diagnosis.latestFaultAge || 'unknown'}`);
   stateNode.textContent = diagnosis.statusLabel || 'Resolved';
   stateNode.className = `diag-state-pill ${diagnosis.status || 'healthy'}`;
 
@@ -1973,7 +2374,7 @@ function renderDiagnosis() {
     ? 'These are the strongest pieces of telemetry currently driving the diagnosis.'
     : 'Keep the response short and decisive when the fault happens again.';
   sideBody.textContent = showingEvidence
-    ? `${diagnosis.statusLabel || 'Resolved'}. Current confidence: ${diagnosis.confidenceLabel || 'Unknown'}. Primary suspect: ${diagnosis.primarySuspect || 'Unknown'}.`
+    ? `${diagnosis.statusLabel || 'Resolved'}. Confidence: ${diagnosis.confidenceLabel || 'Unknown'}. Primary suspect: ${diagnosis.primarySuspect || 'Unknown'}. Current evidence window: ${diagnosis.decisionWindowHours || 8}h.`
     : 'Start with a fresh scan, then compare the suspect device MAC, IP, and open ports before rebooting anything.';
 
   if (!items.length) {
@@ -2036,6 +2437,106 @@ function focusSuspectDevice() {
   });
   const match = cards.find(card => card.textContent.toLowerCase().includes(suspect));
   if (match) match.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+function renderFirewallNoise() {
+  const shell = document.getElementById('firewallShell');
+  const empty = document.getElementById('firewallEmpty');
+  const sourceWrap = document.getElementById('firewallSources');
+  clearNode(sourceWrap);
+  if (!firewall.available) {
+    shell.style.display = 'none';
+    empty.style.display = 'block';
+    empty.textContent = firewall.error ? `Firewall data unavailable: ${firewall.error}` : 'Firewall data is not available for this dashboard yet.';
+    return;
+  }
+
+  shell.style.display = 'grid';
+  empty.style.display = 'none';
+  const hero = document.getElementById('firewallHero');
+  hero.className = `firewall-hero ${firewall.tone || 'contained'}`;
+  setText('firewallSummary', firewall.summary || 'Firewall activity summary unavailable');
+  setText('firewallCopy', (firewall.notes || [])[0] || 'Blocked traffic is being correlated against the latest device inventory.');
+  setText('firewallBlocked', String(firewall.blocked || 0));
+  setText('firewallBlockedMini', `${firewall.windowHours || 24}h window - ${firewall.totalEntries || 0} entries reviewed`);
+  setText('firewallNoisySources', String(firewall.noisySources || 0));
+  setText('firewallNoisyMini', `${(firewall.sources || []).length} source${(firewall.sources || []).length === 1 ? '' : 's'} shown`);
+  setText('firewallSsh', String(firewall.sshAttempts || 0));
+  setText('firewallPolicy', firewall.policy || 'Policy unknown');
+  const topPort = (firewall.ports || [])[0];
+  setText('firewallTopPort', topPort ? topPort.port : 'n/a');
+  setText('firewallLogSource', firewall.logError || `Log ${firewall.logSource || 'unknown'}`);
+
+  const sources = firewall.sources || [];
+  if (!sources.length) {
+    const emptyCard = document.createElement('div');
+    emptyCard.className = 'empty';
+    emptyCard.textContent = 'No noisy source devices in the current firewall window.';
+    sourceWrap.appendChild(emptyCard);
+    return;
+  }
+
+  sources.forEach(source => {
+    const device = source.device || {};
+    const card = document.createElement('article');
+    card.className = `firewall-source-card ${device.accent || 'slate'}${source.matched ? '' : ' unmatched'}`;
+    const head = document.createElement('div');
+    head.className = 'firewall-source-head';
+    const identity = document.createElement('div');
+    const name = document.createElement('div');
+    name.className = 'firewall-device-name';
+    name.textContent = source.matched ? (device.name || device.hostname || source.ip) : 'Unknown LAN device';
+    const ip = document.createElement('div');
+    ip.className = 'firewall-ip';
+    ip.textContent = source.ip || 'n/a';
+    identity.appendChild(name);
+    identity.appendChild(ip);
+    const count = document.createElement('div');
+    count.className = 'firewall-count';
+    const countValue = document.createElement('b');
+    countValue.textContent = source.count || 0;
+    const countLabel = document.createElement('span');
+    countLabel.textContent = `${source.share || 0}% of noise`;
+    count.appendChild(countValue);
+    count.appendChild(countLabel);
+    head.appendChild(identity);
+    head.appendChild(count);
+    card.appendChild(head);
+
+    const chips = document.createElement('div');
+    chips.className = 'firewall-chiprow';
+    [
+      source.risk,
+      source.scope,
+      device.categoryLabel,
+      device.vendor || 'Unknown vendor',
+      device.mac ? `MAC ${device.mac}` : '',
+      device.lastSeen ? `Seen ${relativeFreshness(device.lastSeen)}` : '',
+    ].filter(Boolean).forEach(label => {
+      const chip = document.createElement('span');
+      chip.className = 'device-chip';
+      chip.textContent = label;
+      chips.appendChild(chip);
+    });
+    (device.services || []).slice(0, 3).forEach(service => {
+      const chip = document.createElement('span');
+      chip.className = 'device-chip primary';
+      chip.textContent = service;
+      chips.appendChild(chip);
+    });
+    if (!(device.services || []).length && (device.openPorts || []).length) {
+      const chip = document.createElement('span');
+      chip.className = 'device-chip primary';
+      chip.textContent = `Ports ${(device.openPorts || []).slice(0, 4).join(', ')}`;
+      chips.appendChild(chip);
+    }
+    card.appendChild(chips);
+
+    const action = document.createElement('div');
+    action.className = 'firewall-action';
+    action.textContent = source.action || 'Review this source before suppressing future alerts.';
+    card.appendChild(action);
+    sourceWrap.appendChild(card);
+  });
 }
 function renderDeviceMap() {
   const map = document.getElementById('deviceMap');
@@ -2695,6 +3196,7 @@ function render() {
   renderScatter(data);
   renderDnsCorrelation(data);
   renderDiagnosis();
+  renderFirewallNoise();
   renderTable(events);
   renderInventoryMeta();
   renderDeviceMap();

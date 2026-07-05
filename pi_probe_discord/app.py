@@ -238,7 +238,8 @@ def run_mode(mode: str) -> int:
                         should_send = False
                 if should_send:
                     alert_payload = _build_firewall_alert_payload(hostname, run_at_local, firewall_snapshot, reasons)
-                    firewall_chart_ok, _ = generate_firewall_chart(firewall_snapshot, config.firewall_chart_file)
+                    nmap_rows, _ = load_dashboard_nmap_inventory(config)
+                    firewall_chart_ok, _ = generate_firewall_chart(firewall_snapshot, config.firewall_chart_file, devices=nmap_rows)
                     try:
                         if firewall_chart_ok and Path(config.firewall_chart_file).exists():
                             post_webhook_file(config, alert_payload, config.firewall_chart_file)
@@ -327,8 +328,12 @@ def render_firewall_chart(output_path: str | None = None, window_hours: int | No
         log_paths=config.firewall_log_paths,
     )
     snapshot = collect_firewall_snapshot(firewall_config)
+    now = datetime.now().astimezone()
+    if not Path(config.nmap_inventory_json).exists() and Path(config.nmap_inventory_xml).exists():
+        export_nmap_inventory_json(config, now)
+    nmap_rows, _ = load_dashboard_nmap_inventory(config)
     target_path = output_path or config.firewall_chart_file
-    ok, message = generate_firewall_chart(snapshot, target_path)
+    ok, message = generate_firewall_chart(snapshot, target_path, devices=nmap_rows)
     if not ok:
         raise RuntimeError(message)
     return target_path
