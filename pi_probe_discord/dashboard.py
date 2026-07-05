@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import hmac
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from http import HTTPStatus
@@ -14,6 +15,7 @@ import sqlite3
 import ssl
 import subprocess
 from typing import Any
+from urllib.parse import urlparse
 
 from .baselines import average, history_points_for_window
 from .firewall import FirewallConfig, FirewallSnapshot, collect_firewall_snapshot
@@ -38,6 +40,7 @@ SERVICE_NAME = "pi-probe-discord-dashboard"
 MAX_REASONABLE_PING_MS = 1000.0
 DIAGNOSIS_EVENT_WINDOW_HOURS = 24
 DIAGNOSIS_DECISION_WINDOW_HOURS = 8
+DASHBOARD_ACTION_MAX_BODY_BYTES = 16 * 1024
 
 
 @dataclass
@@ -358,7 +361,7 @@ def build_network_diagnosis(
         recommendations.insert(0, "Add an Nmap override naming the extender clearly once it is back online, so future disappearance events are easier to identify.")
 
     status = "healthy"
-    status_label = "Resolved"
+    status_label = "No Current Fault"
     headline = "No strong extender fault indicators are visible in the recent telemetry."
     likely_cause = "No specific LAN-side fault is strongly indicated."
     confidence = "low"
@@ -434,7 +437,7 @@ def build_network_diagnosis(
         }
     )
     primary_suspect = suspect_names[0] if suspect_names else "No obvious extender-like device in current inventory"
-    if has_historical_fault_context and status == "healthy":
+    if status == "healthy":
         primary_suspect = "None active"
 
     evidence_items: list[dict[str, str]] = []
@@ -940,6 +943,14 @@ def load_dashboard_nmap_inventory(config: AppConfig | None) -> tuple[list[NmapDe
     return _load_nmap_inventory_rows(config)
 
 
+def _dashboard_action_mode(config: AppConfig | None) -> str:
+    if config is None or not config.interactive_dashboard_enabled:
+        return "disabled"
+    if config.interactive_dashboard_api_token:
+        return "token"
+    return "locked"
+
+
 def _ip_scope_label(ip: str) -> str:
     try:
         value = ipaddress.ip_address(ip)
@@ -1281,6 +1292,7 @@ def _build_dashboard_payload(
     device_counts: dict[str, int] = {}
     for row in nmap_rows:
         device_counts[row.category_label] = device_counts.get(row.category_label, 0) + 1
+    action_mode = _dashboard_action_mode(config)
 
     generated_at = datetime.now().astimezone()
     latest_speed_at = rows[-1].timestamp if rows else None
@@ -1345,7 +1357,9 @@ def _build_dashboard_payload(
             "scanTargets": config.nmap_targets if config else "",
             "scanArguments": config.nmap_arguments if config else "",
             "scanMinutes": config.nmap_scan_minutes if config else 0,
-            "actionsEnabled": bool(config and config.interactive_dashboard_enabled),
+            "actionsEnabled": action_mode in {"local", "token"},
+            "actionMode": action_mode,
+            "apiTokenRequired": action_mode == "token",
         },
         "stats": {
             "tests": len(rows),
@@ -1907,6 +1921,7 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
     <div><label>Event severity</label><select id="severityFilter"></select></div>
     <div><label>Event type</label><select id="eventTypeFilter"></select></div>
     <div><label>Theme</label><select id="theme"><option value="auto">Auto / system</option><option value="premium">Premium dark</option><option value="clean">Clean light</option></select></div>
+    <div id="apiTokenControl" style="display:none"><label>Action token</label><input id="apiToken" type="password" autocomplete="off" placeholder="Required"></div>
   </section>
 
   <section class="panel diag-section">
@@ -2053,6 +2068,7 @@ const thresholds = payload.thresholds;
 const meta = payload.meta;
 const refreshed = meta.refreshed || {};
 const themeKey = 'pi_probe_dashboard_theme';
+const actionTokenKey = 'pi_probe_dashboard_action_token';
 let diagView = 'evidence';
 
 function average(values) {
@@ -2179,6 +2195,29 @@ function pathFromPoints(points) {
 }
 function setText(elementId, value) {
   document.getElementById(elementId).textContent = value;
+}
+function getActionHeaders() {
+  const headers = { 'Content-Type': 'application/json' };
+  if (inventory.apiTokenRequired) {
+    const token = (document.getElementById('apiToken')?.value || localStorage.getItem(actionTokenKey) || '').trim();
+    if (token) headers['X-Pi-Probe-Token'] = token;
+  }
+  return headers;
+}
+function actionAuthReady() {
+  return !inventory.apiTokenRequired || Boolean((document.getElementById('apiToken')?.value || '').trim());
+}
+function initActionTokenControl() {
+  const wrap = document.getElementById('apiTokenControl');
+  const input = document.getElementById('apiToken');
+  if (!wrap || !input) return;
+  wrap.style.display = inventory.apiTokenRequired ? 'block' : 'none';
+  input.value = localStorage.getItem(actionTokenKey) || '';
+  input.addEventListener('input', () => {
+    localStorage.setItem(actionTokenKey, input.value.trim());
+    renderInventoryMeta();
+    renderDeviceMap();
+  });
 }
 function formatFreshness(value) {
   if (!value) return 'Refresh unknown';
@@ -2333,9 +2372,13 @@ function renderInventoryMeta() {
     chip.textContent = label;
     metaWrap.appendChild(chip);
   });
-  button.disabled = !(window.location.protocol.startsWith('http') && inventory.actionsEnabled);
+  button.disabled = !(window.location.protocol.startsWith('http') && inventory.actionsEnabled && actionAuthReady());
   if (!window.location.protocol.startsWith('http')) {
     status.textContent = 'Serve the dashboard to enable Nmap scan actions.';
+  } else if (inventory.actionMode === 'locked') {
+    status.textContent = 'Dashboard actions are locked until PI_PROBE_INTERACTIVE_DASHBOARD_API_TOKEN is configured.';
+  } else if (inventory.apiTokenRequired && !actionAuthReady()) {
+    status.textContent = 'Enter the action token to enable scan and device actions.';
   } else if (!inventory.actionsEnabled) {
     status.textContent = inventory.scanArguments ? `Configured scan: nmap ${inventory.scanArguments} ${inventory.scanTargets}` : 'Nmap scan actions are unavailable for this dashboard.';
   } else if (!status.textContent) {
@@ -2691,9 +2734,10 @@ function buildDeviceEditor(device) {
   editor.appendChild(actions);
   editor.appendChild(status);
 
-  save.disabled = !inventory.actionsEnabled;
-  clear.disabled = !inventory.actionsEnabled;
-  if (!inventory.actionsEnabled) {
+  const actionsReady = inventory.actionsEnabled && actionAuthReady();
+  save.disabled = !actionsReady;
+  clear.disabled = !actionsReady;
+  if (!actionsReady) {
     nameInput.disabled = true;
     categorySelect.disabled = true;
   }
@@ -2733,8 +2777,8 @@ function buildDeviceEditor(device) {
     ping.disabled = false;
   });
 
-  if (!inventory.actionsEnabled) {
-    status.textContent = device.hostname ? `Host ${device.hostname} · ping available` : 'Ping available';
+  if (!actionsReady) {
+    status.textContent = inventory.apiTokenRequired ? 'Enter action token to edit or ping.' : 'Actions unavailable';
   }
 
   return editor;
@@ -2743,7 +2787,7 @@ async function pingDashboardDevice(device) {
   try {
     const response = await fetch('/api/device/ping', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getActionHeaders(),
       body: JSON.stringify({
         ip: device.ip || '',
         hostname: device.hostname || '',
@@ -2773,7 +2817,7 @@ async function submitDeviceOverride(device, changes) {
   try {
     const response = await fetch('/api/nmap/override', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getActionHeaders(),
       body: JSON.stringify({
         selector,
         ...changes,
@@ -2798,7 +2842,7 @@ async function triggerNmapScan() {
   button.disabled = true;
   status.textContent = 'Running Nmap scan and refreshing dashboard...';
   try {
-    const response = await fetch('/api/nmap/scan', { method: 'POST' });
+    const response = await fetch('/api/nmap/scan', { method: 'POST', headers: getActionHeaders() });
     const result = await response.json();
     status.textContent = result.message || 'Nmap scan finished.';
     if (!response.ok || !result.ok) {
@@ -3218,6 +3262,7 @@ document.getElementById('diagActionsToggle').addEventListener('click', () => { d
 document.getElementById('diagFocusEvents').addEventListener('click', focusDiagnosisEvents);
 document.getElementById('diagFocusExtender').addEventListener('click', focusSuspectDevice);
 initFilters();
+initActionTokenControl();
 applyTheme(getThemeChoice());
 </script>
 </body>
@@ -3512,6 +3557,22 @@ def ping_dashboard_device(payload: dict[str, Any]) -> dict[str, Any]:
     return {"ok": False, "message": f"{label} unreachable"}
 
 
+def _load_allowed_ping_targets() -> set[str]:
+    try:
+        from .config import load_config
+
+        config = load_config(require_webhook=False)
+        rows, _ = load_dashboard_nmap_inventory(config)
+    except Exception:
+        return set()
+    targets: set[str] = set()
+    for row in rows:
+        for value in (row.ip, row.hostname, row.name):
+            if value:
+                targets.add(value)
+    return targets
+
+
 def serve_interactive_dashboard(
     output_path: str,
     host: str,
@@ -3520,6 +3581,7 @@ def serve_interactive_dashboard(
     tls_enabled: bool = False,
     tls_cert_file: str = "",
     tls_key_file: str = "",
+    api_token: str = "",
 ) -> int:
     file_path = Path(output_path).resolve()
     directory = file_path.parent
@@ -3529,6 +3591,17 @@ def serve_interactive_dashboard(
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             super().__init__(*args, directory=str(directory), **kwargs)
 
+        def end_headers(self) -> None:
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.send_header("X-Frame-Options", "DENY")
+            self.send_header(
+                "Content-Security-Policy",
+                "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
+                "connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+            )
+            super().end_headers()
+
         def _send_json(self, status: HTTPStatus, payload: dict[str, Any]) -> None:
             body = json.dumps(payload).encode("utf-8")
             self.send_response(status)
@@ -3537,8 +3610,34 @@ def serve_interactive_dashboard(
             self.end_headers()
             self.wfile.write(body)
 
+        def _actions_authorized(self) -> bool:
+            if api_token:
+                supplied = self.headers.get("X-Pi-Probe-Token", "")
+                return hmac.compare_digest(supplied, api_token)
+            return False
+
+        def _read_json_payload(self) -> dict[str, Any] | None:
+            try:
+                content_length = int(self.headers.get("Content-Length", "0"))
+            except ValueError:
+                content_length = 0
+            if content_length > DASHBOARD_ACTION_MAX_BODY_BYTES:
+                self._send_json(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, {"ok": False, "message": "JSON payload too large"})
+                return None
+            try:
+                raw = self.rfile.read(content_length) if content_length > 0 else b"{}"
+                payload = json.loads(raw.decode("utf-8"))
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                self._send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "message": "Invalid JSON payload"})
+                return None
+            if not isinstance(payload, dict):
+                self._send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "message": "JSON payload must be an object"})
+                return None
+            return payload
+
         def do_GET(self) -> None:  # noqa: N802
-            if self.path == "/healthz":
+            request_path = urlparse(self.path).path
+            if request_path == "/healthz":
                 payload = b"ok\n"
                 self.send_response(HTTPStatus.OK)
                 self.send_header("Content-Type", "text/plain; charset=utf-8")
@@ -3546,7 +3645,7 @@ def serve_interactive_dashboard(
                 self.end_headers()
                 self.wfile.write(payload)
                 return
-            if self.path == "/status.json":
+            if request_path == "/status.json":
                 try:
                     payload = status_path.read_bytes()
                 except OSError:
@@ -3575,47 +3674,48 @@ def serve_interactive_dashboard(
                 self.end_headers()
                 self.wfile.write(payload)
                 return
-            if self.path in {"/", ""}:
+            if request_path in {"/", ""}:
                 self.path = f"/{file_path.name}"
+            elif request_path != f"/{file_path.name}":
+                self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "message": "Not found"})
+                return
+            else:
+                self.path = request_path
             return super().do_GET()
 
         def do_POST(self) -> None:  # noqa: N802
-            if self.path == "/api/nmap/scan":
+            request_path = urlparse(self.path).path
+            if request_path not in {"/api/nmap/scan", "/api/nmap/override", "/api/device/ping"}:
+                self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "message": "Not found"})
+                return
+            if not self._actions_authorized():
+                self._send_json(HTTPStatus.UNAUTHORIZED, {"ok": False, "message": "Dashboard action token required"})
+                return
+            if request_path == "/api/nmap/scan":
                 result = run_dashboard_nmap_scan(str(file_path))
                 status = HTTPStatus.OK if result.get("ok") else HTTPStatus.INTERNAL_SERVER_ERROR
                 self._send_json(status, result)
                 return
-            if self.path == "/api/nmap/override":
-                try:
-                    content_length = int(self.headers.get("Content-Length", "0"))
-                except ValueError:
-                    content_length = 0
-                try:
-                    raw = self.rfile.read(content_length) if content_length > 0 else b"{}"
-                    payload = json.loads(raw.decode("utf-8"))
-                except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-                    self._send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "message": "Invalid JSON payload"})
+            if request_path == "/api/nmap/override":
+                payload = self._read_json_payload()
+                if payload is None:
                     return
-                result = apply_dashboard_nmap_override(str(file_path), payload if isinstance(payload, dict) else {})
+                result = apply_dashboard_nmap_override(str(file_path), payload)
                 status = HTTPStatus.OK if result.get("ok") else HTTPStatus.BAD_REQUEST
                 self._send_json(status, result)
                 return
-            if self.path == "/api/device/ping":
-                try:
-                    content_length = int(self.headers.get("Content-Length", "0"))
-                except ValueError:
-                    content_length = 0
-                try:
-                    raw = self.rfile.read(content_length) if content_length > 0 else b"{}"
-                    payload = json.loads(raw.decode("utf-8"))
-                except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-                    self._send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "message": "Invalid JSON payload"})
+            if request_path == "/api/device/ping":
+                payload = self._read_json_payload()
+                if payload is None:
                     return
-                result = ping_dashboard_device(payload if isinstance(payload, dict) else {})
+                target = str(payload.get("ip") or payload.get("hostname") or "").strip()
+                if target not in _load_allowed_ping_targets():
+                    self._send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "message": "Ping target is not in current inventory"})
+                    return
+                result = ping_dashboard_device(payload)
                 status = HTTPStatus.OK if result.get("ok") else HTTPStatus.BAD_REQUEST
                 self._send_json(status, result)
                 return
-            self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "message": "Not found"})
 
     server = ThreadingHTTPServer((host, port), DashboardHandler)
     scheme = "http"

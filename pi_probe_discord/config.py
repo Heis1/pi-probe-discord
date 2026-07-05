@@ -115,6 +115,7 @@ def load_config(base_dir: Path | None = None, require_webhook: bool = True) -> A
             "PI_PROBE_INTERACTIVE_DASHBOARD_TLS_KEY_FILE",
             str(DEFAULT_CONFIG_DIR / "dashboard-key.pem"),
         ),
+        interactive_dashboard_api_token=os.environ.get("PI_PROBE_INTERACTIVE_DASHBOARD_API_TOKEN", "").strip(),
         public_dashboard_url=os.environ.get("PI_PROBE_PUBLIC_DASHBOARD_URL", "").strip(),
         dashboard_link_label=os.environ.get("PI_PROBE_DASHBOARD_LINK_LABEL", "Open Interactive Dashboard").strip()
         or "Open Interactive Dashboard",

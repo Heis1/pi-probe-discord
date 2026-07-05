@@ -19,6 +19,7 @@ class AppConfig:
     interactive_dashboard_tls_enabled: bool
     interactive_dashboard_tls_cert_file: str
     interactive_dashboard_tls_key_file: str
+    interactive_dashboard_api_token: str
     public_dashboard_url: str
     dashboard_link_label: str
     outage_download_mbps: float

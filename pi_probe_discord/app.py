@@ -486,6 +486,7 @@ def run_dashboard_server() -> int:
         tls_enabled=config.interactive_dashboard_tls_enabled,
         tls_cert_file=config.interactive_dashboard_tls_cert_file,
         tls_key_file=config.interactive_dashboard_tls_key_file,
+        api_token=config.interactive_dashboard_api_token,
     )
 
 
