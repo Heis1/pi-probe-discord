@@ -4285,7 +4285,7 @@ def serve_interactive_dashboard(
             if request_path not in {"/api/nmap/scan", "/api/nmap/override", "/api/device/ping"}:
                 self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "message": "Not found"}, no_store=True)
                 return
-            if not self._actions_authorized():
+            if request_path in {"/api/nmap/scan", "/api/nmap/override"} and not self._actions_authorized():
                 self._send_json(HTTPStatus.UNAUTHORIZED, {"ok": False, "message": "Dashboard action token required"}, no_store=True)
                 return
             if request_path == "/api/nmap/scan":

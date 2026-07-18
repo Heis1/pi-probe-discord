@@ -1,3 +1,9 @@
+pi-probe-discord (1.1.36-1) unstable; urgency=medium
+
+  * Keep dashboard scan and override actions token-protected while allowing inventory-scoped ping actions without the dashboard token.
+
+ -- Codex Builder <noreply@example.invalid>  Sat, 18 Jul 2026 23:08:00 +0930
+
 pi-probe-discord (1.1.35-1) unstable; urgency=medium
 
   * Prompt for the dashboard action token when a ping, override, or manual scan is invoked so actions do not stay blocked by stale or missing browser-side token state.
