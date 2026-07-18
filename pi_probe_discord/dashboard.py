@@ -2430,6 +2430,20 @@ function getActionHeaders() {
 function actionAuthReady() {
   return !inventory.apiTokenRequired || Boolean((document.getElementById('apiToken')?.value || getActionToken() || '').trim());
 }
+function ensureActionToken() {
+  if (!inventory.apiTokenRequired) return true;
+  const current = (document.getElementById('apiToken')?.value || getActionToken() || '').trim();
+  if (current) {
+    setActionToken(current);
+    return true;
+  }
+  const entered = window.prompt('Enter dashboard action token');
+  if (!entered) return false;
+  setActionToken(entered);
+  renderInventoryMeta();
+  renderDeviceMap();
+  return Boolean(getActionToken().trim());
+}
 function initActionTokenControl() {
   const wrap = document.getElementById('apiTokenControl');
   const input = document.getElementById('apiToken');
@@ -2619,7 +2633,7 @@ function renderInventoryMeta() {
     chip.textContent = label;
     metaWrap.appendChild(chip);
   });
-  button.disabled = !(window.location.protocol.startsWith('http') && inventory.actionsEnabled && actionAuthReady() && !scanState.scanRunning);
+  button.disabled = !(window.location.protocol.startsWith('http') && inventory.actionsEnabled && !scanState.scanRunning);
   if (!window.location.protocol.startsWith('http')) {
     status.textContent = 'Serve the dashboard to enable Nmap scan actions.';
   } else if (inventory.actionMode === 'locked') {
@@ -3183,7 +3197,7 @@ function buildDeviceEditor(device) {
   editor.appendChild(actions);
   editor.appendChild(status);
 
-  const actionsReady = inventory.actionsEnabled && actionAuthReady();
+  const actionsReady = inventory.actionsEnabled;
   save.disabled = !actionsReady;
   clear.disabled = !actionsReady;
   if (!actionsReady) {
@@ -3229,6 +3243,10 @@ function buildDeviceEditor(device) {
   });
 
   ping.addEventListener('click', async () => {
+    if (!ensureActionToken()) {
+      status.textContent = 'Dashboard action token required.';
+      return;
+    }
     ping.disabled = true;
     status.textContent = `Pinging ${device.ip || device.hostname || device.name || 'device'}...`;
     const response = await pingDashboardDevice(device);
@@ -3266,7 +3284,7 @@ async function pingDashboardDevice(device) {
   }
 }
 async function submitDeviceOverride(device, changes) {
-  if (inventory.apiTokenRequired && !actionAuthReady()) {
+  if (!ensureActionToken()) {
     return {
       ok: false,
       message: 'Dashboard action token required.',
@@ -3304,7 +3322,7 @@ async function triggerNmapScan() {
   const button = document.getElementById('nmapScanButton');
   const status = document.getElementById('nmapScanStatus');
   if (button.disabled) return;
-  if (inventory.apiTokenRequired && !actionAuthReady()) {
+  if (!ensureActionToken()) {
     status.textContent = 'Dashboard action token required.';
     return;
   }
