@@ -4245,13 +4245,22 @@ def serve_interactive_dashboard(
                 self._send_json(HTTPStatus.OK, payload, no_store=True)
                 return
             if request_path in {"/", ""}:
-                self.path = f"/{file_path.name}"
+                request_path = f"/{file_path.name}"
             elif request_path != f"/{file_path.name}":
                 self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "message": "Not found"}, no_store=True)
                 return
-            else:
-                self.path = request_path
-            return super().do_GET()
+            try:
+                body = file_path.read_bytes()
+            except OSError:
+                self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "message": "Dashboard HTML not found"}, no_store=True)
+                return
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
 
         def do_POST(self) -> None:  # noqa: N802
             request_path = urlparse(self.path).path
