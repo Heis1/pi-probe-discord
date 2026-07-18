@@ -49,11 +49,12 @@ class RouterWebUiTests(unittest.TestCase):
                      {"modelName": "Archer VR2100", "description": "Router"},
                      {"userName": "admin"},
                      [],
-                 ]), \
+                ]), \
                  patch("pi_probe_discord.router_webui.requests.Session") as mock_session_factory:
                 mock_session = MagicMock()
                 mock_session_factory.return_value = mock_session
                 collect_router_webui_snapshot(config, datetime(2026, 7, 18, 18, 0, 0).isoformat())
+                self.assertFalse(mock_session.verify)
                 mock_session.mount.assert_called_once()
                 mount_prefix, adapter = mock_session.mount.call_args[0]
                 self.assertEqual(mount_prefix, "https://192.168.1.1")

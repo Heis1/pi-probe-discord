@@ -2373,6 +2373,49 @@ function pathFromPoints(points) {
   if (!points.length) return '';
   return points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point[0].toFixed(2)} ${point[1].toFixed(2)}`).join(' ');
 }
+function buildTimelineSegments(points) {
+  if (points.length <= 1) return points.length ? [points] : [];
+  const gaps = [];
+  for (let i = 1; i < points.length; i += 1) {
+    const gap = points[i].ts - points[i - 1].ts;
+    if (gap > 0) gaps.push(gap);
+  }
+  const sortedGaps = gaps.slice().sort((a, b) => a - b);
+  const medianGap = sortedGaps.length ? sortedGaps[Math.floor(sortedGaps.length / 2)] : 0;
+  const gapThreshold = Math.max(6 * 60 * 60 * 1000, medianGap * 3);
+  const segments = [];
+  let current = [points[0]];
+  for (let i = 1; i < points.length; i += 1) {
+    const gap = points[i].ts - points[i - 1].ts;
+    if (gap > gapThreshold) {
+      if (current.length) segments.push(current);
+      current = [points[i]];
+      continue;
+    }
+    current.push(points[i]);
+  }
+  if (current.length) segments.push(current);
+  return segments;
+}
+function clusterTimelineEvents(events, scaleX) {
+  const buckets = new Map();
+  events.forEach(event => {
+    const ts = new Date(event.datetime).getTime();
+    if (Number.isNaN(ts)) return;
+    const x = scaleX(ts);
+    const bucketKey = Math.round(x / 8);
+    const existing = buckets.get(bucketKey);
+    if (!existing) {
+      buckets.set(bucketKey, { x, count: 1, severity: event.severity || 'info', events: [event] });
+      return;
+    }
+    existing.count += 1;
+    existing.events.push(event);
+    if (existing.severity !== 'critical' && event.severity === 'critical') existing.severity = 'critical';
+    else if (existing.severity === 'info' && event.severity === 'warning') existing.severity = 'warning';
+  });
+  return Array.from(buckets.values()).sort((left, right) => left.x - right.x);
+}
 function setText(elementId, value) {
   document.getElementById(elementId).textContent = value;
 }
@@ -3359,7 +3402,11 @@ function renderTimeline(data, events) {
   const theme = chartTheme();
   const plotWidth = surface.width - surface.left - surface.right;
   const plotHeight = surface.height - surface.top - surface.bottom;
-  const points = data.filter(item => item[metric] !== null).map(item => ({ ...item, ts: new Date(item.datetime).getTime() }));
+  const points = data
+    .filter(item => item[metric] !== null)
+    .map(item => ({ ...item, ts: new Date(item.datetime).getTime() }))
+    .filter(item => !Number.isNaN(item.ts))
+    .sort((left, right) => left.ts - right.ts);
   if (!points.length) return;
   const [xMin, xMax] = extent(points.map(item => item.ts), points[0].ts + 1);
   const [yMin0, yMax0] = extent(points.map(item => Number(item[metric])), 1);
@@ -3373,22 +3420,35 @@ function renderTimeline(data, events) {
   }));
   drawAxes(surface, yMin, yMax, xTicks);
   const eventLines = svgEl('g');
-  events.forEach(event => {
-    const x = scaleX(new Date(event.datetime).getTime());
+  clusterTimelineEvents(events, scaleX).forEach(cluster => {
+    const x = cluster.x;
     eventLines.appendChild(svgEl('line', {
       x1: x, y1: surface.top, x2: x, y2: surface.top + plotHeight,
-      stroke: event.severity === 'critical' ? '#ef4444' : event.severity === 'warning' ? '#f59e0b' : '#94a3b8',
+      stroke: cluster.severity === 'critical' ? '#ef4444' : cluster.severity === 'warning' ? '#f59e0b' : '#94a3b8',
       'stroke-dasharray': '4 4'
     }));
+    if (cluster.count > 1) {
+      const label = svgEl('text', {
+        x,
+        y: surface.top + 12,
+        'text-anchor': 'middle',
+        fill: cluster.severity === 'critical' ? '#fca5a5' : cluster.severity === 'warning' ? '#fcd34d' : theme.muted,
+        'font-size': 10
+      });
+      label.textContent = String(cluster.count);
+      eventLines.appendChild(label);
+    }
   });
   surface.svg.appendChild(eventLines);
-  const line = svgEl('path', {
-    d: pathFromPoints(points.map(item => [scaleX(item.ts), scaleY(Number(item[metric]))])),
-    fill: 'none',
-    stroke: '#38bdf8',
-    'stroke-width': 2.4
+  buildTimelineSegments(points).forEach(segment => {
+    const line = svgEl('path', {
+      d: pathFromPoints(segment.map(item => [scaleX(item.ts), scaleY(Number(item[metric]))])),
+      fill: 'none',
+      stroke: '#38bdf8',
+      'stroke-width': 2.4
+    });
+    surface.svg.appendChild(line);
   });
-  surface.svg.appendChild(line);
   points.forEach(item => {
     const circle = svgEl('circle', {
       cx: scaleX(item.ts),

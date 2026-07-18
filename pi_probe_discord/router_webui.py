@@ -17,6 +17,7 @@ import requests
 from requests.adapters import HTTPAdapter
 from Cryptodome.Cipher import AES
 from Cryptodome.Util.Padding import pad, unpad
+from urllib3.exceptions import InsecureRequestWarning
 
 from .config import load_router_webui_secrets
 from .models import AppConfig
@@ -128,6 +129,8 @@ class _RouterWebUiSession:
 
     def __post_init__(self) -> None:
         self.session = requests.Session()
+        self.session.verify = False
+        requests.packages.urllib3.disable_warnings(category=InsecureRequestWarning)
         if self.ca_file:
             certificate_path = Path(self.ca_file)
             if not certificate_path.exists():
