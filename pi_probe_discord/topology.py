@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .models import AppConfig
+from .router_webui import collect_router_webui_snapshot
 
 
 _DOT1D_BASEPORT_IFINDEX_OID = ".1.3.6.1.2.1.17.1.4.1.2"
@@ -275,6 +276,52 @@ def _resolve_node_relationships(snapshot: dict[str, Any]) -> None:
                 changed = True
 
 
+def _merge_router_webui_snapshot(snapshot: dict[str, Any], router_snapshot: dict[str, Any]) -> dict[str, Any]:
+    host_table = router_snapshot.get("hostTable", [])
+    if not isinstance(host_table, list):
+        host_table = []
+    snapshot["hostTable"] = host_table
+    router_nodes = router_snapshot.get("nodes", [])
+    if not isinstance(router_nodes, list):
+        router_nodes = []
+    existing_nodes = snapshot.get("nodes", [])
+    if not isinstance(existing_nodes, list):
+        existing_nodes = []
+    node_by_ip = {
+        str(node.get("managementIp") or ""): node
+        for node in existing_nodes
+        if isinstance(node, dict)
+    }
+    for router_node in router_nodes:
+        if not isinstance(router_node, dict):
+            continue
+        router_ip = str(router_node.get("managementIp") or "")
+        existing = node_by_ip.get(router_ip)
+        if existing is None:
+            existing_nodes.append(router_node)
+            node_by_ip[router_ip] = router_node
+            continue
+        if not existing.get("name"):
+            existing["name"] = router_node.get("name", "")
+        existing["webUiHostCount"] = int(router_node.get("webUiHostCount") or 0)
+        if not existing.get("ok"):
+            existing["ok"] = bool(router_node.get("ok"))
+        existing.setdefault("errors", [])
+    snapshot["nodes"] = existing_nodes
+    for key in ("notes", "errors"):
+        incoming = router_snapshot.get(key, [])
+        if isinstance(incoming, list):
+            snapshot.setdefault(key, [])
+            for item in incoming:
+                if item and item not in snapshot[key]:
+                    snapshot[key].append(item)
+    if host_table:
+        snapshot["available"] = True
+        if snapshot.get("source") == "snmp-bridge-fdb":
+            snapshot["source"] = "snmp-bridge-fdb+router-webui"
+    return snapshot
+
+
 def _write_snapshot(path: Path, snapshot: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(snapshot, indent=2), encoding="utf-8")
@@ -299,6 +346,7 @@ def collect_topology_snapshot(config: AppConfig, now: datetime) -> dict[str, Any
         "available": False,
         "source": "snmp-bridge-fdb",
         "nodes": [],
+        "hostTable": [],
         "errors": [],
         "notes": [],
     }
@@ -308,46 +356,48 @@ def collect_topology_snapshot(config: AppConfig, now: datetime) -> dict[str, Any
         return snapshot
     if shutil.which(config.topology_snmpwalk_bin) is None:
         snapshot["errors"].append(f"snmpwalk binary not found: {config.topology_snmpwalk_bin}")
-        _write_snapshot(cache_path, snapshot)
-        return snapshot
-    if not nodes:
-        snapshot["errors"].append("No topology nodes configured.")
-        _write_snapshot(cache_path, snapshot)
-        return snapshot
-    for node in nodes:
-        collected_lines: list[str] = []
-        node_errors: list[str] = []
-        for oid in (
-            _DOT1D_BASEPORT_IFINDEX_OID,
-            _IF_NAME_OID,
-            _IF_DESCR_OID,
-            _IF_PHYSADDRESS_OID,
-            _DOT1D_TP_FDB_PORT_OID,
-            _DOT1Q_TP_FDB_PORT_OID,
-        ):
-            ok, lines, error = _run_snmpwalk(config, node, oid)
-            if lines:
-                collected_lines.extend(lines)
-            if not ok and error:
-                node_errors.append(f"{oid}: {error}")
-        parsed = _parse_snmpwalk_lines(collected_lines)
-        parsed.update(
-            {
-                "id": str(node.get("id") or ""),
-                "name": str(node.get("name") or ""),
-                "host": str(node.get("host") or ""),
-                "managementIp": str(node.get("managementIp") or ""),
-                "role": str(node.get("role") or ""),
-                "location": str(node.get("location") or ""),
-                "ok": bool(parsed.get("fdb") or parsed.get("interfaces")),
-                "errors": node_errors,
-            }
-        )
-        snapshot["nodes"].append(parsed)
-    _resolve_node_relationships(snapshot)
-    snapshot["available"] = any(bool(node.get("ok")) for node in snapshot["nodes"])
-    if not snapshot["available"] and not snapshot["errors"]:
-        snapshot["notes"].append("No bridge-table data collected from configured nodes.")
+    elif nodes:
+        for node in nodes:
+            collected_lines: list[str] = []
+            node_errors: list[str] = []
+            for oid in (
+                _DOT1D_BASEPORT_IFINDEX_OID,
+                _IF_NAME_OID,
+                _IF_DESCR_OID,
+                _IF_PHYSADDRESS_OID,
+                _DOT1D_TP_FDB_PORT_OID,
+                _DOT1Q_TP_FDB_PORT_OID,
+            ):
+                ok, lines, error = _run_snmpwalk(config, node, oid)
+                if lines:
+                    collected_lines.extend(lines)
+                if not ok and error:
+                    node_errors.append(f"{oid}: {error}")
+            parsed = _parse_snmpwalk_lines(collected_lines)
+            parsed.update(
+                {
+                    "id": str(node.get("id") or ""),
+                    "name": str(node.get("name") or ""),
+                    "host": str(node.get("host") or ""),
+                    "managementIp": str(node.get("managementIp") or ""),
+                    "role": str(node.get("role") or ""),
+                    "location": str(node.get("location") or ""),
+                    "ok": bool(parsed.get("fdb") or parsed.get("interfaces")),
+                    "errors": node_errors,
+                }
+            )
+            snapshot["nodes"].append(parsed)
+        _resolve_node_relationships(snapshot)
+        snapshot["available"] = any(bool(node.get("ok")) for node in snapshot["nodes"])
+        if not snapshot["available"] and not snapshot["errors"]:
+            snapshot["notes"].append("No bridge-table data collected from configured nodes.")
+    else:
+        snapshot["notes"].append("No SNMP topology nodes configured.")
+    if config.router_webui_enabled:
+        try:
+            snapshot = _merge_router_webui_snapshot(snapshot, collect_router_webui_snapshot(config, now.isoformat()))
+        except RuntimeError as exc:
+            snapshot["errors"].append(str(exc))
     _write_snapshot(cache_path, snapshot)
     return snapshot
 
@@ -364,6 +414,7 @@ def load_topology_snapshot(config: AppConfig, now: datetime, *, allow_refresh: b
             "available": False,
             "source": "snmp-bridge-fdb",
             "nodes": [],
+            "hostTable": [],
             "errors": [],
             "notes": ["Topology discovery disabled."],
         }
@@ -397,6 +448,19 @@ def apply_topology_to_inventory(devices: list[dict[str, Any]], topology: dict[st
     }
     node_by_id = {str(node.get("id") or ""): node for node in nodes if isinstance(node, dict)}
     node_by_ip = {str(node.get("managementIp") or ""): node for node in nodes if isinstance(node, dict)}
+    host_table = topology.get("hostTable", [])
+    if not isinstance(host_table, list):
+        host_table = []
+    host_by_mac = {
+        _compact_mac(str(entry.get("mac") or "")): entry
+        for entry in host_table
+        if isinstance(entry, dict) and _compact_mac(str(entry.get("mac") or ""))
+    }
+    host_by_ip = {
+        str(entry.get("ip") or ""): entry
+        for entry in host_table
+        if isinstance(entry, dict) and str(entry.get("ip") or "")
+    }
     for device in devices:
         ip = str(device.get("ip") or "")
         mac = _compact_mac(str(device.get("mac") or ""))
@@ -440,6 +504,20 @@ def apply_topology_to_inventory(devices: list[dict[str, Any]], topology: dict[st
         device["uplinkRole"] = str(chosen.get("role") or "")
         if str(chosen.get("role") or "").strip() in {"extender", "access_point", "mesh", "switch", "bridge"}:
             device["placementReason"] = f"Learned from {chosen.get('name') or chosen.get('managementIp')}"
+        continue
+        
+    for device in devices:
+        if str(device.get("uplinkIp") or "").strip():
+            continue
+        ip = str(device.get("ip") or "")
+        mac = _compact_mac(str(device.get("mac") or ""))
+        matched_host = host_by_mac.get(mac) or host_by_ip.get(ip)
+        if matched_host is None:
+            continue
+        device["uplinkIp"] = str(matched_host.get("sourceManagementIp") or "")
+        device["uplinkName"] = str(matched_host.get("sourceNodeName") or "")
+        device["uplinkRole"] = str(matched_host.get("sourceNodeRole") or "")
+        device["placementReason"] = "Seen in router host table"
     for node in nodes:
         node["attachedDevices"] = []
     for device in devices:

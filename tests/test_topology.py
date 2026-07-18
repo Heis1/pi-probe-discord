@@ -96,6 +96,95 @@ class TopologyTests(unittest.TestCase):
         nodes = {item["id"]: item for item in updated_topology["nodes"]}
         self.assertEqual(nodes["extender"]["attachedDeviceCount"], 1)
 
+    def test_collect_topology_snapshot_uses_router_webui_host_table_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = make_config(Path(tmp))
+            config.topology_enabled = True
+            config.topology_nodes_json = ""
+            config.router_webui_enabled = True
+            router_snapshot = {
+                "generatedAt": "2026-07-18T16:00:00+09:30",
+                "enabled": True,
+                "available": True,
+                "source": "router-webui-lan-host-entry",
+                "nodes": [
+                    {
+                        "id": "router-webui",
+                        "name": "Archer VR2100",
+                        "host": "192.168.1.1",
+                        "managementIp": "192.168.1.1",
+                        "role": "router",
+                        "location": "",
+                        "ok": True,
+                        "errors": [],
+                        "interfaces": [],
+                        "basePorts": [],
+                        "fdb": [],
+                        "depth": 0,
+                        "webUiHostCount": 2,
+                    }
+                ],
+                "hostTable": [
+                    {
+                        "ip": "192.168.1.100",
+                        "mac": "dc:a6:32:37:7a:6a",
+                        "hostName": "raspberrypi",
+                        "active": True,
+                        "sourceNodeId": "router-webui",
+                        "sourceManagementIp": "192.168.1.1",
+                        "sourceNodeName": "Archer VR2100",
+                        "sourceNodeRole": "router",
+                    }
+                ],
+                "errors": [],
+                "notes": ["Router Web UI host table fallback in use."],
+            }
+            with patch("pi_probe_discord.topology.collect_router_webui_snapshot", return_value=router_snapshot), \
+                 patch("pi_probe_discord.topology.shutil.which", return_value="/usr/bin/snmpwalk"):
+                snapshot = collect_topology_snapshot(config, datetime(2026, 7, 18, 16, 0, 0))
+            self.assertTrue(snapshot["available"])
+            self.assertEqual(snapshot["source"], "snmp-bridge-fdb+router-webui")
+            self.assertEqual(snapshot["hostTable"][0]["hostName"], "raspberrypi")
+            self.assertEqual(snapshot["nodes"][0]["name"], "Archer VR2100")
+
+    def test_apply_topology_to_inventory_assigns_router_uplink_from_host_table(self) -> None:
+        devices = [
+            {"id": "192.168.1.100", "ip": "192.168.1.100", "mac": "DC:A6:32:37:7A:6A", "name": "Pi-hole", "category": "servers", "categoryLabel": "Servers"},
+        ]
+        topology = {
+            "available": True,
+            "nodes": [
+                {
+                    "id": "router-webui",
+                    "name": "Archer VR2100",
+                    "managementIp": "192.168.1.1",
+                    "role": "router",
+                    "location": "",
+                    "parentNodeId": "",
+                    "interfaces": [],
+                    "fdb": [],
+                    "depth": 0,
+                }
+            ],
+            "hostTable": [
+                {
+                    "ip": "192.168.1.100",
+                    "mac": "dc:a6:32:37:7a:6a",
+                    "hostName": "raspberrypi",
+                    "active": True,
+                    "sourceNodeId": "router-webui",
+                    "sourceManagementIp": "192.168.1.1",
+                    "sourceNodeName": "Archer VR2100",
+                    "sourceNodeRole": "router",
+                }
+            ],
+        }
+        updated_devices, updated_topology = apply_topology_to_inventory(devices, topology)
+        self.assertEqual(updated_devices[0]["uplinkIp"], "192.168.1.1")
+        self.assertEqual(updated_devices[0]["uplinkName"], "Archer VR2100")
+        self.assertEqual(updated_devices[0]["placementReason"], "Seen in router host table")
+        self.assertEqual(updated_topology["nodes"][0]["attachedDeviceCount"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()
