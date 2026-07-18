@@ -2447,39 +2447,18 @@ async function establishActionSession(forcePrompt = false) {
   }
   if (!current) return false;
   setActionToken(current);
-  try {
-    const response = await fetch('/api/auth/session', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'same-origin',
-      body: JSON.stringify({ token: current }),
-    });
-    const result = await response.json();
-    if (!response.ok || !result.ok) {
-      localStorage.removeItem(actionSessionKey);
-      if (!forcePrompt) {
-        setActionToken('');
-        return establishActionSession(true);
-      }
-      return false;
-    }
-    localStorage.setItem(actionSessionKey, 'true');
-    renderInventoryMeta();
-    renderDeviceMap();
-    return true;
-  } catch (_) {
-    localStorage.removeItem(actionSessionKey);
-    if (!forcePrompt) {
-      setActionToken('');
-      return establishActionSession(true);
-    }
-    return false;
-  }
+  localStorage.setItem(actionSessionKey, 'true');
+  renderInventoryMeta();
+  renderDeviceMap();
+  return true;
 }
 async function ensureActionToken(forcePrompt = false) {
   if (!inventory.apiTokenRequired) return true;
   const current = (document.getElementById('apiToken')?.value || getActionToken() || '').trim();
-  if (current && !forcePrompt) return establishActionSession(false);
+  if (current && !forcePrompt) {
+    setActionToken(current);
+    return true;
+  }
   return establishActionSession(true);
 }
 async function fetchWithActionAuth(url, options = {}, { allowRetry = true } = {}) {
@@ -2515,9 +2494,6 @@ function initActionTokenControl() {
     renderInventoryMeta();
     renderDeviceMap();
   });
-  if (inventory.apiTokenRequired && input.value.trim()) {
-    void establishActionSession(false);
-  }
 }
 function formatFreshness(value) {
   if (!value) return 'Refresh unknown';
