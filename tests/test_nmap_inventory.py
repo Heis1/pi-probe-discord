@@ -5,12 +5,46 @@ import tempfile
 import unittest
 from datetime import datetime
 from pathlib import Path
+from unittest.mock import patch
 
-from pi_probe_discord.nmap_inventory import export_nmap_inventory_json, remove_nmap_override, upsert_nmap_override
+from pi_probe_discord.nmap_inventory import export_nmap_inventory_json, remove_nmap_override, run_nmap_inventory_scan, upsert_nmap_override
 from tests.test_dashboard import make_config
 
 
 class NmapInventoryTests(unittest.TestCase):
+    def test_run_nmap_inventory_scan_upgrades_legacy_fast_scan_defaults(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            config = make_config(base)
+            captured: dict[str, object] = {}
+
+            class FakeStdout:
+                def __iter__(self):
+                    return iter(["Starting Nmap 7.93\n", "Nmap done:\n"])
+
+            class FakeProcess:
+                def __init__(self, args: list[str]) -> None:
+                    captured["args"] = args
+                    self.stdout = FakeStdout()
+
+                def wait(self, timeout: int | None = None) -> int:
+                    return 0
+
+            def fake_popen(args, stdout=None, stderr=None, text=None):
+                return FakeProcess(args)
+
+            with patch("pi_probe_discord.nmap_inventory.subprocess.Popen", side_effect=fake_popen), \
+                 patch("pi_probe_discord.nmap_inventory.export_nmap_inventory_json", return_value=(True, "ok")):
+                ok, _ = run_nmap_inventory_scan(config, datetime(2026, 7, 18, 13, 0, 0))
+
+            self.assertTrue(ok)
+            args = captured["args"]
+            self.assertIn("-Pn", args)
+            self.assertIn("--top-ports", args)
+            top_ports_index = args.index("--top-ports")
+            self.assertEqual(args[top_ports_index + 1], "200")
+            self.assertNotIn("-F", args)
+
     def test_export_nmap_inventory_json_identifies_bambu_by_certificate(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
@@ -107,6 +141,73 @@ class NmapInventoryTests(unittest.TestCase):
             device = payload["devices"][0]
             self.assertNotEqual(device["category"], "printer")
             self.assertNotIn("Bambu", device["name"])
+
+    def test_export_nmap_inventory_json_records_generic_category_reasons(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            config = make_config(base)
+            Path(config.nmap_inventory_xml).parent.mkdir(parents=True, exist_ok=True)
+            Path(config.nmap_inventory_xml).write_text(
+                """<?xml version="1.0"?>
+<nmaprun args="nmap -sV 192.168.1.0/24">
+  <host>
+    <status state="up"/>
+    <address addr="192.168.1.51" addrtype="ipv4"/>
+    <hostnames><hostname name="pi.hole"/></hostnames>
+    <ports>
+      <port protocol="tcp" portid="53"><state state="open"/><service name="domain"/></port>
+      <port protocol="tcp" portid="80"><state state="open"/><service name="http"/></port>
+      <port protocol="tcp" portid="443"><state state="open"/><service name="https"/></port>
+    </ports>
+  </host>
+</nmaprun>
+""",
+                encoding="utf-8",
+            )
+            ok, _ = export_nmap_inventory_json(config, datetime(2026, 6, 8, 20, 0, 0))
+            self.assertTrue(ok)
+            payload = json.loads(Path(config.nmap_inventory_json).read_text(encoding="utf-8"))
+            device = payload["devices"][0]
+            self.assertEqual(device["category"], "servers")
+            self.assertGreaterEqual(device["identificationScore"], 30)
+            self.assertTrue(device["identificationReasons"])
+
+    def test_export_nmap_inventory_json_recognizes_tcl_tv_and_lenovo_computer(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            config = make_config(base)
+            Path(config.nmap_inventory_xml).parent.mkdir(parents=True, exist_ok=True)
+            Path(config.nmap_inventory_xml).write_text(
+                """<?xml version="1.0"?>
+<nmaprun args="nmap -sV 192.168.1.0/24">
+  <host>
+    <status state="up"/>
+    <address addr="192.168.1.120" addrtype="ipv4"/>
+    <hostnames><hostname name="tcl-smart-tv"/></hostnames>
+    <ports>
+      <port protocol="tcp" portid="8008"><state state="open"/><service name="http"/></port>
+    </ports>
+  </host>
+  <host>
+    <status state="up"/>
+    <address addr="192.168.1.130" addrtype="ipv4"/>
+    <hostnames><hostname name="lenovo-yoga"/></hostnames>
+    <ports>
+      <port protocol="tcp" portid="3389"><state state="open"/><service name="ms-wbt-server"/></port>
+    </ports>
+  </host>
+</nmaprun>
+""",
+                encoding="utf-8",
+            )
+            ok, _ = export_nmap_inventory_json(config, datetime(2026, 7, 18, 14, 0, 0))
+            self.assertTrue(ok)
+            payload = json.loads(Path(config.nmap_inventory_json).read_text(encoding="utf-8"))
+            devices = {item["ip"]: item for item in payload["devices"]}
+            self.assertEqual(devices["192.168.1.120"]["category"], "media")
+            self.assertEqual(devices["192.168.1.120"]["name"], "TCL Smart TV")
+            self.assertEqual(devices["192.168.1.130"]["category"], "computers")
+            self.assertEqual(devices["192.168.1.130"]["name"], "Lenovo Computer")
 
     def test_export_nmap_inventory_json_parses_hosts_and_categories(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

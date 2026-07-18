@@ -1,3 +1,15 @@
+pi-probe-discord (1.1.21-1) unstable; urgency=medium
+
+  * Improve device assessment by weighing hostname, vendor, OS, ports, services, and TLS signals together, and add friendlier naming for common home devices.
+
+ -- Codex Builder <noreply@example.invalid>  Sat, 18 Jul 2026 14:25:00 +0930
+
+pi-probe-discord (1.1.20-1) unstable; urgency=medium
+
+  * Replace the legacy fast Nmap default with a Bambu-safe profile and auto-upgrade older -F defaults at scan time.
+
+ -- Codex Builder <noreply@example.invalid>  Sat, 18 Jul 2026 14:10:00 +0930
+
 pi-probe-discord (1.1.19-1) unstable; urgency=medium
 
   * Fingerprint Bambu Lab printers from Nmap TLS and service evidence.

@@ -33,6 +33,7 @@ BBL_ISSUER_MARKERS = (
     "bbl ca",
 )
 BBL_SERIAL_RE = re.compile(r"^[0-9A-Z]{10,}$")
+IP_LIKE_RE = re.compile(r"^\d{1,3}(?:\.\d{1,3}){3}(?:\s*\(.*\))?$")
 
 
 def _first_text(element: ET.Element | None, xpath: str, default: str = "") -> str:
@@ -44,25 +45,126 @@ def _first_text(element: ET.Element | None, xpath: str, default: str = "") -> st
     return (found.text or "").strip()
 
 
-def _guess_category(hostname: str, vendor: str, open_ports: list[int], services: list[str], ip: str) -> str:
-    text = f"{hostname} {vendor} {' '.join(services)}".lower()
-    if ip.endswith(".1") or any(token in text for token in ("router", "gateway", "tp-link", "archer", "ubiquiti")):
-        return "infrastructure"
-    if any(port in open_ports for port in (53, 67, 68, 80, 443, 22)) and any(
-        token in text for token in ("pi", "raspberry", "server", "nas", "pihole", "proxmox")
-    ):
-        return "servers"
-    if any(token in text for token in ("iphone", "pixel", "android", "phone", "samsung")):
-        return "mobile"
-    if any(token in text for token in ("tv", "chromecast", "roku", "apple tv", "fire tv", "playstation", "xbox")):
-        return "media"
-    if any(port in open_ports for port in (9100, 515, 631, 554, 8008, 8009, 8080)) or any(
-        token in text for token in ("printer", "camera", "plug", "switch", "echo", "ring", "vacuum", "iot")
-    ):
-        return "iot"
-    if any(token in text for token in ("laptop", "desktop", "pc", "lenovo", "thinkpad", "yoga", "macbook", "workstation")):
-        return "computers"
-    return "unknown"
+def _is_ip_like_name(value: str) -> bool:
+    return bool(IP_LIKE_RE.fullmatch(value.strip()))
+
+
+def _summarize_reasons(reasons: list[str], *, limit: int = 2) -> str:
+    compact = [reason for reason in reasons if reason][:limit]
+    return " · ".join(compact)
+
+
+def _friendly_name_from_signals(hostname: str, vendor: str, category: str, text: str, fallback: str) -> str:
+    if "iphone" in text:
+        return "Apple iPhone"
+    if "ipad" in text:
+        return "Apple iPad"
+    if any(token in text for token in ("samsung", "galaxy")) and category == "mobile":
+        return "Samsung Phone"
+    if "pixel" in text and category == "mobile":
+        return "Google Pixel Phone"
+    if any(token in text for token in ("tcl", "smart tv", "android tv")) and category == "media":
+        return "TCL Smart TV"
+    if any(token in text for token in ("firestick", "fire tv")) and category == "media":
+        return "Amazon Fire TV"
+    if "nintendo switch" in text and category == "media":
+        return "Nintendo Switch"
+    if "chromecast" in text and category == "media":
+        return "Google Chromecast"
+    if "google nest" in text and category in {"media", "iot"}:
+        return "Google Nest Device"
+    if "google home" in text and category in {"media", "iot"}:
+        return "Google Home Device"
+    if "eufy homebase" in text and category == "iot":
+        return "Eufy HomeBase"
+    if "eufy" in text and "camera" in text and category == "iot":
+        return "Eufy Camera"
+    if "lenovo" in text and category == "computers":
+        return "Lenovo Computer"
+    if "dell" in text and category == "computers":
+        return "Dell Computer"
+    if fallback and not _is_ip_like_name(fallback):
+        return fallback
+    if vendor.strip():
+        return vendor.strip()
+    if hostname.strip() and hostname.strip() != fallback:
+        return hostname.strip()
+    return fallback
+
+
+def _rank_category_signals(
+    hostname: str,
+    vendor: str,
+    host_os_text: str,
+    ip: str,
+    port_entries: list[dict[str, object]],
+) -> tuple[str, int, list[str]]:
+    port_numbers = {int(item.get("port") or 0) for item in port_entries}
+    services = [
+        str(item.get("service") or "")
+        for item in port_entries
+        if str(item.get("service") or "").strip()
+    ]
+    script_text = " ".join(str(item.get("scriptText") or "") for item in port_entries if str(item.get("scriptText") or "").strip())
+    text = " ".join(
+        part
+        for part in (
+            hostname,
+            vendor,
+            host_os_text,
+            " ".join(services),
+            script_text,
+        )
+        if part
+    ).lower()
+    scores: dict[str, int] = {category: 0 for category in VALID_CATEGORIES}
+    reasons: dict[str, list[str]] = {category: [] for category in VALID_CATEGORIES}
+
+    def add(category: str, points: int, reason: str) -> None:
+        scores[category] += points
+        reasons[category].append(reason)
+
+    if ip.endswith(".1"):
+        add("infrastructure", 80, "Gateway-style .1 address")
+    if any(token in text for token in ("router", "gateway", "archer", "ubiquiti", "unifi")):
+        add("infrastructure", 60, "Router or gateway identifier present")
+    if vendor and any(token in vendor.lower() for token in ("tp-link", "ubiquiti", "mikrotik")):
+        add("infrastructure", 25, "Infrastructure vendor match")
+    if {53, 67, 68}.intersection(port_numbers):
+        add("infrastructure", 25, "Core network service ports exposed")
+
+    if any(token in text for token in ("pi-hole", "pihole", "server", "nas", "proxmox", "docker", "raspberry", "pi-probe", "synology")):
+        add("servers", 55, "Server-oriented hostname or vendor signal")
+    if {22, 53, 80, 443}.intersection(port_numbers) and any(token in text for token in ("pi", "server", "nas", "raspberry")):
+        add("servers", 30, "Common server ports paired with server keywords")
+
+    if any(token in text for token in ("iphone", "ipad", "pixel", "android", "phone", "samsung", "galaxy")):
+        add("mobile", 70, "Mobile device keyword present")
+
+    if any(token in text for token in ("tv", "smart tv", "chromecast", "roku", "apple tv", "fire tv", "firestick", "playstation", "xbox", "nintendo switch", "google home", "google nest")):
+        add("media", 70, "Media device keyword present")
+    if {8008, 8009}.intersection(port_numbers):
+        add("media", 30, "Cast-style media control ports exposed")
+
+    if any(token in text for token in ("laptop", "desktop", "pc", "lenovo", "thinkpad", "yoga", "macbook", "workstation", "dell", "latitude", "xps", "inspiron")):
+        add("computers", 70, "Computer keyword present")
+    if 3389 in port_numbers or 5900 in port_numbers:
+        add("computers", 25, "Remote desktop port exposed")
+
+    if any(token in text for token in ("printer", "camera", "plug", "switch", "echo", "ring", "vacuum", "iot", "tuya", "shelly", "eufy", "homebase", "nest cam")):
+        add("iot", 55, "IoT-oriented device keyword present")
+    if {554, 8080, 9100, 515, 631}.intersection(port_numbers):
+        add("iot", 30, "Common IoT or embedded service ports exposed")
+
+    ranked = max(
+        ((category, score) for category, score in scores.items() if category != "unknown"),
+        key=lambda item: item[1],
+        default=("unknown", 0),
+    )
+    category, score = ranked
+    if score < 30:
+        return "unknown", 0, []
+    return category, score, reasons[category]
 
 
 def _category_label(category: str) -> str:
@@ -383,6 +485,7 @@ def _classify_bambu_device(
     cert_text_all = " ".join(cert_text_parts).lower()
     matching_issuer = next((marker for marker in BBL_ISSUER_MARKERS if marker in cert_text_all), "")
     has_printer_marker = "printer" in cert_text_all
+    hostname_mentions_bambu = "bambu" in hostname.lower()
     if matching_issuer:
         reasons.append(f"TLS issuer contains {matching_issuer}")
     if has_printer_marker:
@@ -403,10 +506,31 @@ def _classify_bambu_device(
             candidate = text_serial.group(1)
             if _looks_like_bambu_serial(candidate):
                 device_id = candidate
-    confirmed = bool(matching_issuer)
-    probable = not confirmed and has_ftps_990 and 3000 in port_numbers and 6000 in port_numbers and (
-        has_vsftpd or bool(device_id) or any(token in host_os_text.lower() for token in ("linux", "unix", "embedded"))
-    )
+    if device_id:
+        reasons.append("Certificate CN resembles a Bambu device ID")
+    if hostname_mentions_bambu:
+        reasons.append("Hostname mentions Bambu")
+
+    score = 0
+    if matching_issuer:
+        score += 100
+    if has_printer_marker:
+        score += 35
+    if has_ftps_990:
+        score += 25
+    if has_vsftpd:
+        score += 20
+    if 3000 in port_numbers and 6000 in port_numbers:
+        score += 25
+    if device_id:
+        score += 20
+    if hostname_mentions_bambu:
+        score += 15
+    if host_os_text and any(token in host_os_text.lower() for token in ("linux", "unix", "embedded")):
+        score += 10
+
+    confirmed = bool(matching_issuer or (has_printer_marker and has_ftps_990 and (device_id or has_vsftpd)))
+    probable = not confirmed and has_ftps_990 and 3000 in port_numbers and 6000 in port_numbers and score >= 70
     if not confirmed and not probable:
         return {}
 
@@ -419,7 +543,7 @@ def _classify_bambu_device(
         "manufacturer": "Bambu Lab",
         "deviceType": "3d_printer",
         "identificationConfidence": "confirmed" if confirmed else "probable",
-        "identificationScore": 100 if confirmed else 75,
+        "identificationScore": 100 if confirmed else min(score, 89),
         "identificationReasons": reasons,
         "deviceId": device_id,
         "displayEvidence": (
@@ -672,11 +796,22 @@ def export_nmap_inventory_json(config: AppConfig, now: datetime) -> tuple[bool, 
             if service_name:
                 services.append(service_name)
 
-        category = _guess_category(hostname, vendor, open_ports, services, ip)
+        category, generic_score, generic_reasons = _rank_category_signals(hostname, vendor, host_os_text, ip, port_entries)
         label_name = hostname if hostname and hostname != ip else vendor or ip
+        assessment_text = " ".join(
+            part
+            for part in (
+                hostname,
+                vendor,
+                host_os_text,
+                " ".join(services),
+                " ".join(str(item.get("scriptText") or "") for item in port_entries if str(item.get("scriptText") or "").strip()),
+            )
+            if part
+        ).lower()
         device = {
             "id": ip or hostname,
-            "name": label_name,
+            "name": _friendly_name_from_signals(hostname, vendor, category, assessment_text, label_name),
             "hostname": hostname,
             "ip": ip,
             "mac": mac,
@@ -692,18 +827,21 @@ def export_nmap_inventory_json(config: AppConfig, now: datetime) -> tuple[bool, 
             "lastSeen": now.isoformat(),
             "manufacturer": vendor,
             "deviceType": category,
-            "identificationConfidence": "guessed",
-            "identificationScore": 0,
-            "identificationReasons": [],
+            "identificationConfidence": "probable" if generic_score >= 70 else "guessed" if generic_score >= 30 else "unknown",
+            "identificationScore": generic_score,
+            "identificationReasons": generic_reasons,
             "deviceId": "",
             "ips": [ip] if ip else [],
             "interfaces": [{"ip": ip, "mac": mac, "hostname": hostname}] if ip or mac or hostname else [],
             "osFingerprint": host_os_text,
             "rawRecords": [],
+            "displayEvidence": _summarize_reasons(generic_reasons),
         }
         bambu = _classify_bambu_device(hostname, vendor, host_os_text, port_entries)
         if bambu:
             device.update(bambu)
+        elif category == "unknown":
+            device["identificationConfidence"] = "unknown"
         raw_devices.append(dict(device))
         override = _find_matching_override(overrides, ip, mac, hostname)
         if override and bool(override.get("hidden")):
@@ -833,6 +971,11 @@ def run_nmap_inventory_scan(config: AppConfig, now: datetime) -> tuple[bool, str
     state_path = Path(config.nmap_state_json)
     lock_path = state_path.with_suffix(".lock")
     nmap_args = shlex.split(config.nmap_arguments)
+    legacy_fast_scan = shlex.split("-F --min-rate 2000 --host-timeout 30s")
+    if nmap_args == legacy_fast_scan:
+        nmap_args = shlex.split("-Pn --top-ports 200 --min-rate 2000 --host-timeout 30s")
+    if "-F" in nmap_args and "-Pn" not in nmap_args:
+        nmap_args.append("-Pn")
     if "-sV" not in nmap_args and "--version-all" not in nmap_args and "--version-light" not in nmap_args:
         nmap_args.extend(["-sV", "--version-light"])
     if "--script" not in nmap_args:
