@@ -1,3 +1,9 @@
+pi-probe-discord (1.1.42-1) unstable; urgency=medium
+
+  * Add explicit dashboard token validation feedback and accept action tokens from protected request bodies as well as headers to avoid repeated prompt loops and silent 401 failures.
+
+ -- Codex Builder <noreply@example.invalid>  Sat, 18 Jul 2026 23:59:30 +0930
+
 pi-probe-discord (1.1.41-1) unstable; urgency=medium
 
   * Stop revalidating the dashboard action token before every protected action; use the saved token directly and only reprompt after an actual 401 response.
