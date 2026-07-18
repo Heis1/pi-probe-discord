@@ -177,6 +177,73 @@ sudo pi-probe-discord nmap-scan
 
 The interactive dashboard can also start a manual scan when an action token is configured. After a successful scan, the browser fetches fresh dashboard JSON immediately instead of waiting for the next polling interval.
 
+## Automated topology and visual diagram
+
+The dashboard can now build an automated LAN topology view from SNMP bridge MAC tables instead of relying on guessed uplinks.
+
+What it does:
+
+- walks bridge forwarding tables from configured infrastructure nodes
+- matches learned client MAC addresses to scanned inventory devices
+- identifies downstream devices behind extenders or access points
+- derives parent links for infrastructure nodes when their MAC addresses appear in another node's FDB
+- renders a visual topology diagram in the live dashboard
+
+Install the SNMP tools on the Pi:
+
+```bash
+sudo apt install snmp
+```
+
+Example topology configuration:
+
+```bash
+PI_PROBE_TOPOLOGY_ENABLED="true"
+PI_PROBE_TOPOLOGY_NODES_JSON='[
+  {"id":"router","name":"Main Router","host":"192.168.1.1","management_ip":"192.168.1.1","community":"public","role":"router","location":"Main Network"},
+  {"id":"extender","name":"Downstairs Extender","host":"192.168.1.115","management_ip":"192.168.1.115","community":"public","role":"extender","location":"Downstairs"}
+]'
+PI_PROBE_TOPOLOGY_CACHE_JSON="/var/lib/pi-probe-discord/topology/latest.json"
+PI_PROBE_TOPOLOGY_REFRESH_MINUTES="30"
+PI_PROBE_TOPOLOGY_SNMPWALK_BIN="snmpwalk"
+PI_PROBE_TOPOLOGY_SNMP_TIMEOUT_SECONDS="6"
+```
+
+Notes:
+
+- this requires SNMP read access on the router, extender, switch, or access point you want to map
+- the topology poll is separate from dashboard JSON polling
+- dashboard refresh polling does not trigger Nmap or SNMP topology scans by itself
+- topology data is cached and reused until the refresh interval expires
+
+## Router Web UI Secrets
+
+If you later enable router web UI scraping, keep the credentials out of the main env file.
+
+Main config:
+
+```bash
+PI_PROBE_ROUTER_WEBUI_ENABLED="true"
+PI_PROBE_ROUTER_WEBUI_URL="http://192.168.1.1"
+PI_PROBE_ROUTER_WEBUI_SECRET_FILE="/etc/pi-probe-discord/router-webui.env"
+```
+
+Secret file:
+
+```bash
+sudo install -o root -g root -m 600 /usr/share/pi-probe-discord/router-webui.env.example /etc/pi-probe-discord/router-webui.env
+sudo nano /etc/pi-probe-discord/router-webui.env
+```
+
+The secret file must:
+
+- be owned by `root`
+- have mode `600`
+- define `PI_PROBE_ROUTER_WEBUI_USERNAME`
+- define `PI_PROBE_ROUTER_WEBUI_PASSWORD`
+
+The dashboard payload and normal status views do not expose these values.
+
 ## Firewall examples
 
 LAN-only example:

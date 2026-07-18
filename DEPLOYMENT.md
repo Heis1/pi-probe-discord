@@ -147,6 +147,53 @@ Nmap inventory processing now identifies Bambu Lab printers from certificate and
 
 The dashboard shows confirmed printers with a printer marker, confidence, evidence summary, and `Device ID` when the certificate CN is already present in scan data.
 
+## Automated topology discovery
+
+The dashboard can now build a live topology diagram from SNMP bridge MAC tables.
+
+Install the collector dependency on the Pi:
+
+```bash
+sudo apt install snmp
+```
+
+Example configuration:
+
+```bash
+PI_PROBE_TOPOLOGY_ENABLED="true"
+PI_PROBE_TOPOLOGY_NODES_JSON='[
+  {"id":"router","name":"Main Router","host":"192.168.1.1","management_ip":"192.168.1.1","community":"public","role":"router","location":"Main Network"},
+  {"id":"extender","name":"Downstairs Extender","host":"192.168.1.115","management_ip":"192.168.1.115","community":"public","role":"extender","location":"Downstairs"}
+]'
+PI_PROBE_TOPOLOGY_CACHE_JSON="/var/lib/pi-probe-discord/topology/latest.json"
+PI_PROBE_TOPOLOGY_REFRESH_MINUTES="30"
+PI_PROBE_TOPOLOGY_SNMPWALK_BIN="snmpwalk"
+PI_PROBE_TOPOLOGY_SNMP_TIMEOUT_SECONDS="6"
+```
+
+This topology refresh is separate from dashboard polling. The browser refreshing `/api/dashboard/data` does not itself run Nmap or SNMP collection.
+
+## Root-only router web UI credentials
+
+If you later enable router web UI scraping, keep the credentials in a separate root-only file instead of `/etc/pi-probe-discord/pihole-update-discord.env`.
+
+Main env:
+
+```bash
+PI_PROBE_ROUTER_WEBUI_ENABLED="true"
+PI_PROBE_ROUTER_WEBUI_URL="http://192.168.1.1"
+PI_PROBE_ROUTER_WEBUI_SECRET_FILE="/etc/pi-probe-discord/router-webui.env"
+```
+
+Install the secret template and lock it down:
+
+```bash
+sudo install -o root -g root -m 600 /usr/share/pi-probe-discord/router-webui.env.example /etc/pi-probe-discord/router-webui.env
+sudo nano /etc/pi-probe-discord/router-webui.env
+```
+
+The secret file must remain owned by `root` with mode `600` or Pi Probe will refuse to load it.
+
 ## Nmap timer inspection and logs
 
 ```bash

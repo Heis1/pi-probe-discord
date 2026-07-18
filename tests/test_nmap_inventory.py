@@ -254,6 +254,47 @@ class NmapInventoryTests(unittest.TestCase):
             self.assertEqual(devices["192.168.1.130"]["category"], "computers")
             self.assertEqual(devices["192.168.1.130"]["name"], "Lenovo Computer")
 
+    def test_export_nmap_inventory_json_recognizes_samsung_apple_watch_and_thermomix(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            config = make_config(base)
+            Path(config.nmap_inventory_xml).parent.mkdir(parents=True, exist_ok=True)
+            Path(config.nmap_inventory_xml).write_text(
+                """<?xml version="1.0"?>
+<nmaprun args="nmap -sV 192.168.1.0/24">
+  <host>
+    <status state="up"/>
+    <address addr="192.168.1.102" addrtype="ipv4"/>
+    <hostnames><hostname name="samsung-galaxy-z-fold6"/></hostnames>
+  </host>
+  <host>
+    <status state="up"/>
+    <address addr="192.168.1.140" addrtype="ipv4"/>
+    <hostnames><hostname name="apple-watch"/></hostnames>
+    <ports>
+      <port protocol="tcp" portid="62078"><state state="open"/><service name="iphone-sync"/></port>
+    </ports>
+  </host>
+  <host>
+    <status state="up"/>
+    <address addr="192.168.1.127" addrtype="ipv4"/>
+    <hostnames><hostname name="thermomix"/></hostnames>
+  </host>
+</nmaprun>
+""",
+                encoding="utf-8",
+            )
+            ok, _ = export_nmap_inventory_json(config, datetime(2026, 7, 18, 14, 0, 0))
+            self.assertTrue(ok)
+            payload = json.loads(Path(config.nmap_inventory_json).read_text(encoding="utf-8"))
+            devices = {item["ip"]: item for item in payload["devices"]}
+            self.assertEqual(devices["192.168.1.102"]["category"], "mobile")
+            self.assertEqual(devices["192.168.1.102"]["name"], "Samsung Galaxy Phone")
+            self.assertEqual(devices["192.168.1.140"]["category"], "mobile")
+            self.assertEqual(devices["192.168.1.140"]["name"], "Apple Watch")
+            self.assertEqual(devices["192.168.1.127"]["category"], "iot")
+            self.assertEqual(devices["192.168.1.127"]["name"], "Thermomix")
+
     def test_export_nmap_inventory_json_parses_hosts_and_categories(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
@@ -526,12 +567,18 @@ class NmapInventoryTests(unittest.TestCase):
                 ip="192.168.1.51",
                 name="Pi Probe",
                 category="servers",
+                location="Downstairs",
+                role="server",
+                uplink_ip="192.168.1.115",
             )
             self.assertIn("Saved Nmap override", message)
             payload = json.loads(Path(config.nmap_overrides_json).read_text(encoding="utf-8"))
             self.assertEqual(payload["devices"][0]["ip"], "192.168.1.51")
             self.assertEqual(payload["devices"][0]["name"], "Pi Probe")
             self.assertEqual(payload["devices"][0]["category"], "servers")
+            self.assertEqual(payload["devices"][0]["location"], "Downstairs")
+            self.assertEqual(payload["devices"][0]["role"], "server")
+            self.assertEqual(payload["devices"][0]["uplinkIp"], "192.168.1.115")
 
             message = remove_nmap_override(config, ip="192.168.1.51")
             self.assertIn("Removed Nmap override", message)

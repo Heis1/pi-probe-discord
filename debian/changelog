@@ -1,3 +1,24 @@
+pi-probe-discord (1.1.25-1) unstable; urgency=medium
+
+  * Add root-only Router Web UI secret-file loading for HTTPS-based router integrations.
+  * Ship Router Web UI credential examples and deployment guidance for packaged installs.
+
+ -- Codex Builder <noreply@example.invalid>  Sat, 18 Jul 2026 16:35:00 +0930
+
+pi-probe-discord (1.1.24-1) unstable; urgency=medium
+
+  * Add SNMP bridge-table topology discovery with automatic downstream device placement and a live dashboard diagram.
+  * Recommend snmpwalk tooling and ship topology configuration examples for packaged installs.
+
+ -- Codex Builder <noreply@example.invalid>  Sat, 18 Jul 2026 15:10:00 +0930
+
+pi-probe-discord (1.1.23-1) unstable; urgency=medium
+
+  * Improve home-device fingerprinting for Samsung Galaxy, Apple Watch, Thermomix, and extenders.
+  * Add device location and uplink override metadata and reorganize dashboard inventory by location.
+
+ -- Codex Builder <noreply@example.invalid>  Sat, 18 Jul 2026 14:45:00 +0930
+
 pi-probe-discord (1.1.22-1) unstable; urgency=medium
 
   * Add a two-stage LAN scan that discovers hosts first and then runs the service scan, so quiet devices stay in inventory.

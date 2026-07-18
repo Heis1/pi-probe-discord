@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import stat
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -25,6 +26,8 @@ DEFAULT_NMAP_INVENTORY_JSON = DEFAULT_DATA_DIR / "nmap" / "latest.json"
 DEFAULT_NMAP_EVENTS_JSON = DEFAULT_DATA_DIR / "nmap" / "events.json"
 DEFAULT_NMAP_OVERRIDES_JSON = DEFAULT_DATA_DIR / "nmap" / "overrides.json"
 DEFAULT_NMAP_STATE_JSON = DEFAULT_DATA_DIR / "nmap" / "state.json"
+DEFAULT_TOPOLOGY_CACHE_JSON = DEFAULT_DATA_DIR / "topology" / "latest.json"
+DEFAULT_ROUTER_WEBUI_SECRET_FILE = DEFAULT_CONFIG_DIR / "router-webui.env"
 DEFAULT_NMAP_TARGETS = "192.168.1.0/24"
 DEFAULT_NMAP_ARGUMENTS = "-Pn --top-ports 200 --min-rate 2000 --host-timeout 30s"
 DEFAULT_FIREWALL_LOG_PATHS = ["/var/log/ufw.log", "/var/log/kern.log", "/var/log/syslog"]
@@ -66,6 +69,44 @@ def load_dotenv_style(path: Path) -> None:
         value = value.strip().strip('"').strip("'")
         if key and key not in os.environ:
             os.environ[key] = value
+
+
+def validate_router_webui_secret_file(path: Path) -> None:
+    if not path.exists():
+        raise RuntimeError(f"Router Web UI secret file not found: {path}")
+    stat_result = path.stat()
+    if stat_result.st_uid != 0:
+        raise RuntimeError(f"Router Web UI secret file must be owned by root: {path}")
+    mode = stat.S_IMODE(stat_result.st_mode)
+    if mode != 0o600:
+        raise RuntimeError(f"Router Web UI secret file must have mode 600: {path}")
+
+
+def load_router_webui_secrets(config: AppConfig) -> dict[str, str]:
+    if not config.router_webui_enabled:
+        return {}
+    secret_path = Path(config.router_webui_secret_file)
+    validate_router_webui_secret_file(secret_path)
+    secrets: dict[str, str] = {}
+    for raw_line in secret_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        clean_key = key.strip().upper()
+        clean_value = value.strip().strip('"').strip("'")
+        if clean_key in {"PI_PROBE_ROUTER_WEBUI_USERNAME", "PI_PROBE_ROUTER_WEBUI_PASSWORD"}:
+            secrets[clean_key] = clean_value
+    username = secrets.get("PI_PROBE_ROUTER_WEBUI_USERNAME", "").strip()
+    password = secrets.get("PI_PROBE_ROUTER_WEBUI_PASSWORD", "").strip()
+    if not username or not password:
+        raise RuntimeError(
+            f"Router Web UI secret file must define PI_PROBE_ROUTER_WEBUI_USERNAME and PI_PROBE_ROUTER_WEBUI_PASSWORD: {secret_path}"
+        )
+    return {
+        "username": username,
+        "password": password,
+    }
 
 
 def validate_webhook_url(webhook_url: str) -> str:
@@ -182,4 +223,16 @@ def load_config(base_dir: Path | None = None, require_webhook: bool = True) -> A
             256, int(os.environ.get("PI_PROBE_ROUTER_SNMP_MAX_PACKET_BYTES", "4096"))
         ),
         router_snmp_oid_severity_map=_env_severity_map("PI_PROBE_ROUTER_SNMP_OID_SEVERITY_MAP"),
+        topology_enabled=_env_bool("PI_PROBE_TOPOLOGY_ENABLED", False),
+        topology_nodes_json=os.environ.get("PI_PROBE_TOPOLOGY_NODES_JSON", "").strip(),
+        topology_cache_json=os.environ.get("PI_PROBE_TOPOLOGY_CACHE_JSON", str(DEFAULT_TOPOLOGY_CACHE_JSON)),
+        topology_refresh_minutes=max(1, int(os.environ.get("PI_PROBE_TOPOLOGY_REFRESH_MINUTES", "30"))),
+        topology_snmpwalk_bin=os.environ.get("PI_PROBE_TOPOLOGY_SNMPWALK_BIN", "snmpwalk").strip() or "snmpwalk",
+        topology_snmp_timeout_seconds=max(1, int(os.environ.get("PI_PROBE_TOPOLOGY_SNMP_TIMEOUT_SECONDS", "6"))),
+        router_webui_enabled=_env_bool("PI_PROBE_ROUTER_WEBUI_ENABLED", False),
+        router_webui_url=os.environ.get("PI_PROBE_ROUTER_WEBUI_URL", "http://192.168.1.1").strip() or "http://192.168.1.1",
+        router_webui_secret_file=os.environ.get(
+            "PI_PROBE_ROUTER_WEBUI_SECRET_FILE",
+            str(DEFAULT_ROUTER_WEBUI_SECRET_FILE),
+        ),
     )

@@ -517,6 +517,9 @@ def save_nmap_override(
     name: str = "",
     category: str = "",
     hidden: bool | None = None,
+    role: str = "",
+    location: str = "",
+    uplink_ip: str = "",
 ) -> str:
     config = load_config(require_webhook=False)
     return upsert_nmap_override(
@@ -527,6 +530,9 @@ def save_nmap_override(
         name=name,
         category=category,
         hidden=hidden,
+        role=role,
+        location=location,
+        uplink_ip=uplink_ip,
     )
 
 

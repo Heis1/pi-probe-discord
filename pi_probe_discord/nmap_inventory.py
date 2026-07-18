@@ -14,6 +14,7 @@ from textwrap import shorten
 import xml.etree.ElementTree as ET
 
 from .models import AppConfig
+from .topology import apply_topology_to_inventory, load_topology_snapshot
 
 
 VALID_CATEGORIES = {
@@ -25,6 +26,16 @@ VALID_CATEGORIES = {
     "iot",
     "printer",
     "unknown",
+}
+VALID_DEVICE_ROLES = {
+    "extender",
+    "router",
+    "server",
+    "printer",
+    "computer",
+    "mobile",
+    "media",
+    "iot",
 }
 
 BBL_ISSUER_MARKERS = (
@@ -65,10 +76,18 @@ def _contains_phrase(text: str, *phrases: str) -> bool:
 
 
 def _friendly_name_from_signals(hostname: str, vendor: str, category: str, text: str, fallback: str) -> str:
+    if category == "infrastructure" and _contains_phrase(text, "extender", "repeater", "range extender", "access point", "mesh"):
+        if _contains_phrase(text, "d link", "dlink"):
+            return "D-Link Extender"
+        return "Network Extender"
+    if _contains_phrase(text, "apple watch", "watchos"):
+        return "Apple Watch"
     if _contains_phrase(text, "iphone"):
         return "Apple iPhone"
     if _contains_phrase(text, "ipad"):
         return "Apple iPad"
+    if _contains_phrase(text, "samsung", "galaxy", "z fold", "fold") and category == "mobile":
+        return "Samsung Galaxy Phone"
     if _contains_phrase(text, "samsung", "galaxy") and category == "mobile":
         return "Samsung Phone"
     if _contains_phrase(text, "pixel") and category == "mobile":
@@ -89,6 +108,8 @@ def _friendly_name_from_signals(hostname: str, vendor: str, category: str, text:
         return "Eufy HomeBase"
     if _contains_phrase(text, "eufy") and _contains_phrase(text, "camera") and category == "iot":
         return "Eufy Camera"
+    if _contains_phrase(text, "thermomix") and category == "iot":
+        return "Thermomix"
     if _contains_phrase(text, "lenovo") and category == "computers":
         return "Lenovo Computer"
     if _contains_phrase(text, "dell") and category == "computers":
@@ -148,8 +169,10 @@ def _rank_category_signals(
     if {22, 53, 80, 443}.intersection(port_numbers) and _contains_phrase(text, "server", "nas", "raspberry", "pi hole", "pihole"):
         add("servers", 30, "Common server ports paired with server keywords")
 
-    if _contains_phrase(text, "iphone", "ipad", "pixel", "android", "phone", "samsung", "galaxy"):
+    if _contains_phrase(text, "iphone", "ipad", "pixel", "android", "phone", "samsung", "galaxy", "apple watch", "watchos", "z fold", "fold"):
         add("mobile", 70, "Mobile device keyword present")
+    if 62078 in port_numbers and _contains_phrase(text, "apple", "watch", "iphone", "ipad"):
+        add("mobile", 30, "Apple device sync port exposed")
 
     if _contains_phrase(text, "tv", "smart tv", "chromecast", "roku", "apple tv", "fire tv", "firestick", "playstation", "xbox", "nintendo switch", "google home", "google nest"):
         add("media", 70, "Media device keyword present")
@@ -161,7 +184,7 @@ def _rank_category_signals(
     if 3389 in port_numbers or 5900 in port_numbers:
         add("computers", 25, "Remote desktop port exposed")
 
-    if _contains_phrase(text, "printer", "camera", "plug", "switch", "echo", "ring", "vacuum", "iot", "tuya", "shelly", "eufy", "homebase", "nest cam"):
+    if _contains_phrase(text, "printer", "camera", "plug", "switch", "echo", "ring", "vacuum", "iot", "tuya", "shelly", "eufy", "homebase", "nest cam", "thermomix"):
         add("iot", 55, "IoT-oriented device keyword present")
     if {554, 8080, 9100, 515, 631}.intersection(port_numbers):
         add("iot", 30, "Common IoT or embedded service ports exposed")
@@ -201,6 +224,77 @@ def _category_accent(category: str) -> str:
         "printer": "rose",
         "unknown": "slate",
     }.get(category, "slate")
+
+
+def _normalize_role(value: str) -> str:
+    role = value.strip().lower().replace("-", "_").replace(" ", "_")
+    return role if role in VALID_DEVICE_ROLES else ""
+
+
+def _infer_device_role(device: dict[str, object]) -> str:
+    existing = _normalize_role(str(device.get("role") or ""))
+    if existing:
+        return existing
+    text = " ".join(
+        str(device.get(key) or "")
+        for key in ("name", "hostname", "vendor", "manufacturer", "deviceType", "category")
+    ).lower()
+    if _contains_phrase(text, "extender", "repeater", "range extender", "mesh", "access point"):
+        return "extender"
+    if str(device.get("category") or "") == "infrastructure" and str(device.get("ip") or "").endswith(".1"):
+        return "router"
+    category = str(device.get("category") or "")
+    return {
+        "servers": "server",
+        "printer": "printer",
+        "computers": "computer",
+        "mobile": "mobile",
+        "media": "media",
+        "iot": "iot",
+    }.get(category, "")
+
+
+def _clean_location(value: str) -> str:
+    return " ".join(value.strip().split())
+
+
+def _apply_topology_metadata(devices: list[dict[str, object]]) -> list[dict[str, object]]:
+    by_ip = {
+        str(device.get("ip") or "").strip(): device
+        for device in devices
+        if str(device.get("ip") or "").strip()
+    }
+    for device in devices:
+        device["role"] = _infer_device_role(device)
+    for device in devices:
+        location = _clean_location(str(device.get("location") or ""))
+        uplink_ip = str(device.get("uplinkIp") or "").strip()
+        uplink_name = ""
+        uplink_role = ""
+        inherited_location = ""
+        if uplink_ip and uplink_ip in by_ip:
+            uplink = by_ip[uplink_ip]
+            uplink_name = str(uplink.get("name") or uplink.get("hostname") or uplink_ip)
+            uplink_role = str(uplink.get("role") or "")
+            inherited_location = _clean_location(str(uplink.get("location") or ""))
+        if not location and inherited_location:
+            location = inherited_location
+        device["location"] = location
+        if uplink_ip:
+            device["uplinkIp"] = uplink_ip
+        if uplink_name:
+            device["uplinkName"] = uplink_name
+        if uplink_role:
+            device["uplinkRole"] = uplink_role
+        if location and uplink_name:
+            device["placementLabel"] = f"{location} via {uplink_name}"
+        elif location:
+            device["placementLabel"] = location
+        elif uplink_name:
+            device["placementLabel"] = f"Via {uplink_name}"
+        else:
+            device["placementLabel"] = ""
+    return devices
 
 
 def _normalize_mac(value: str) -> str:
@@ -680,6 +774,14 @@ def _apply_override(device: dict[str, object], override: dict[str, object]) -> d
             updated["category"] = category
             updated["categoryLabel"] = _category_label(category)
             updated["accent"] = _category_accent(category)
+    if "role" in override:
+        role = _normalize_role(str(override.get("role") or ""))
+        if role:
+            updated["role"] = role
+    if "location" in override:
+        updated["location"] = _clean_location(str(override.get("location") or ""))
+    if "uplinkIp" in override:
+        updated["uplinkIp"] = str(override.get("uplinkIp") or "").strip()
     return updated
 
 
@@ -887,6 +989,12 @@ def export_nmap_inventory_json(config: AppConfig, now: datetime) -> tuple[bool, 
             "osFingerprint": host_os_text,
             "rawRecords": [],
             "displayEvidence": _summarize_reasons(generic_reasons),
+            "role": "",
+            "location": "",
+            "uplinkIp": "",
+            "uplinkName": "",
+            "uplinkRole": "",
+            "placementLabel": "",
         }
         bambu = _classify_bambu_device(hostname, vendor, host_os_text, port_entries)
         if bambu:
@@ -902,7 +1010,10 @@ def export_nmap_inventory_json(config: AppConfig, now: datetime) -> tuple[bool, 
         devices.append(device)
 
     previous = _load_existing_inventory(json_path)
-    sorted_devices = _merge_devices_by_hardware_id(devices)
+    topology_snapshot = load_topology_snapshot(config, now)
+    sorted_devices = _apply_topology_metadata(_merge_devices_by_hardware_id(devices))
+    sorted_devices, topology_snapshot = apply_topology_to_inventory(sorted_devices, topology_snapshot)
+    sorted_devices = _apply_topology_metadata(sorted_devices)
     scan_state = _load_scan_state(scan_state_path)
     interval_minutes = max(5, int(config.nmap_scan_minutes))
     scan_state["configuredScanMinutes"] = interval_minutes
@@ -924,6 +1035,7 @@ def export_nmap_inventory_json(config: AppConfig, now: datetime) -> tuple[bool, 
             "scanRunning": bool(scan_state.get("scanRunning")),
             "lastErrorSummary": str(scan_state.get("lastErrorSummary") or ""),
         },
+        "topology": topology_snapshot,
         "devices": sorted_devices,
     }
     json_path.parent.mkdir(parents=True, exist_ok=True)
@@ -966,15 +1078,27 @@ def upsert_nmap_override(
     name: str = "",
     category: str = "",
     hidden: bool | None = None,
+    role: str = "",
+    location: str = "",
+    uplink_ip: str = "",
 ) -> str:
     selectors = [("ip", ip.strip()), ("mac", mac.strip()), ("hostname", hostname.strip())]
     active_selectors = [(key, value) for key, value in selectors if value]
     if len(active_selectors) != 1:
         raise RuntimeError("Specify exactly one selector: --ip, --mac, or --hostname.")
-    if not name.strip() and not category.strip() and hidden is None:
-        raise RuntimeError("Provide at least one change: --name, --category, or --hidden.")
+    if (
+        not name.strip()
+        and not category.strip()
+        and hidden is None
+        and not role.strip()
+        and not location.strip()
+        and not uplink_ip.strip()
+    ):
+        raise RuntimeError("Provide at least one change: --name, --category, --role, --location, --uplink-ip, or --hidden.")
     if category.strip() and category.strip().lower() not in VALID_CATEGORIES:
         raise RuntimeError(f"Invalid category: {category}. Valid values: {', '.join(sorted(VALID_CATEGORIES))}")
+    if role.strip() and not _normalize_role(role):
+        raise RuntimeError(f"Invalid role: {role}. Valid values: {', '.join(sorted(VALID_DEVICE_ROLES))}")
 
     key, value = active_selectors[0]
     overrides_path = Path(config.nmap_overrides_json)
@@ -995,6 +1119,12 @@ def upsert_nmap_override(
         existing["name"] = name.strip()
     if category.strip():
         existing["category"] = category.strip().lower()
+    if role.strip():
+        existing["role"] = _normalize_role(role)
+    if location.strip():
+        existing["location"] = _clean_location(location)
+    if uplink_ip.strip():
+        existing["uplinkIp"] = uplink_ip.strip()
     if hidden is not None:
         existing["hidden"] = hidden
     _save_overrides(overrides_path, overrides)

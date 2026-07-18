@@ -70,6 +70,28 @@ class AppConfig:
     router_snmp_max_events_per_minute: int
     router_snmp_max_packet_bytes: int
     router_snmp_oid_severity_map: dict[str, str]
+    topology_enabled: bool
+    topology_nodes_json: str
+    topology_cache_json: str
+    topology_refresh_minutes: int
+    topology_snmpwalk_bin: str
+    topology_snmp_timeout_seconds: int
+    router_webui_enabled: bool
+    router_webui_url: str
+    router_webui_secret_file: str
+
+
+@dataclass
+class DeviceOverride:
+    ip: str = ""
+    mac: str = ""
+    hostname: str = ""
+    name: str = ""
+    category: str = ""
+    hidden: bool | None = None
+    role: str = ""
+    location: str = ""
+    uplink_ip: str = ""
 
 
 @dataclass

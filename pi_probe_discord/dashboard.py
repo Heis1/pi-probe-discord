@@ -111,6 +111,12 @@ class NmapDeviceRow:
     identification_reasons: list[str] | None = None
     device_id_label: str = ""
     display_evidence: str = ""
+    role: str = ""
+    location: str = ""
+    uplink_ip: str = ""
+    uplink_name: str = ""
+    uplink_role: str = ""
+    placement_label: str = ""
 
     def __post_init__(self) -> None:
         if self.ips is None:
@@ -966,6 +972,12 @@ def _load_nmap_inventory_rows(config: AppConfig | None) -> tuple[list[NmapDevice
                 identification_reasons=[str(reason) for reason in item.get("identificationReasons", []) if str(reason)],
                 device_id_label=str(item.get("deviceId") or ""),
                 display_evidence=str(item.get("displayEvidence") or ""),
+                role=str(item.get("role") or ""),
+                location=str(item.get("location") or ""),
+                uplink_ip=str(item.get("uplinkIp") or ""),
+                uplink_name=str(item.get("uplinkName") or ""),
+                uplink_role=str(item.get("uplinkRole") or ""),
+                placement_label=str(item.get("placementLabel") or ""),
             )
         )
     meta = raw if isinstance(raw, dict) else {}
@@ -975,6 +987,7 @@ def _load_nmap_inventory_rows(config: AppConfig | None) -> tuple[list[NmapDevice
         "deviceCount": int(meta.get("deviceCount") or len(rows)),
         "rawDeviceCount": int(meta.get("rawDeviceCount") or 0),
         "scanState": meta.get("scanState") if isinstance(meta.get("scanState"), dict) else {},
+        "topology": meta.get("topology") if isinstance(meta.get("topology"), dict) else {},
     }
 
 
@@ -1338,6 +1351,12 @@ def _build_dashboard_payload(
             "identificationReasons": row.identification_reasons,
             "deviceId": row.device_id_label,
             "displayEvidence": row.display_evidence,
+            "role": row.role,
+            "location": row.location,
+            "uplinkIp": row.uplink_ip,
+            "uplinkName": row.uplink_name,
+            "uplinkRole": row.uplink_role,
+            "placementLabel": row.placement_label,
         }
         for row in nmap_rows
     ]
@@ -1415,6 +1434,7 @@ def _build_dashboard_payload(
             "apiTokenRequired": action_mode == "token",
             "scanState": nmap_meta.get("scanState", {}),
         },
+        "topology": nmap_meta.get("topology", {}),
         "stats": {
             "tests": len(rows),
             "start": start,
@@ -1686,9 +1706,44 @@ body.theme-clean select, body.theme-clean input { background: rgba(255,255,255,.
 }
 .chart { height: 390px; }
 .chart-small { height: 320px; }
+.topology-diagram {
+  min-height: 260px;
+}
+.topology-legend {
+  display:flex;
+  flex-wrap:wrap;
+  gap: 8px;
+  margin: 10px 0 14px;
+}
 .device-map {
   min-height: 330px;
   display: grid;
+  gap: 16px;
+}
+.device-zone {
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: rgba(8, 15, 28, 0.42);
+  padding: 14px;
+}
+.device-zone-head {
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.device-zone-title {
+  font-size: 16px;
+  font-weight: 900;
+  letter-spacing: -.02em;
+}
+.device-zone-copy {
+  color: var(--muted);
+  font-size: 12px;
+}
+.device-zone-grid {
+  display:grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
 }
@@ -1736,6 +1791,8 @@ body.theme-clean select, body.theme-clean input { background: rgba(255,255,255,.
   font-size: 11px; color: var(--muted); font-weight: 700;
 }
 .device-chip.primary { color: var(--text); }
+.device-chip.location { color: #bfdbfe; }
+.device-chip.link { color: #c4b5fd; }
 .device-chip.fresh { color: #86efac; }
 .device-chip.aging { color: #fcd34d; }
 .device-chip.stale { color: #fca5a5; }
@@ -1962,6 +2019,7 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
 .action-inline input { min-width: 220px; }
 @media (max-width: 1180px) {
   .hero, .grid, .controls, .hero-grid, .score-grid, .diag-topline, .diag-grid, .chart-summary, .firewall-topline, .firewall-source-grid { grid-template-columns: 1fr; }
+  .device-zone-grid { grid-template-columns: 1fr; }
 }
 </style>
 </head>
@@ -2084,12 +2142,15 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
         <div class="table-wrap"><table><thead><tr><th>Time</th><th>Type</th><th>Severity</th><th>Source</th><th>Message</th></tr></thead><tbody id="eventRows"></tbody></table></div>
       </div>
       <div class="panel">
-      <div class="panel-head"><div><h2>Network Devices</h2><p>LAN inventory derived from the latest Nmap export. Devices are grouped by category for a quick visual sweep.</p></div><div class="panel-stamp" id="inventoryFreshness"></div></div>
+      <div class="panel-head"><div><h2>Network Devices</h2><p>LAN inventory derived from the latest Nmap export plus topology enrichment when bridge-table collection is enabled.</p></div><div class="panel-stamp" id="inventoryFreshness"></div></div>
         <div id="inventoryMeta" class="chart-meta"></div>
         <div class="action-row">
           <button id="nmapScanButton" class="action-button" type="button">Run Nmap Scan</button>
           <div id="nmapScanStatus" class="helper-text"></div>
         </div>
+        <div id="topologyLegend" class="topology-legend"></div>
+        <div id="topologyDiagram" class="topology-diagram"></div>
+        <div id="topologyEmpty" class="empty" style="display:none">Topology discovery is not available yet.</div>
         <div id="deviceMap" class="device-map"></div>
         <div id="deviceMapEmpty" class="empty" style="display:none">No Nmap inventory data yet.</div>
       </div>
@@ -2146,6 +2207,7 @@ let piholeRows = [];
 let deviceRows = [];
 let firewall = {};
 let inventory = {};
+let topology = {};
 let stats = {};
 let score = {};
 let diagnosis = {};
@@ -2168,6 +2230,7 @@ function hydratePayload(nextPayload) {
   deviceRows = Array.isArray(payload.devices) ? payload.devices : [];
   firewall = payload.firewall || {};
   inventory = payload.inventory || {};
+  topology = payload.topology || {};
   stats = payload.stats || {};
   score = payload.score || {};
   diagnosis = payload.diagnosis || {};
@@ -2737,107 +2800,240 @@ function renderDeviceMap() {
   }
   map.style.display = 'grid';
   empty.style.display = 'none';
-  const order = ['Infrastructure', 'Servers', 'Computers', 'Mobile', 'Media', 'IoT', 'Unknown'];
-  order.forEach(categoryLabel => {
-    const rows = deviceRows.filter(item => item.categoryLabel === categoryLabel);
-    if (!rows.length) return;
-    const cluster = document.createElement('section');
-    cluster.className = 'device-cluster';
-    const head = document.createElement('div');
-    head.className = 'cluster-head';
-    const title = document.createElement('div');
-    title.className = 'cluster-title';
-    title.textContent = categoryLabel;
-    const count = document.createElement('div');
-    count.className = 'cluster-count';
-    count.textContent = `${rows.length} device${rows.length === 1 ? '' : 's'}`;
-    head.appendChild(title);
-    head.appendChild(count);
-    cluster.appendChild(head);
-    const list = document.createElement('div');
-    list.className = 'device-list';
-    rows.forEach(device => {
-      const card = document.createElement('article');
-      card.className = `device-card ${device.accent || 'slate'}`;
-      const name = document.createElement('div');
-      name.className = 'device-name';
-      const isPrinter = device.category === 'printer' || device.deviceType === '3d_printer';
-      name.textContent = `${isPrinter ? '🖨 ' : ''}${device.name || device.hostname || device.ip || 'Unknown device'}`;
-      const ip = document.createElement('div');
-      ip.className = 'device-ip';
-      ip.textContent = (Array.isArray(device.ips) && device.ips.length ? device.ips.join(' · ') : (device.ip || device.hostname || 'n/a'));
-      const meta = document.createElement('div');
-      meta.className = 'device-meta';
-      const vendor = document.createElement('span');
-      vendor.className = 'device-chip';
-      vendor.textContent = device.manufacturer || device.vendor || 'Unknown vendor';
-      meta.appendChild(vendor);
-      if (device.mac) {
-        const mac = document.createElement('span');
-        mac.className = 'device-chip';
-        mac.textContent = `MAC ${device.mac}`;
-        meta.appendChild(mac);
-      }
-      if (device.lastSeen) {
-        const seen = document.createElement('span');
-        seen.className = `device-chip ${freshnessClass(device.lastSeen)}`;
-        seen.textContent = `Seen ${relativeFreshness(device.lastSeen)}`;
-        meta.appendChild(seen);
-      }
-      const portCount = document.createElement('span');
-      portCount.className = 'device-chip primary';
-      portCount.textContent = `${device.portCount || 0} open port${(device.portCount || 0) === 1 ? '' : 's'}`;
-      meta.appendChild(portCount);
-      if (device.identificationConfidence) {
-        const confidence = document.createElement('span');
-        confidence.className = 'device-chip';
-        confidence.textContent = `Confidence ${device.identificationConfidence}`;
-        meta.appendChild(confidence);
-      }
-      const services = document.createElement('div');
-      services.className = 'device-services';
-      if (isPrinter && device.deviceId) {
-        const chip = document.createElement('span');
-        chip.className = 'device-chip primary';
-        chip.textContent = `Device ID ${device.deviceId}`;
-        services.appendChild(chip);
-      }
-      if (isPrinter && device.displayEvidence) {
-        const chip = document.createElement('span');
-        chip.className = 'device-chip';
-        chip.textContent = device.displayEvidence;
-        services.appendChild(chip);
-      }
-      (device.services || []).slice(0, 4).forEach(service => {
-        const chip = document.createElement('span');
-        chip.className = 'device-chip';
-        chip.textContent = service;
-        services.appendChild(chip);
-      });
-      if (isPrinter && Array.isArray(device.openPorts)) {
-        [990, 3000, 6000].forEach(port => {
-          if (!device.openPorts.includes(port)) return;
+  const categoryOrder = ['Infrastructure', 'Servers', 'Computers', 'Mobile', 'Media', '3D Printer', 'IoT', 'Unknown'];
+  const zonePriority = ['Main Network', 'Downstairs', 'Upstairs', 'Office', 'Garage', 'Workshop', 'Unassigned'];
+  const zoneMap = new Map();
+  deviceRows.forEach(device => {
+    const zoneName = (device.location || '').trim() || 'Unassigned';
+    if (!zoneMap.has(zoneName)) zoneMap.set(zoneName, []);
+    zoneMap.get(zoneName).push(device);
+  });
+  const orderedZones = Array.from(zoneMap.keys()).sort((left, right) => {
+    const leftRank = zonePriority.indexOf(left);
+    const rightRank = zonePriority.indexOf(right);
+    const normLeft = leftRank === -1 ? Number.MAX_SAFE_INTEGER : leftRank;
+    const normRight = rightRank === -1 ? Number.MAX_SAFE_INTEGER : rightRank;
+    return normLeft - normRight || left.localeCompare(right);
+  });
+  orderedZones.forEach(zoneName => {
+    const zoneRows = zoneMap.get(zoneName) || [];
+    const zone = document.createElement('section');
+    zone.className = 'device-zone';
+    const zoneHead = document.createElement('div');
+    zoneHead.className = 'device-zone-head';
+    const zoneText = document.createElement('div');
+    const zoneTitle = document.createElement('div');
+    zoneTitle.className = 'device-zone-title';
+    zoneTitle.textContent = zoneName;
+    const zoneCopy = document.createElement('div');
+    zoneCopy.className = 'device-zone-copy';
+    zoneCopy.textContent = `${zoneRows.length} device${zoneRows.length === 1 ? '' : 's'} in this section`;
+    zoneText.appendChild(zoneTitle);
+    zoneText.appendChild(zoneCopy);
+    zoneHead.appendChild(zoneText);
+    zone.appendChild(zoneHead);
+    const zoneGrid = document.createElement('div');
+    zoneGrid.className = 'device-zone-grid';
+    categoryOrder.forEach(categoryLabel => {
+      const rows = zoneRows.filter(item => item.categoryLabel === categoryLabel);
+      if (!rows.length) return;
+      const cluster = document.createElement('section');
+      cluster.className = 'device-cluster';
+      const head = document.createElement('div');
+      head.className = 'cluster-head';
+      const title = document.createElement('div');
+      title.className = 'cluster-title';
+      title.textContent = categoryLabel;
+      const count = document.createElement('div');
+      count.className = 'cluster-count';
+      count.textContent = `${rows.length} device${rows.length === 1 ? '' : 's'}`;
+      head.appendChild(title);
+      head.appendChild(count);
+      cluster.appendChild(head);
+      const list = document.createElement('div');
+      list.className = 'device-list';
+      rows.forEach(device => {
+        const card = document.createElement('article');
+        card.className = `device-card ${device.accent || 'slate'}`;
+        const name = document.createElement('div');
+        name.className = 'device-name';
+        const isPrinter = device.category === 'printer' || device.deviceType === '3d_printer';
+        name.textContent = `${isPrinter ? '🖨 ' : ''}${device.name || device.hostname || device.ip || 'Unknown device'}`;
+        const ip = document.createElement('div');
+        ip.className = 'device-ip';
+        ip.textContent = (Array.isArray(device.ips) && device.ips.length ? device.ips.join(' · ') : (device.ip || device.hostname || 'n/a'));
+        const meta = document.createElement('div');
+        meta.className = 'device-meta';
+        [
+          device.manufacturer || device.vendor || 'Unknown vendor',
+          device.location || '',
+          device.role ? device.role.replaceAll('_', ' ') : '',
+          device.uplinkName ? `Via ${device.uplinkName}` : '',
+          device.mac ? `MAC ${device.mac}` : '',
+          device.lastSeen ? `Seen ${relativeFreshness(device.lastSeen)}` : '',
+          `${device.portCount || 0} open port${(device.portCount || 0) === 1 ? '' : 's'}`,
+          device.identificationConfidence ? `Confidence ${device.identificationConfidence}` : '',
+        ].filter(Boolean).forEach(label => {
           const chip = document.createElement('span');
           chip.className = 'device-chip';
-          chip.textContent = port === 990 ? 'FTPS 990' : `Bambu service ${port}`;
+          if (label === device.location) chip.classList.add('location');
+          if (device.uplinkName && label === `Via ${device.uplinkName}`) chip.classList.add('link');
+          if (label.startsWith(`${device.portCount || 0} open port`)) chip.classList.add('primary');
+          if (label.startsWith('Seen ')) chip.classList.add(freshnessClass(device.lastSeen));
+          chip.textContent = label;
+          meta.appendChild(chip);
+        });
+        const services = document.createElement('div');
+        services.className = 'device-services';
+        if (device.placementLabel && device.placementLabel !== device.location) {
+          const placement = document.createElement('span');
+          placement.className = 'device-chip link';
+          placement.textContent = device.placementLabel;
+          services.appendChild(placement);
+        }
+        if (isPrinter && device.deviceId) {
+          const chip = document.createElement('span');
+          chip.className = 'device-chip primary';
+          chip.textContent = `Device ID ${device.deviceId}`;
+          services.appendChild(chip);
+        }
+        if (isPrinter && device.displayEvidence) {
+          const chip = document.createElement('span');
+          chip.className = 'device-chip';
+          chip.textContent = device.displayEvidence;
+          services.appendChild(chip);
+        }
+        (device.services || []).slice(0, 4).forEach(service => {
+          const chip = document.createElement('span');
+          chip.className = 'device-chip';
+          chip.textContent = service;
           services.appendChild(chip);
         });
-      }
-      if (!services.childNodes.length && Array.isArray(device.openPorts) && device.openPorts.length) {
-        const chip = document.createElement('span');
-        chip.className = 'device-chip';
-        chip.textContent = `Ports ${device.openPorts.slice(0, 4).join(', ')}`;
-        services.appendChild(chip);
-      }
-      card.appendChild(name);
-      card.appendChild(ip);
-      card.appendChild(meta);
-      if (services.childNodes.length) card.appendChild(services);
-      card.appendChild(buildDeviceEditor(device));
-      list.appendChild(card);
+        if (isPrinter && Array.isArray(device.openPorts)) {
+          [990, 3000, 6000].forEach(port => {
+            if (!device.openPorts.includes(port)) return;
+            const chip = document.createElement('span');
+            chip.className = 'device-chip';
+            chip.textContent = port === 990 ? 'FTPS 990' : `Bambu service ${port}`;
+            services.appendChild(chip);
+          });
+        }
+        if (!services.childNodes.length && Array.isArray(device.openPorts) && device.openPorts.length) {
+          const chip = document.createElement('span');
+          chip.className = 'device-chip';
+          chip.textContent = `Ports ${device.openPorts.slice(0, 4).join(', ')}`;
+          services.appendChild(chip);
+        }
+        card.appendChild(name);
+        card.appendChild(ip);
+        card.appendChild(meta);
+        if (services.childNodes.length) card.appendChild(services);
+        card.appendChild(buildDeviceEditor(device));
+        list.appendChild(card);
+      });
+      cluster.appendChild(list);
+      zoneGrid.appendChild(cluster);
     });
-    cluster.appendChild(list);
-    map.appendChild(cluster);
+    zone.appendChild(zoneGrid);
+    map.appendChild(zone);
+  });
+}
+function renderTopology() {
+  const wrap = document.getElementById('topologyDiagram');
+  const empty = document.getElementById('topologyEmpty');
+  const legend = document.getElementById('topologyLegend');
+  clearNode(wrap);
+  clearNode(legend);
+  const nodes = Array.isArray(topology.nodes) ? topology.nodes : [];
+  if (!topology.available || !nodes.length) {
+    wrap.style.display = 'none';
+    legend.style.display = 'none';
+    const errors = Array.isArray(topology.errors) ? topology.errors.filter(Boolean) : [];
+    const notes = Array.isArray(topology.notes) ? topology.notes.filter(Boolean) : [];
+    if (errors.length) {
+      empty.textContent = `Topology unavailable: ${errors.join(' | ')}`;
+    } else if (notes.length) {
+      empty.textContent = `Topology unavailable: ${notes.join(' | ')}`;
+    } else if (topology.enabled) {
+      empty.textContent = 'Topology unavailable: the router or extender did not expose bridge-table data over SNMP.';
+    } else {
+      empty.textContent = 'Topology discovery is disabled.';
+    }
+    empty.style.display = 'block';
+    return;
+  }
+  wrap.style.display = 'block';
+  legend.style.display = 'flex';
+  empty.style.display = 'none';
+  [
+    `Source ${topology.source || 'snmp-bridge-fdb'}`,
+    topology.generatedAt ? `Updated ${new Date(topology.generatedAt).toLocaleString()}` : '',
+    `${nodes.length} topology node${nodes.length === 1 ? '' : 's'}`,
+  ].filter(Boolean).forEach(label => {
+    const chip = document.createElement('span');
+    chip.className = 'device-chip';
+    chip.textContent = label;
+    legend.appendChild(chip);
+  });
+  const laneMap = new Map();
+  nodes.forEach(node => {
+    const depth = Number(node.depth || 0);
+    if (!laneMap.has(depth)) laneMap.set(depth, []);
+    laneMap.get(depth).push(node);
+  });
+  const depths = Array.from(laneMap.keys()).sort((a, b) => a - b);
+  const columnWidth = 260;
+  const rowHeight = 130;
+  const boxWidth = 208;
+  const boxHeight = 82;
+  const maxRows = Math.max(...depths.map(depth => (laneMap.get(depth) || []).length), 1);
+  const width = Math.max((depths.length * columnWidth) + 80, wrap.clientWidth || 720, 420);
+  const height = Math.max((maxRows * rowHeight) + 70, 220);
+  const svg = svgEl('svg', { viewBox: `0 0 ${width} ${height}`, width: '100%', height });
+  wrap.appendChild(svg);
+  const positions = new Map();
+  depths.forEach((depth, columnIndex) => {
+    const lane = (laneMap.get(depth) || []).slice().sort((left, right) => String(left.name || '').localeCompare(String(right.name || '')));
+    lane.forEach((node, rowIndex) => {
+      const x = 36 + (columnIndex * columnWidth);
+      const y = 24 + (rowIndex * rowHeight);
+      positions.set(String(node.id || ''), { x, y, node });
+    });
+  });
+  nodes.forEach(node => {
+    const parentId = String(node.parentNodeId || '');
+    if (!parentId || !positions.has(parentId) || !positions.has(String(node.id || ''))) return;
+    const from = positions.get(parentId);
+    const to = positions.get(String(node.id || ''));
+    const line = svgEl('path', {
+      d: `M ${from.x + boxWidth} ${from.y + boxHeight / 2} C ${from.x + boxWidth + 32} ${from.y + boxHeight / 2}, ${to.x - 32} ${to.y + boxHeight / 2}, ${to.x} ${to.y + boxHeight / 2}`,
+      fill: 'none',
+      stroke: chartTheme().grid,
+      'stroke-width': 2.5,
+    });
+    svg.appendChild(line);
+  });
+  positions.forEach(({ x, y, node }) => {
+    const role = String(node.role || 'node');
+    const isRouter = role === 'router';
+    const isExtender = role === 'extender' || role === 'access_point' || role === 'mesh';
+    const fill = isRouter ? 'rgba(56,189,248,.18)' : isExtender ? 'rgba(34,197,94,.16)' : 'rgba(148,163,184,.12)';
+    const stroke = isRouter ? '#38bdf8' : isExtender ? '#22c55e' : chartTheme().border;
+    const rect = svgEl('rect', { x, y, width: boxWidth, height: boxHeight, rx: 18, fill, stroke, 'stroke-width': 1.4 });
+    svg.appendChild(rect);
+    const title = svgEl('text', { x: x + 14, y: y + 24, fill: chartTheme().text, 'font-size': 14, 'font-weight': 800 });
+    title.textContent = String(node.name || node.managementIp || node.id || 'Node').slice(0, 28);
+    svg.appendChild(title);
+    const sub = svgEl('text', { x: x + 14, y: y + 44, fill: chartTheme().muted, 'font-size': 11 });
+    sub.textContent = `${role || 'node'}${node.location ? ` · ${node.location}` : ''}`;
+    svg.appendChild(sub);
+    const metaLine = svgEl('text', { x: x + 14, y: y + 62, fill: chartTheme().muted, 'font-size': 11 });
+    metaLine.textContent = `${node.managementIp || node.host || 'n/a'} · ${(node.attachedDeviceCount || 0)} attached`;
+    svg.appendChild(metaLine);
+    const samples = Array.isArray(node.attachedDevices) ? node.attachedDevices.slice(0, 2).map(item => item.name || item.ip || 'device').join(' · ') : '';
+    const sampleLine = svgEl('text', { x: x + 14, y: y + 76, fill: chartTheme().muted, 'font-size': 10 });
+    sampleLine.textContent = samples || (node.parentName ? `upstream ${node.parentName}` : 'no attached devices');
+    svg.appendChild(sampleLine);
   });
 }
 function buildDeviceEditor(device) {
@@ -2863,6 +3059,7 @@ function buildDeviceEditor(device) {
     ['computers', 'Computers'],
     ['mobile', 'Mobile'],
     ['media', 'Media'],
+    ['printer', '3D Printer'],
     ['iot', 'IoT'],
     ['unknown', 'Unknown'],
   ];
@@ -2875,6 +3072,40 @@ function buildDeviceEditor(device) {
   });
   categoryWrap.appendChild(categoryLabel);
   categoryWrap.appendChild(categorySelect);
+
+  const locationWrap = document.createElement('div');
+  const locationLabel = document.createElement('label');
+  locationLabel.textContent = 'Location';
+  const locationInput = document.createElement('input');
+  locationInput.type = 'text';
+  locationInput.placeholder = 'Downstairs';
+  locationInput.value = device.location || '';
+  locationWrap.appendChild(locationLabel);
+  locationWrap.appendChild(locationInput);
+
+  const roleWrap = document.createElement('div');
+  const roleLabel = document.createElement('label');
+  roleLabel.textContent = 'Role';
+  const roleSelect = document.createElement('select');
+  [
+    ['', 'Auto'],
+    ['extender', 'Extender'],
+    ['router', 'Router'],
+    ['server', 'Server'],
+    ['computer', 'Computer'],
+    ['mobile', 'Mobile'],
+    ['media', 'Media'],
+    ['printer', 'Printer'],
+    ['iot', 'IoT'],
+  ].forEach(([value, label]) => {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = label;
+    option.selected = (device.role || '') === value;
+    roleSelect.appendChild(option);
+  });
+  roleWrap.appendChild(roleLabel);
+  roleWrap.appendChild(roleSelect);
 
   const status = document.createElement('div');
   status.className = 'device-status';
@@ -2903,6 +3134,8 @@ function buildDeviceEditor(device) {
 
   editor.appendChild(nameWrap);
   editor.appendChild(categoryWrap);
+  editor.appendChild(locationWrap);
+  editor.appendChild(roleWrap);
   editor.appendChild(tools);
   editor.appendChild(actions);
   editor.appendChild(status);
@@ -2913,6 +3146,8 @@ function buildDeviceEditor(device) {
   if (!actionsReady) {
     nameInput.disabled = true;
     categorySelect.disabled = true;
+    locationInput.disabled = true;
+    roleSelect.disabled = true;
   }
 
   editor.addEventListener('submit', async event => {
@@ -2924,6 +3159,8 @@ function buildDeviceEditor(device) {
       action: 'set',
       name: nameInput.value.trim(),
       category: categorySelect.value,
+      location: locationInput.value.trim(),
+      role: roleSelect.value,
     });
     status.textContent = response.message;
     if (response.ok) {
@@ -3434,6 +3671,7 @@ function render() {
   renderFirewallNoise();
   renderTable(events);
   renderInventoryMeta();
+  renderTopology();
   renderDeviceMap();
   renderScore();
 }
@@ -3771,6 +4009,9 @@ def apply_dashboard_nmap_override(output_path: str, payload: dict[str, Any]) -> 
                 hostname=hostname,
                 name=str(payload.get("name") or "").strip(),
                 category=str(payload.get("category") or "").strip(),
+                role=str(payload.get("role") or "").strip(),
+                location=str(payload.get("location") or "").strip(),
+                uplink_ip=str(payload.get("uplinkIp") or "").strip(),
             )
     except RuntimeError as exc:
         return {"ok": False, "message": str(exc)}

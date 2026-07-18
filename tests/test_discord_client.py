@@ -74,6 +74,15 @@ def make_config(base_dir: Path) -> AppConfig:
         router_snmp_max_events_per_minute=120,
         router_snmp_max_packet_bytes=4096,
         router_snmp_oid_severity_map={},
+        topology_enabled=False,
+        topology_nodes_json="",
+        topology_cache_json=str(base_dir / "topology" / "latest.json"),
+        topology_refresh_minutes=30,
+        topology_snmpwalk_bin="snmpwalk",
+        topology_snmp_timeout_seconds=6,
+        router_webui_enabled=False,
+        router_webui_url="http://192.168.1.1",
+        router_webui_secret_file=str(base_dir / "router-webui.env"),
     )
 
 

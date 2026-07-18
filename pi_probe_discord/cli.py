@@ -197,7 +197,7 @@ def main(argv: list[str] | None = None) -> int:
         args_tail = args[2:]
         if not args_tail or args_tail[0] not in {"set", "clear"}:
             print(
-                "Usage: pihole_update_report.py nmap-override set|clear [--ip IP | --mac MAC | --hostname NAME] [--name LABEL] [--category CATEGORY] [--hidden true|false]",
+                "Usage: pihole_update_report.py nmap-override set|clear [--ip IP | --mac MAC | --hostname NAME] [--name LABEL] [--category CATEGORY] [--role ROLE] [--location LABEL] [--uplink-ip IP] [--hidden true|false]",
                 file=sys.stderr,
             )
             return 1
@@ -207,11 +207,14 @@ def main(argv: list[str] | None = None) -> int:
         hostname = ""
         name = ""
         category = ""
+        role = ""
+        location = ""
+        uplink_ip = ""
         hidden = None
         idx = 1
         while idx < len(args_tail):
             token = args_tail[idx]
-            if token in {"--ip", "--mac", "--hostname", "--name", "--category", "--hidden"}:
+            if token in {"--ip", "--mac", "--hostname", "--name", "--category", "--role", "--location", "--uplink-ip", "--hidden"}:
                 if idx + 1 >= len(args_tail):
                     print(f"{token} requires a value", file=sys.stderr)
                     return 1
@@ -227,6 +230,12 @@ def main(argv: list[str] | None = None) -> int:
                     name = value
                 elif token == "--category":
                     category = value
+                elif token == "--role":
+                    role = value
+                elif token == "--location":
+                    location = value
+                elif token == "--uplink-ip":
+                    uplink_ip = value
                 else:
                     lowered = value.strip().lower()
                     if lowered not in {"true", "false"}:
@@ -235,7 +244,7 @@ def main(argv: list[str] | None = None) -> int:
                     hidden = lowered == "true"
             else:
                 print(
-                    "Usage: pihole_update_report.py nmap-override set|clear [--ip IP | --mac MAC | --hostname NAME] [--name LABEL] [--category CATEGORY] [--hidden true|false]",
+                    "Usage: pihole_update_report.py nmap-override set|clear [--ip IP | --mac MAC | --hostname NAME] [--name LABEL] [--category CATEGORY] [--role ROLE] [--location LABEL] [--uplink-ip IP] [--hidden true|false]",
                     file=sys.stderr,
                 )
                 return 1
@@ -249,6 +258,9 @@ def main(argv: list[str] | None = None) -> int:
                         hostname=hostname,
                         name=name,
                         category=category,
+                        role=role,
+                        location=location,
+                        uplink_ip=uplink_ip,
                         hidden=hidden,
                     )
                 )

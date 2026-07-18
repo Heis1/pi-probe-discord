@@ -15,6 +15,8 @@ Depends:
  python3-requests,
  python3-matplotlib,
  speedtest-cli
+Recommends:
+ snmp
 Description: Raspberry Pi and Pi-hole Discord reporting probe
  Headless Raspberry Pi reporting application that collects Pi-hole status,
  update results, and periodic speed tests, stores historical data in SQLite,
