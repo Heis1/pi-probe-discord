@@ -1,3 +1,9 @@
+pi-probe-discord (1.1.29-1) unstable; urgency=medium
+
+  * Fix router Web UI certificate pinning by importing pathlib.Path for pinned certificate file handling.
+
+ -- Codex Builder <noreply@example.invalid>  Sat, 18 Jul 2026 20:41:00 +0930
+
 pi-probe-discord (1.1.28-1) unstable; urgency=medium
 
   * Replace CA-style router web UI validation with direct certificate pinning for self-signed TP-Link router certificates.
