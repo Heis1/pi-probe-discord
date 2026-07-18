@@ -3,6 +3,8 @@ set -e
 
 SERVICE_USER="pi-probe-discord"
 SERVICE_GROUP="pi-probe-discord"
+NMAP_TIMER_OVERRIDE_DIR="/etc/systemd/system/pi-probe-discord-nmap.timer.d"
+NMAP_TIMER_OVERRIDE_FILE="${NMAP_TIMER_OVERRIDE_DIR}/override.conf"
 
 ensure_service_account() {
     if ! getent group "$SERVICE_GROUP" >/dev/null 2>&1; then
@@ -88,15 +90,54 @@ env_flag_enabled() {
     return 1
 }
 
+read_env_value() {
+    key="$1"
+    default="$2"
+    file="/etc/pi-probe-discord/pihole-update-discord.env"
+    if [ ! -f "$file" ]; then
+        printf '%s\n' "$default"
+        return
+    fi
+    value="$(sed -n "s/^${key}=//p" "$file" | tail -n 1 | sed "s/[\"']//g")"
+    if [ -z "$value" ]; then
+        printf '%s\n' "$default"
+    else
+        printf '%s\n' "$value"
+    fi
+}
+
+write_nmap_timer_override() {
+    minutes="$(read_env_value PI_PROBE_NMAP_SCAN_MINUTES 360)"
+    case "$minutes" in
+        ''|*[!0-9]*)
+            minutes=360
+            ;;
+    esac
+    if [ "$minutes" -lt 5 ]; then
+        minutes=5
+    fi
+    mkdir -p "$NMAP_TIMER_OVERRIDE_DIR"
+    cat > "$NMAP_TIMER_OVERRIDE_FILE" <<EOF
+[Timer]
+OnBootSec=15min
+OnUnitActiveSec=${minutes}min
+RandomizedDelaySec=10min
+Persistent=true
+EOF
+}
+
 if command -v systemctl >/dev/null 2>&1; then
+    write_nmap_timer_override
     systemctl daemon-reload || true
     restart_if_enabled pi-probe-discord-speedtest.timer
     restart_if_enabled pi-probe-discord-full.timer
+    restart_if_enabled pi-probe-discord-nmap.timer
     restart_if_enabled pi-probe-discord-bot.service
     restart_if_enabled pi-probe-discord-dashboard.service
     restart_if_enabled pi-probe-discord-snmp-listener.service
     enable_if_file_exists pi-probe-discord-speedtest.timer /etc/systemd/system/pi-probe-discord-speedtest.timer.d/override.conf
     enable_if_file_exists pi-probe-discord-full.timer /etc/systemd/system/pi-probe-discord-full.timer.d/override.conf
+    enable_if_file_exists pi-probe-discord-nmap.timer "$NMAP_TIMER_OVERRIDE_FILE"
     if env_flag_enabled PI_PROBE_ROUTER_SNMP_LISTENER_ENABLED; then
         systemctl enable --now pi-probe-discord-snmp-listener.service || true
     fi

@@ -6,6 +6,7 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 WorkingDirectory=/opt/pi-probe-discord
+EnvironmentFile=-/etc/pi-probe-discord/pihole-update-discord.env
 Environment=MPLCONFIGDIR=/var/lib/pi-probe-discord/.config/matplotlib
 ExecStart=/usr/bin/pi-probe-discord nmap-scan
 PrivateTmp=true

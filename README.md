@@ -118,6 +118,64 @@ The dashboard server also exposes:
 
 - `/healthz`
 - `/status.json`
+- `/api/dashboard/data`
+
+`/api/dashboard/data` is read-only and returns the same dashboard data already visible in the page. The browser polls it every `PI_PROBE_DASHBOARD_REFRESH_SECONDS` seconds, with a hard minimum of 15 seconds, pauses while the tab is hidden, and refreshes immediately when the tab becomes visible again.
+
+Recommended refresh and action settings:
+
+```bash
+PI_PROBE_DASHBOARD_REFRESH_SECONDS="60"
+PI_PROBE_INTERACTIVE_DASHBOARD_API_TOKEN=""
+```
+
+If you set `PI_PROBE_INTERACTIVE_DASHBOARD_API_TOKEN`, the token is required for dashboard actions such as manual Nmap scans and saved device overrides. Read-only dashboard polling does not use the token and does not trigger a new Nmap scan.
+
+## Nmap inventory and Bambu Lab identification
+
+The LAN inventory pipeline stores raw Nmap XML plus a JSON inventory at:
+
+- `/var/lib/pi-probe-discord/nmap/latest.xml`
+- `/var/lib/pi-probe-discord/nmap/latest.json`
+- `/var/lib/pi-probe-discord/nmap/events.json`
+- `/var/lib/pi-probe-discord/nmap/overrides.json`
+
+The inventory now fingerprints Bambu Lab printers from scan evidence. A confirmed match requires Bambu certificate evidence such as `BBL Technologies Co. Ltd`, `BBL Device CA`, `BBL CA`, or certificate text containing `Printer`. Supporting evidence includes FTPS on TCP `990`, `vsftpd 3.0.5`, and the Bambu service-port pattern on TCP `3000` and `6000`.
+
+Confirmed devices appear in the dashboard as `Bambu Lab 3D Printer` with:
+
+- printer styling
+- IP address
+- `Device ID` when the certificate CN is already visible in scan data
+- identification confidence
+- concise verification evidence
+
+Port `3000` alone is never treated as proof of a Bambu device.
+
+Recommended Nmap settings:
+
+```bash
+PI_PROBE_NMAP_SCAN_MINUTES="360"
+```
+
+The scheduled scan uses the packaged `pi-probe-discord-nmap.service` and `pi-probe-discord-nmap.timer`. Package upgrades preserve the configured interval by regenerating the timer override from `PI_PROBE_NMAP_SCAN_MINUTES`, with a floor of 5 minutes.
+
+Inspect the Nmap timer and recent scans:
+
+```bash
+sudo systemctl status pi-probe-discord-nmap.timer --no-pager
+sudo systemctl list-timers pi-probe-discord-nmap.timer --all
+sudo systemctl cat pi-probe-discord-nmap.timer
+sudo journalctl -u pi-probe-discord-nmap.service -n 50 --no-pager
+```
+
+Run a manual inventory scan:
+
+```bash
+sudo pi-probe-discord nmap-scan
+```
+
+The interactive dashboard can also start a manual scan when an action token is configured. After a successful scan, the browser fetches fresh dashboard JSON immediately instead of waiting for the next polling interval.
 
 ## Firewall examples
 
@@ -258,6 +316,9 @@ TP-Link side:
 - chart image: `/var/lib/pi-probe-discord/speed_chart.png`
 - dashboard HTML: `/var/lib/pi-probe-discord/dashboard/index.html`
 - dashboard status: `/var/lib/pi-probe-discord/dashboard/status.json`
+- Nmap XML: `/var/lib/pi-probe-discord/nmap/latest.xml`
+- Nmap inventory JSON: `/var/lib/pi-probe-discord/nmap/latest.json`
+- Nmap scan state JSON: `/var/lib/pi-probe-discord/nmap/state.json`
 
 ## Upgrade
 

@@ -20,6 +20,7 @@ class AppConfig:
     interactive_dashboard_tls_cert_file: str
     interactive_dashboard_tls_key_file: str
     interactive_dashboard_api_token: str
+    dashboard_refresh_seconds: int
     public_dashboard_url: str
     dashboard_link_label: str
     outage_download_mbps: float
@@ -36,6 +37,7 @@ class AppConfig:
     nmap_inventory_json: str
     nmap_events_json: str
     nmap_overrides_json: str
+    nmap_state_json: str
     nmap_targets: str
     nmap_arguments: str
     nmap_scan_minutes: int

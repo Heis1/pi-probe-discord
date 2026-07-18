@@ -102,6 +102,23 @@ class NmapDeviceRow:
     services: list[str]
     port_count: int
     last_seen: str
+    ips: list[str] | None = None
+    interfaces: list[dict[str, str]] | None = None
+    manufacturer: str = ""
+    device_type: str = ""
+    identification_confidence: str = ""
+    identification_score: int = 0
+    identification_reasons: list[str] | None = None
+    device_id_label: str = ""
+    display_evidence: str = ""
+
+    def __post_init__(self) -> None:
+        if self.ips is None:
+            self.ips = [self.ip] if self.ip else []
+        if self.interfaces is None:
+            self.interfaces = [{"ip": self.ip, "mac": self.mac, "hostname": self.hostname}] if (self.ip or self.mac or self.hostname) else []
+        if self.identification_reasons is None:
+            self.identification_reasons = []
 
 
 def _format_relative_age(now: datetime, timestamp: datetime | None) -> str:
@@ -146,6 +163,8 @@ def _key_device_role(row: NmapDeviceRow) -> str:
 def _event_matches_key_device(event: RouterEvent, key_devices: list[dict[str, str]]) -> bool:
     text = f"{event.source} {event.message} {event.event_type}".lower()
     event_type = event.event_type.lower()
+    if _is_extender_hint(text):
+        return True
     if "linkdown" in event_type or event_type in {"snmpv2-mib::warmstart", "snmpv2-mib::coldstart"}:
         return True
     for device in key_devices:
@@ -246,7 +265,12 @@ def build_network_diagnosis(
     ]
     key_context_events = [event for event in recent_events if _event_matches_key_device(event, key_devices)]
     key_decision_events = [event for event in decision_events if _event_matches_key_device(event, key_devices)]
-    ignored_context_events = max(0, len(broad_context_fault_events) - len(key_context_events))
+    if not key_devices:
+        key_context_events = list(recent_events)
+        key_decision_events = list(decision_events)
+        ignored_context_events = 0
+    else:
+        ignored_context_events = max(0, len(broad_context_fault_events) - len(key_context_events))
     host_missing_context = [event for event in key_context_events if event.event_type == "host_missing"]
     port_closed_context = [event for event in key_context_events if event.event_type == "port_closed"]
     suspect_events_context = [
@@ -925,6 +949,23 @@ def _load_nmap_inventory_rows(config: AppConfig | None) -> tuple[list[NmapDevice
                 services=[str(service) for service in item.get("services", []) if str(service)],
                 port_count=int(item.get("portCount") or 0),
                 last_seen=str(item.get("lastSeen") or ""),
+                ips=[str(ip) for ip in item.get("ips", []) if str(ip)],
+                interfaces=[
+                    {
+                        "ip": str(interface.get("ip") or ""),
+                        "mac": str(interface.get("mac") or ""),
+                        "hostname": str(interface.get("hostname") or ""),
+                    }
+                    for interface in item.get("interfaces", [])
+                    if isinstance(interface, dict)
+                ],
+                manufacturer=str(item.get("manufacturer") or item.get("vendor") or ""),
+                device_type=str(item.get("deviceType") or ""),
+                identification_confidence=str(item.get("identificationConfidence") or ""),
+                identification_score=int(item.get("identificationScore") or 0),
+                identification_reasons=[str(reason) for reason in item.get("identificationReasons", []) if str(reason)],
+                device_id_label=str(item.get("deviceId") or ""),
+                display_evidence=str(item.get("displayEvidence") or ""),
             )
         )
     meta = raw if isinstance(raw, dict) else {}
@@ -932,6 +973,8 @@ def _load_nmap_inventory_rows(config: AppConfig | None) -> tuple[list[NmapDevice
         "scannedAt": str(meta.get("scannedAt") or ""),
         "network": str(meta.get("network") or ""),
         "deviceCount": int(meta.get("deviceCount") or len(rows)),
+        "rawDeviceCount": int(meta.get("rawDeviceCount") or 0),
+        "scanState": meta.get("scanState") if isinstance(meta.get("scanState"), dict) else {},
     }
 
 
@@ -1286,6 +1329,15 @@ def _build_dashboard_payload(
             "services": row.services,
             "portCount": row.port_count,
             "lastSeen": row.last_seen,
+            "ips": row.ips,
+            "interfaces": row.interfaces,
+            "manufacturer": row.manufacturer,
+            "deviceType": row.device_type,
+            "identificationConfidence": row.identification_confidence,
+            "identificationScore": row.identification_score,
+            "identificationReasons": row.identification_reasons,
+            "deviceId": row.device_id_label,
+            "displayEvidence": row.display_evidence,
         }
         for row in nmap_rows
     ]
@@ -1353,6 +1405,7 @@ def _build_dashboard_payload(
             "scannedAt": nmap_meta.get("scannedAt", ""),
             "network": nmap_meta.get("network", ""),
             "deviceCount": nmap_meta.get("deviceCount", len(nmap_rows)),
+            "rawDeviceCount": nmap_meta.get("rawDeviceCount", 0),
             "categoryCounts": device_counts,
             "scanTargets": config.nmap_targets if config else "",
             "scanArguments": config.nmap_arguments if config else "",
@@ -1360,6 +1413,7 @@ def _build_dashboard_payload(
             "actionsEnabled": action_mode in {"local", "token"},
             "actionMode": action_mode,
             "apiTokenRequired": action_mode == "token",
+            "scanState": nmap_meta.get("scanState", {}),
         },
         "stats": {
             "tests": len(rows),
@@ -1402,6 +1456,10 @@ def _build_dashboard_payload(
             "heatmapWarnMbps": thresholds.heatmap_warn_mbps,
         },
         "meta": metadata,
+        "refresh": {
+            "seconds": config.dashboard_refresh_seconds if config else 60,
+            "minimumSeconds": 15,
+        },
     }
 
 
@@ -1431,24 +1489,25 @@ def build_dashboard_summary(
     }
 
 
-def generate_interactive_dashboard(
+def build_interactive_dashboard_payload(
     history: dict[str, list[dict[str, Any]]],
     now: datetime,
+    *,
     output_path: str,
     config: AppConfig | None = None,
     run_rows: list[dict[str, Any]] | None = None,
     router_events: list[RouterEvent] | None = None,
     pihole_rows: list[PiholeHourlyRow] | None = None,
-) -> tuple[bool, str]:
+) -> dict[str, Any]:
     thresholds = _build_thresholds(config)
     rows = _rows_from_run_records(run_rows, history, now, thresholds, days=30)
     if not rows:
-        return False, "No speed data available for interactive dashboard"
+        raise RuntimeError("No speed data available for interactive dashboard")
 
     event_rows = router_events if router_events is not None else _load_router_events(config)
     dns_rows = pihole_rows if pihole_rows is not None else _load_pihole_hourly_rows(config)
     nmap_rows, nmap_meta = _load_nmap_inventory_rows(config)
-    payload = _build_dashboard_payload(
+    return _build_dashboard_payload(
         rows,
         event_rows,
         dns_rows,
@@ -1460,6 +1519,29 @@ def generate_interactive_dashboard(
         config=config,
         include_firewall=True,
     )
+
+
+def generate_interactive_dashboard(
+    history: dict[str, list[dict[str, Any]]],
+    now: datetime,
+    output_path: str,
+    config: AppConfig | None = None,
+    run_rows: list[dict[str, Any]] | None = None,
+    router_events: list[RouterEvent] | None = None,
+    pihole_rows: list[PiholeHourlyRow] | None = None,
+) -> tuple[bool, str]:
+    try:
+        payload = build_interactive_dashboard_payload(
+            history,
+            now,
+            output_path=output_path,
+            config=config,
+            run_rows=run_rows,
+            router_events=router_events,
+            pihole_rows=pihole_rows,
+        )
+    except RuntimeError as exc:
+        return False, str(exc)
     html = _render_interactive_dashboard_html(payload)
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -1876,6 +1958,8 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
 .empty { color: var(--muted); font-size: 14px; padding: 18px; border: 1px dashed var(--border); border-radius: 16px; }
 .linkline { margin-top: auto; }
 .linkline a { color: var(--accent); text-decoration: none; font-weight: 700; }
+.action-inline { display:flex; flex-wrap:wrap; gap: 8px; align-items:center; }
+.action-inline input { min-width: 220px; }
 @media (max-width: 1180px) {
   .hero, .grid, .controls, .hero-grid, .score-grid, .diag-topline, .diag-grid, .chart-summary, .firewall-topline, .firewall-source-grid { grid-template-columns: 1fr; }
 }
@@ -1890,6 +1974,7 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
       <div class="hero-meta">
         <div class="chip" id="dashboardVersion"></div>
         <div class="chip" id="dashboardFreshness"></div>
+        <div class="chip" id="refreshStatus"></div>
       </div>
       <div class="hero-grid">
         <div class="kpi"><div class="label">Median download</div><div class="value" id="kpiMedian"></div><div class="sub">Typical observed downstream performance</div><div class="sub" id="kpiMedianFreshness"></div></div>
@@ -1999,7 +2084,7 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
         <div class="table-wrap"><table><thead><tr><th>Time</th><th>Type</th><th>Severity</th><th>Source</th><th>Message</th></tr></thead><tbody id="eventRows"></tbody></table></div>
       </div>
       <div class="panel">
-        <div class="panel-head"><div><h2>Network Devices</h2><p>LAN inventory derived from the latest Nmap export. Devices are grouped by category for a quick visual sweep.</p></div><div class="panel-stamp" id="inventoryFreshness"></div></div>
+      <div class="panel-head"><div><h2>Network Devices</h2><p>LAN inventory derived from the latest Nmap export. Devices are grouped by category for a quick visual sweep.</p></div><div class="panel-stamp" id="inventoryFreshness"></div></div>
         <div id="inventoryMeta" class="chart-meta"></div>
         <div class="action-row">
           <button id="nmapScanButton" class="action-button" type="button">Run Nmap Scan</button>
@@ -2042,7 +2127,7 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
 </div>
 <script id="dashboard-payload" type="application/json">__PAYLOAD_JSON__</script>
 <script>
-const payload = JSON.parse(document.getElementById('dashboard-payload').textContent);
+let payload = JSON.parse(document.getElementById('dashboard-payload').textContent);
 function sanitizePing(value) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return null;
   const ping = Number(value);
@@ -2055,21 +2140,42 @@ function normalizeDashboardRows(rows) {
     ping: sanitizePing(row.ping)
   }));
 }
-const rawData = normalizeDashboardRows(payload.data);
-const rawEvents = payload.events;
-const piholeRows = payload.pihole;
-const deviceRows = payload.devices;
-const firewall = payload.firewall || {};
-const inventory = payload.inventory;
-const stats = payload.stats;
-const score = payload.score;
-const diagnosis = payload.diagnosis || {};
-const thresholds = payload.thresholds;
-const meta = payload.meta;
-const refreshed = meta.refreshed || {};
+let rawData = [];
+let rawEvents = [];
+let piholeRows = [];
+let deviceRows = [];
+let firewall = {};
+let inventory = {};
+let stats = {};
+let score = {};
+let diagnosis = {};
+let thresholds = {};
+let meta = {};
+let refreshed = {};
 const themeKey = 'pi_probe_dashboard_theme';
 const actionTokenKey = 'pi_probe_dashboard_action_token';
 let diagView = 'evidence';
+let refreshTimer = null;
+let refreshInFlight = false;
+let refreshAbortController = null;
+let lastRefreshError = '';
+
+function hydratePayload(nextPayload) {
+  payload = nextPayload || {};
+  rawData = normalizeDashboardRows(Array.isArray(payload.data) ? payload.data : []);
+  rawEvents = Array.isArray(payload.events) ? payload.events : [];
+  piholeRows = Array.isArray(payload.pihole) ? payload.pihole : [];
+  deviceRows = Array.isArray(payload.devices) ? payload.devices : [];
+  firewall = payload.firewall || {};
+  inventory = payload.inventory || {};
+  stats = payload.stats || {};
+  score = payload.score || {};
+  diagnosis = payload.diagnosis || {};
+  thresholds = payload.thresholds || {};
+  meta = payload.meta || {};
+  refreshed = meta.refreshed || {};
+}
+hydratePayload(payload);
 
 function average(values) {
   const clean = values.filter(v => v !== null && v !== undefined && !Number.isNaN(v));
@@ -2085,6 +2191,17 @@ function quantile(values, q) {
   return clean[base + 1] !== undefined ? clean[base] + rest * (clean[base + 1] - clean[base]) : clean[base];
 }
 function getThemeChoice() { return localStorage.getItem(themeKey) || 'auto'; }
+function getActionToken() { return localStorage.getItem(actionTokenKey) || ''; }
+function setActionToken(value) {
+  const clean = (value || '').trim();
+  if (clean) localStorage.setItem(actionTokenKey, clean);
+  else localStorage.removeItem(actionTokenKey);
+  const input = document.getElementById('apiToken');
+  if (input && input.value !== clean) input.value = clean;
+}
+function refreshIntervalSeconds() {
+  return Math.max(15, Number((payload.refresh || {}).seconds || 60));
+}
 function resolveDarkMode(choice) {
   if (choice === 'premium') return true;
   if (choice === 'clean') return false;
@@ -2267,6 +2384,19 @@ function setFreshness(elementId, value, prefix = 'Updated') {
   if (!node) return;
   node.textContent = `${prefix} ${formatFreshness(value)}`;
 }
+function setRefreshStatus(kind, message) {
+  const node = document.getElementById('refreshStatus');
+  if (!node) return;
+  if (kind === 'loading') {
+    node.textContent = message || 'Refreshing dashboard...';
+    return;
+  }
+  if (kind === 'error') {
+    node.textContent = message || 'Refresh failed';
+    return;
+  }
+  node.textContent = message || `Auto-refresh ${refreshIntervalSeconds()}s`;
+}
 function renderFreshness() {
   setText('dashboardVersion', `Version ${meta.version || 'unknown'}`);
   setFreshness('dashboardFreshness', refreshed.dashboard || meta.generated_at, 'Built');
@@ -2282,10 +2412,13 @@ function renderFreshness() {
   setFreshness('scatterFreshness', refreshed.speed, 'Data');
   setFreshness('dnsFreshness', refreshed.pihole, 'Data');
   setFreshness('scoreFreshness', refreshed.speed, 'Data');
+  setRefreshStatus(lastRefreshError ? 'error' : 'ok', lastRefreshError || `Auto-refresh ${refreshIntervalSeconds()}s`);
 }
 function initFilters() {
   const severitySelect = document.getElementById('severityFilter');
   const typeSelect = document.getElementById('eventTypeFilter');
+  const previousSeverity = severitySelect.value || 'all';
+  const previousType = typeSelect.value || 'all';
   const severities = ['all', ...new Set(rawEvents.map(e => e.severity || 'info'))];
   const types = ['all', ...new Set(rawEvents.map(e => e.eventType || 'event'))];
   [severitySelect, typeSelect].forEach(select => clearNode(select));
@@ -2301,6 +2434,8 @@ function initFilters() {
     option.textContent = value === 'all' ? 'All types' : value;
     typeSelect.appendChild(option);
   });
+  severitySelect.value = severities.includes(previousSeverity) ? previousSeverity : 'all';
+  typeSelect.value = types.includes(previousType) ? previousType : 'all';
 }
 function filteredData() {
   const day = document.getElementById('dayFilter').value;
@@ -2364,15 +2499,21 @@ function renderInventoryMeta() {
   if (inventory.scannedAt) items.push(`Scanned ${new Date(inventory.scannedAt).toLocaleString()}`);
   if (inventory.network) items.push(`Network ${inventory.network}`);
   items.push(`${inventory.deviceCount || 0} discovered`);
+  if (inventory.rawDeviceCount) items.push(`${inventory.rawDeviceCount} raw records`);
   if (inventory.scanTargets) items.push(`Targets ${inventory.scanTargets}`);
   if (inventory.scanMinutes) items.push(`Schedule ${inventory.scanMinutes} min`);
+  const scanState = inventory.scanState || {};
+  if (scanState.lastSuccessfulScan) items.push(`Last success ${new Date(scanState.lastSuccessfulScan).toLocaleString()}`);
+  if (scanState.lastScanDurationSeconds) items.push(`Duration ${Number(scanState.lastScanDurationSeconds).toFixed(1)}s`);
+  if (scanState.nextExpectedScan) items.push(`Next expected ${new Date(scanState.nextExpectedScan).toLocaleString()}`);
+  if (scanState.scanRunning) items.push('Scan running now');
   items.forEach(label => {
     const chip = document.createElement('div');
     chip.className = 'legend-chip';
     chip.textContent = label;
     metaWrap.appendChild(chip);
   });
-  button.disabled = !(window.location.protocol.startsWith('http') && inventory.actionsEnabled && actionAuthReady());
+  button.disabled = !(window.location.protocol.startsWith('http') && inventory.actionsEnabled && actionAuthReady() && !scanState.scanRunning);
   if (!window.location.protocol.startsWith('http')) {
     status.textContent = 'Serve the dashboard to enable Nmap scan actions.';
   } else if (inventory.actionMode === 'locked') {
@@ -2381,6 +2522,10 @@ function renderInventoryMeta() {
     status.textContent = 'Enter the action token to enable scan and device actions.';
   } else if (!inventory.actionsEnabled) {
     status.textContent = inventory.scanArguments ? `Configured scan: nmap ${inventory.scanArguments} ${inventory.scanTargets}` : 'Nmap scan actions are unavailable for this dashboard.';
+  } else if (scanState.lastErrorSummary) {
+    status.textContent = `Last scan error: ${scanState.lastErrorSummary}`;
+  } else if (scanState.scanRunning) {
+    status.textContent = 'Nmap scan currently running...';
   } else if (!status.textContent) {
     status.textContent = inventory.scanArguments ? `Configured scan: nmap ${inventory.scanArguments} ${inventory.scanTargets}` : 'Run a fresh scan to update the device inventory.';
   }
@@ -2616,15 +2761,16 @@ function renderDeviceMap() {
       card.className = `device-card ${device.accent || 'slate'}`;
       const name = document.createElement('div');
       name.className = 'device-name';
-      name.textContent = device.name || device.hostname || device.ip || 'Unknown device';
+      const isPrinter = device.category === 'printer' || device.deviceType === '3d_printer';
+      name.textContent = `${isPrinter ? '🖨 ' : ''}${device.name || device.hostname || device.ip || 'Unknown device'}`;
       const ip = document.createElement('div');
       ip.className = 'device-ip';
-      ip.textContent = device.ip || device.hostname || 'n/a';
+      ip.textContent = (Array.isArray(device.ips) && device.ips.length ? device.ips.join(' · ') : (device.ip || device.hostname || 'n/a'));
       const meta = document.createElement('div');
       meta.className = 'device-meta';
       const vendor = document.createElement('span');
       vendor.className = 'device-chip';
-      vendor.textContent = device.vendor || 'Unknown vendor';
+      vendor.textContent = device.manufacturer || device.vendor || 'Unknown vendor';
       meta.appendChild(vendor);
       if (device.mac) {
         const mac = document.createElement('span');
@@ -2642,14 +2788,41 @@ function renderDeviceMap() {
       portCount.className = 'device-chip primary';
       portCount.textContent = `${device.portCount || 0} open port${(device.portCount || 0) === 1 ? '' : 's'}`;
       meta.appendChild(portCount);
+      if (device.identificationConfidence) {
+        const confidence = document.createElement('span');
+        confidence.className = 'device-chip';
+        confidence.textContent = `Confidence ${device.identificationConfidence}`;
+        meta.appendChild(confidence);
+      }
       const services = document.createElement('div');
       services.className = 'device-services';
+      if (isPrinter && device.deviceId) {
+        const chip = document.createElement('span');
+        chip.className = 'device-chip primary';
+        chip.textContent = `Device ID ${device.deviceId}`;
+        services.appendChild(chip);
+      }
+      if (isPrinter && device.displayEvidence) {
+        const chip = document.createElement('span');
+        chip.className = 'device-chip';
+        chip.textContent = device.displayEvidence;
+        services.appendChild(chip);
+      }
       (device.services || []).slice(0, 4).forEach(service => {
         const chip = document.createElement('span');
         chip.className = 'device-chip';
         chip.textContent = service;
         services.appendChild(chip);
       });
+      if (isPrinter && Array.isArray(device.openPorts)) {
+        [990, 3000, 6000].forEach(port => {
+          if (!device.openPorts.includes(port)) return;
+          const chip = document.createElement('span');
+          chip.className = 'device-chip';
+          chip.textContent = port === 990 ? 'FTPS 990' : `Bambu service ${port}`;
+          services.appendChild(chip);
+        });
+      }
       if (!services.childNodes.length && Array.isArray(device.openPorts) && device.openPorts.length) {
         const chip = document.createElement('span');
         chip.className = 'device-chip';
@@ -2753,7 +2926,10 @@ function buildDeviceEditor(device) {
       category: categorySelect.value,
     });
     status.textContent = response.message;
-    if (response.ok) window.location.reload();
+    if (response.ok) {
+      const refreshedOk = await fetchDashboardData('override');
+      if (!refreshedOk) window.location.reload();
+    }
     save.disabled = false;
     clear.disabled = false;
   });
@@ -2764,7 +2940,10 @@ function buildDeviceEditor(device) {
     status.textContent = 'Clearing device override...';
     const response = await submitDeviceOverride(device, { action: 'clear' });
     status.textContent = response.message;
-    if (response.ok) window.location.reload();
+    if (response.ok) {
+      const refreshedOk = await fetchDashboardData('override');
+      if (!refreshedOk) window.location.reload();
+    }
     save.disabled = false;
     clear.disabled = false;
   });
@@ -2807,6 +2986,12 @@ async function pingDashboardDevice(device) {
   }
 }
 async function submitDeviceOverride(device, changes) {
+  if (inventory.apiTokenRequired && !actionAuthReady()) {
+    return {
+      ok: false,
+      message: 'Dashboard action token required.',
+    };
+  }
   const selector = device.mac
     ? { mac: device.mac }
     : device.ip
@@ -2839,6 +3024,10 @@ async function triggerNmapScan() {
   const button = document.getElementById('nmapScanButton');
   const status = document.getElementById('nmapScanStatus');
   if (button.disabled) return;
+  if (inventory.apiTokenRequired && !actionAuthReady()) {
+    status.textContent = 'Dashboard action token required.';
+    return;
+  }
   button.disabled = true;
   status.textContent = 'Running Nmap scan and refreshing dashboard...';
   try {
@@ -2849,7 +3038,9 @@ async function triggerNmapScan() {
       button.disabled = false;
       return;
     }
-    window.location.reload();
+    const refreshedOk = await fetchDashboardData('manual-scan');
+    if (!refreshedOk) window.location.reload();
+    button.disabled = false;
   } catch (error) {
     status.textContent = `Nmap scan failed: ${error instanceof Error ? error.message : 'request error'}`;
     button.disabled = false;
@@ -3246,6 +3437,45 @@ function render() {
   renderDeviceMap();
   renderScore();
 }
+function scheduleNextRefresh() {
+  if (refreshTimer) clearTimeout(refreshTimer);
+  if (document.hidden) return;
+  refreshTimer = window.setTimeout(() => {
+    void fetchDashboardData('poll');
+  }, refreshIntervalSeconds() * 1000);
+}
+async function fetchDashboardData(reason = 'poll') {
+  if (refreshInFlight) return false;
+  refreshInFlight = true;
+  refreshAbortController = new AbortController();
+  lastRefreshError = '';
+  setRefreshStatus('loading', reason === 'manual-scan' ? 'Refreshing after scan...' : 'Refreshing dashboard...');
+  try {
+    const response = await fetch('/api/dashboard/data', {
+      method: 'GET',
+      cache: 'no-store',
+      headers: { 'Accept': 'application/json' },
+      signal: refreshAbortController.signal,
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const nextPayload = await response.json();
+    hydratePayload(nextPayload);
+    document.getElementById('threshold').value = stats.thresholdMbps;
+    initFilters();
+    render();
+    scheduleNextRefresh();
+    return true;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') return false;
+    lastRefreshError = `Refresh failed: ${error instanceof Error ? error.message : 'request error'}`;
+    setRefreshStatus('error', lastRefreshError);
+    scheduleNextRefresh();
+    return false;
+  } finally {
+    refreshInFlight = false;
+    refreshAbortController = null;
+  }
+}
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (getThemeChoice() === 'auto') applyTheme('auto'); });
 window.addEventListener('resize', () => render());
 document.getElementById('theme').value = getThemeChoice();
@@ -3264,6 +3494,15 @@ document.getElementById('diagFocusExtender').addEventListener('click', focusSusp
 initFilters();
 initActionTokenControl();
 applyTheme(getThemeChoice());
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    if (refreshTimer) clearTimeout(refreshTimer);
+    if (refreshAbortController) refreshAbortController.abort();
+    return;
+  }
+  void fetchDashboardData('visible');
+});
+scheduleNextRefresh();
 </script>
 </body>
 </html>
@@ -3492,6 +3731,23 @@ def run_dashboard_nmap_scan(output_path: str) -> dict[str, Any]:
     return response
 
 
+def load_dashboard_data_payload(output_path: str) -> dict[str, Any]:
+    from .config import load_config
+    from .storage import load_history_from_db, load_probe_runs_from_db
+
+    config = load_config(require_webhook=False)
+    now = datetime.now().astimezone()
+    history = load_history_from_db(config, now)
+    run_rows = load_probe_runs_from_db(config, now, days=30)
+    return build_interactive_dashboard_payload(
+        history,
+        now,
+        output_path=output_path,
+        config=config,
+        run_rows=run_rows,
+    )
+
+
 def apply_dashboard_nmap_override(output_path: str, payload: dict[str, Any]) -> dict[str, Any]:
     from .config import load_config
     from .nmap_inventory import export_nmap_inventory_json, remove_nmap_override, upsert_nmap_override
@@ -3586,6 +3842,8 @@ def serve_interactive_dashboard(
     file_path = Path(output_path).resolve()
     directory = file_path.parent
     status_path = directory / STATUS_FILE_NAME
+    from .config import load_config
+    config = load_config(require_webhook=False)
 
     class DashboardHandler(SimpleHTTPRequestHandler):
         def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -3602,10 +3860,12 @@ def serve_interactive_dashboard(
             )
             super().end_headers()
 
-        def _send_json(self, status: HTTPStatus, payload: dict[str, Any]) -> None:
+        def _send_json(self, status: HTTPStatus, payload: dict[str, Any], *, no_store: bool = False) -> None:
             body = json.dumps(payload).encode("utf-8")
             self.send_response(status)
             self.send_header("Content-Type", "application/json; charset=utf-8")
+            if no_store:
+                self.send_header("Cache-Control", "no-store")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
@@ -3670,14 +3930,23 @@ def serve_interactive_dashboard(
                     ).encode("utf-8")
                 self.send_response(HTTPStatus.OK)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Cache-Control", "no-store")
                 self.send_header("Content-Length", str(len(payload)))
                 self.end_headers()
                 self.wfile.write(payload)
                 return
+            if request_path == "/api/dashboard/data":
+                try:
+                    payload = load_dashboard_data_payload(str(file_path))
+                except RuntimeError as exc:
+                    self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "message": str(exc)}, no_store=True)
+                    return
+                self._send_json(HTTPStatus.OK, payload, no_store=True)
+                return
             if request_path in {"/", ""}:
                 self.path = f"/{file_path.name}"
             elif request_path != f"/{file_path.name}":
-                self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "message": "Not found"})
+                self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "message": "Not found"}, no_store=True)
                 return
             else:
                 self.path = request_path
@@ -3686,15 +3955,15 @@ def serve_interactive_dashboard(
         def do_POST(self) -> None:  # noqa: N802
             request_path = urlparse(self.path).path
             if request_path not in {"/api/nmap/scan", "/api/nmap/override", "/api/device/ping"}:
-                self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "message": "Not found"})
+                self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "message": "Not found"}, no_store=True)
                 return
             if not self._actions_authorized():
-                self._send_json(HTTPStatus.UNAUTHORIZED, {"ok": False, "message": "Dashboard action token required"})
+                self._send_json(HTTPStatus.UNAUTHORIZED, {"ok": False, "message": "Dashboard action token required"}, no_store=True)
                 return
             if request_path == "/api/nmap/scan":
                 result = run_dashboard_nmap_scan(str(file_path))
                 status = HTTPStatus.OK if result.get("ok") else HTTPStatus.INTERNAL_SERVER_ERROR
-                self._send_json(status, result)
+                self._send_json(status, result, no_store=True)
                 return
             if request_path == "/api/nmap/override":
                 payload = self._read_json_payload()
@@ -3702,7 +3971,7 @@ def serve_interactive_dashboard(
                     return
                 result = apply_dashboard_nmap_override(str(file_path), payload)
                 status = HTTPStatus.OK if result.get("ok") else HTTPStatus.BAD_REQUEST
-                self._send_json(status, result)
+                self._send_json(status, result, no_store=True)
                 return
             if request_path == "/api/device/ping":
                 payload = self._read_json_payload()
@@ -3714,7 +3983,7 @@ def serve_interactive_dashboard(
                     return
                 result = ping_dashboard_device(payload)
                 status = HTTPStatus.OK if result.get("ok") else HTTPStatus.BAD_REQUEST
-                self._send_json(status, result)
+                self._send_json(status, result, no_store=True)
                 return
 
     server = ThreadingHTTPServer((host, port), DashboardHandler)

@@ -11,7 +11,8 @@ import tempfile
 import time
 import unittest
 from unittest.mock import patch
-from urllib.request import urlopen
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
 
 from pi_probe_discord.dashboard import (
     NmapDeviceRow,
@@ -45,6 +46,7 @@ def make_config(base_dir: Path) -> AppConfig:
         interactive_dashboard_tls_cert_file=str(base_dir / "dashboard-cert.pem"),
         interactive_dashboard_tls_key_file=str(base_dir / "dashboard-key.pem"),
         interactive_dashboard_api_token="",
+        dashboard_refresh_seconds=60,
         public_dashboard_url="https://example.com/dashboard",
         dashboard_link_label="Open Interactive Dashboard",
         outage_download_mbps=50.0,
@@ -61,6 +63,7 @@ def make_config(base_dir: Path) -> AppConfig:
         nmap_inventory_json=str(base_dir / "nmap" / "latest.json"),
         nmap_events_json=str(base_dir / "nmap" / "events.json"),
         nmap_overrides_json=str(base_dir / "nmap" / "overrides.json"),
+        nmap_state_json=str(base_dir / "nmap" / "state.json"),
         nmap_targets="192.168.1.0/24",
         nmap_arguments="-F --min-rate 2000 --host-timeout 30s",
         nmap_scan_minutes=360,
@@ -216,6 +219,8 @@ class DashboardTests(unittest.TestCase):
                 SpeedResult(ok=True, summary="Download 240 Mbps | Upload 42 Mbps | Ping 5 ms", download_mbps=240.0, upload_mbps=42.0, ping_ms=5.0),
             )
 
+            if message == "matplotlib not installed":
+                self.skipTest("matplotlib not installed")
             self.assertTrue(ok, message)
             self.assertTrue((base / "speed_chart.png").exists())
 
@@ -521,6 +526,154 @@ class DashboardTests(unittest.TestCase):
             finally:
                 process.terminate()
                 process.join(timeout=2)
+
+    def test_dashboard_server_exposes_read_only_data_endpoint_with_no_store(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            config = replace(make_config(base), interactive_dashboard_file=str(base / "dashboard" / "index.html"))
+            dashboard_dir = Path(config.interactive_dashboard_file).parent
+            dashboard_dir.mkdir(parents=True, exist_ok=True)
+            Path(config.interactive_dashboard_file).write_text("<html><body>dashboard</body></html>", encoding="utf-8")
+            Path(config.router_events_csv).parent.mkdir(parents=True, exist_ok=True)
+            Path(config.nmap_inventory_json).parent.mkdir(parents=True, exist_ok=True)
+            Path(config.nmap_inventory_json).write_text(
+                json.dumps(
+                    {
+                        "scannedAt": "2026-06-06T10:15:00",
+                        "network": "192.168.1.0/24",
+                        "deviceCount": 1,
+                        "devices": [
+                            {
+                                "id": "192.168.1.77",
+                                "name": "Bambu Lab 3D Printer",
+                                "hostname": "printer",
+                                "ip": "192.168.1.77",
+                                "vendor": "Bambu Lab",
+                                "manufacturer": "Bambu Lab",
+                                "deviceType": "3d_printer",
+                                "identificationConfidence": "confirmed",
+                                "identificationScore": 100,
+                                "identificationReasons": ["TLS issuer contains BBL Technologies Co. Ltd"],
+                                "deviceId": "22E8BJ5C1401474",
+                                "displayEvidence": "Verified by Bambu device certificate",
+                                "status": "up",
+                                "category": "printer",
+                                "categoryLabel": "3D Printer",
+                                "accent": "rose",
+                                "ports": [],
+                                "openPorts": [],
+                                "services": [],
+                                "portCount": 0,
+                                "lastSeen": "2026-06-06T10:15:00",
+                            }
+                        ],
+                        "scanState": {
+                            "lastScanStart": "2026-06-06T10:10:00",
+                            "lastSuccessfulScan": "2026-06-06T10:15:00",
+                            "lastFailedScan": "",
+                            "lastScanDurationSeconds": 12.5,
+                            "nextExpectedScan": "2026-06-06T16:10:00",
+                            "configuredScanMinutes": 360,
+                            "scanRunning": False,
+                            "lastErrorSummary": "",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with patch("pi_probe_discord.config.load_config", return_value=config):
+                try:
+                    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                        sock.bind(("127.0.0.1", 0))
+                        port = sock.getsockname()[1]
+                except PermissionError:
+                    self.skipTest("socket bind not permitted in this environment")
+                process = Process(target=serve_interactive_dashboard, args=(str(config.interactive_dashboard_file), "127.0.0.1", port), daemon=True)
+                process.start()
+                try:
+                    time.sleep(0.5)
+                    response = urlopen(f"http://127.0.0.1:{port}/api/dashboard/data", timeout=3)
+                    payload = json.loads(response.read().decode("utf-8"))
+                    self.assertEqual(response.headers.get("Cache-Control"), "no-store")
+                    self.assertEqual(payload["inventory"]["deviceCount"], 1)
+                    self.assertEqual(payload["devices"][0]["name"], "Bambu Lab 3D Printer")
+                    self.assertNotIn("webhook_url", json.dumps(payload).lower())
+                    self.assertNotIn("discord.invalid", json.dumps(payload))
+                finally:
+                    process.terminate()
+                    process.join(timeout=2)
+
+    def test_dashboard_server_requires_action_token_for_scan_but_not_data(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            config = replace(
+                make_config(base),
+                interactive_dashboard_file=str(base / "dashboard" / "index.html"),
+                interactive_dashboard_api_token="secret-token",
+            )
+            dashboard_dir = Path(config.interactive_dashboard_file).parent
+            dashboard_dir.mkdir(parents=True, exist_ok=True)
+            Path(config.interactive_dashboard_file).write_text("<html><body>dashboard</body></html>", encoding="utf-8")
+            with patch("pi_probe_discord.config.load_config", return_value=config):
+                try:
+                    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                        sock.bind(("127.0.0.1", 0))
+                        port = sock.getsockname()[1]
+                except PermissionError:
+                    self.skipTest("socket bind not permitted in this environment")
+                process = Process(target=serve_interactive_dashboard, args=(str(config.interactive_dashboard_file), "127.0.0.1", port), daemon=True)
+                process.start()
+                try:
+                    time.sleep(0.5)
+                    data_response = urlopen(f"http://127.0.0.1:{port}/api/dashboard/data", timeout=3)
+                    self.assertEqual(data_response.status, 200)
+                    with self.assertRaises(HTTPError) as scan_error:
+                        urlopen(
+                            Request(
+                                f"http://127.0.0.1:{port}/api/nmap/scan",
+                                data=b"{}",
+                                method="POST",
+                            ),
+                            timeout=3,
+                        )
+                    self.assertEqual(scan_error.exception.code, 401)
+                    error_payload = json.loads(scan_error.exception.read().decode("utf-8"))
+                    self.assertIn("Dashboard action token required", error_payload["message"])
+                finally:
+                    process.terminate()
+                    process.join(timeout=2)
+
+    def test_dashboard_server_returns_404_for_unknown_api_route(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            config = replace(make_config(base), interactive_dashboard_file=str(base / "dashboard" / "index.html"))
+            dashboard_dir = Path(config.interactive_dashboard_file).parent
+            dashboard_dir.mkdir(parents=True, exist_ok=True)
+            Path(config.interactive_dashboard_file).write_text("<html><body>dashboard</body></html>", encoding="utf-8")
+            with patch("pi_probe_discord.config.load_config", return_value=config):
+                try:
+                    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                        sock.bind(("127.0.0.1", 0))
+                        port = sock.getsockname()[1]
+                except PermissionError:
+                    self.skipTest("socket bind not permitted in this environment")
+                process = Process(target=serve_interactive_dashboard, args=(str(config.interactive_dashboard_file), "127.0.0.1", port), daemon=True)
+                process.start()
+                try:
+                    time.sleep(0.5)
+                    with self.assertRaises(HTTPError) as error:
+                        urlopen(
+                            Request(
+                                f"http://127.0.0.1:{port}/api/not-real",
+                                data=b"{}",
+                                method="POST",
+                            ),
+                            timeout=3,
+                        )
+                    self.assertEqual(error.exception.code, 404)
+                finally:
+                    process.terminate()
+                    process.join(timeout=2)
 
 
 if __name__ == "__main__":

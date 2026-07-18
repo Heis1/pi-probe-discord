@@ -16,7 +16,8 @@ If you already have a built `.deb`:
 ```bash
 sudo apt install /path/to/pi-probe-discord_<version>-1_all.deb
 sudo systemctl daemon-reload
-sudo systemctl restart pi-probe-discord-speedtest.timer pi-probe-discord-full.timer
+sudo systemctl restart pi-probe-discord-speedtest.timer pi-probe-discord-full.timer pi-probe-discord-nmap.timer
+sudo systemctl restart pi-probe-discord-dashboard.service
 ```
 
 If you are pulling from GitHub releases:
@@ -39,11 +40,20 @@ Set at least:
 WEBHOOK_URL="https://discord.com/api/webhooks/replace/this"
 ```
 
+Useful dashboard and inventory settings:
+
+```bash
+PI_PROBE_DASHBOARD_REFRESH_SECONDS="60"
+PI_PROBE_INTERACTIVE_DASHBOARD_API_TOKEN=""
+PI_PROBE_NMAP_SCAN_MINUTES="360"
+```
+
 ## Enable timers
 
 ```bash
 sudo systemctl enable --now pi-probe-discord-speedtest.timer
 sudo systemctl enable --now pi-probe-discord-full.timer
+sudo systemctl enable --now pi-probe-discord-nmap.timer
 ```
 
 ## Manual checks
@@ -51,6 +61,7 @@ sudo systemctl enable --now pi-probe-discord-full.timer
 ```bash
 pi-probe-discord speedtest-only
 pi-probe-discord full
+sudo pi-probe-discord nmap-scan
 pi-probe-discord doctor
 ```
 
@@ -128,12 +139,31 @@ Open:
 https://<pi-or-tailscale-name>:8088/index.html
 ```
 
+The dashboard page polls `/api/dashboard/data` every `PI_PROBE_DASHBOARD_REFRESH_SECONDS` seconds by default. That refresh only reloads dashboard JSON. It does not run an Nmap scan. Manual Nmap scans still go through the protected scan action and refresh the page data only after the scan completes.
+
+## Bambu Lab printers
+
+Nmap inventory processing now identifies Bambu Lab printers from certificate and service evidence. A certificate issuer such as `BBL Technologies Co. Ltd`, `BBL Device CA`, or `BBL CA` produces a confirmed `Bambu Lab 3D Printer` classification. Supporting service evidence, such as FTPS on `990` plus Bambu control ports `3000` and `6000`, can raise a probable match without over-classifying generic port `3000` services.
+
+The dashboard shows confirmed printers with a printer marker, confidence, evidence summary, and `Device ID` when the certificate CN is already present in scan data.
+
+## Nmap timer inspection and logs
+
+```bash
+sudo systemctl status pi-probe-discord-nmap.timer --no-pager
+sudo systemctl list-timers pi-probe-discord-nmap.timer --all
+sudo systemctl cat pi-probe-discord-nmap.timer
+sudo journalctl -u pi-probe-discord-nmap.service -n 100 --no-pager
+```
+
 ## Upgrade behavior
 
 The package upgrade path now:
 
 - reloads systemd
 - restarts speedtest and full timers
+- regenerates the Nmap timer override from `PI_PROBE_NMAP_SCAN_MINUTES`
+- restarts the Nmap timer if it is enabled or active
 - restarts the bot service if enabled or active
 - restarts the dashboard service if enabled or active
 - restarts the SNMP listener if enabled or active
@@ -155,5 +185,7 @@ sudo pi-probe-discord router
 ```bash
 journalctl -u pi-probe-discord-speedtest.service -n 100 --no-pager
 journalctl -u pi-probe-discord-full.service -n 100 --no-pager
+journalctl -u pi-probe-discord-nmap.service -n 100 --no-pager
+journalctl -u pi-probe-discord-dashboard.service -n 100 --no-pager
 journalctl -u pi-probe-discord-bot.service -n 100 --no-pager
 ```

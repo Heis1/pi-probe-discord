@@ -59,6 +59,7 @@ def run_doctor() -> tuple[int, str]:
         "pi-probe-discord-bot.service",
         "pi-probe-discord-speedtest.timer",
         "pi-probe-discord-full.timer",
+        "pi-probe-discord-nmap.timer",
     ]
     if os.environ.get("PI_PROBE_ROUTER_SNMP_LISTENER_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}:
         services.append("pi-probe-discord-snmp-listener.service")

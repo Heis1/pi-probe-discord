@@ -1,3 +1,11 @@
+pi-probe-discord (1.1.19-1) unstable; urgency=medium
+
+  * Fingerprint Bambu Lab printers from Nmap TLS and service evidence.
+  * Add read-only dashboard JSON refresh polling and post-scan rerendering.
+  * Track Nmap scan state, expose inventory timing metadata, and harden the scheduled Nmap timer packaging.
+
+ -- Codex Builder <noreply@example.invalid>  Sat, 18 Jul 2026 16:45:00 +0930
+
 pi-probe-discord (1.1.18-1) unstable; urgency=medium
 
   * Fix premium speed chart generation when heatmap cells have no samples so hourly speedtest Discord reports can publish reliably.
