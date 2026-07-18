@@ -5,6 +5,8 @@ import hashlib
 import os
 import random
 import re
+import socket
+import ssl
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -40,6 +42,38 @@ def _rsa_encrypt_raw_chunks(text: str, modulus_hex: str, exponent_hex: str, *, c
         encrypted = pow(message, exponent, modulus)
         parts.append(f"{encrypted:0{chunk_bytes * 2}x}")
     return "".join(parts)
+
+
+def _sha256_hex(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _load_pinned_certificate_fingerprint(certificate_path: str) -> str:
+    pem = Path(certificate_path).read_text(encoding="utf-8")
+    return _sha256_hex(ssl.PEM_cert_to_DER_cert(pem))
+
+
+def _fetch_peer_certificate_fingerprint(base_url: str) -> str:
+    match = re.match(r"^https?://([^/:]+)(?::(\d+))?", base_url.strip())
+    if match is None:
+        raise RuntimeError(f"Could not parse router Web UI URL: {base_url}")
+    host = match.group(1)
+    port = int(match.group(2) or 443)
+    context = ssl._create_unverified_context()
+    with socket.create_connection((host, port), timeout=15) as sock:
+        with context.wrap_socket(sock, server_hostname=host) as tls_sock:
+            return _sha256_hex(tls_sock.getpeercert(binary_form=True))
+
+
+def _verify_pinned_certificate(base_url: str, certificate_path: str) -> None:
+    if not certificate_path:
+        return
+    if not Path(certificate_path).exists():
+        raise RuntimeError(f"Router Web UI CA/certificate file not found: {certificate_path}")
+    expected = _load_pinned_certificate_fingerprint(certificate_path)
+    actual = _fetch_peer_certificate_fingerprint(base_url)
+    if expected != actual:
+        raise RuntimeError("Router Web UI certificate pin mismatch.")
 
 
 def _parse_object_response(payload: str, *, collection: bool) -> list[dict[str, str]] | dict[str, str]:
@@ -84,7 +118,7 @@ class _RouterWebUiSession:
 
     def __post_init__(self) -> None:
         self.session = requests.Session()
-        self.session.verify = self.ca_file if self.ca_file else False
+        self.session.verify = False
         self.headers = {
             "User-Agent": "Mozilla/5.0",
             "Referer": f"{self.base_url}/",
@@ -99,6 +133,8 @@ class _RouterWebUiSession:
         self._token = "0"
 
     def login(self) -> None:
+        if self.ca_file:
+            _verify_pinned_certificate(self.base_url, self.ca_file)
         self.session.get(f"{self.base_url}/", headers=self.headers, timeout=15)
         parm_response = self.session.post(
             f"{self.base_url}/cgi/getParm?_={int(time.time() * 1000)}",

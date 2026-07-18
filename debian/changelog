@@ -1,3 +1,10 @@
+pi-probe-discord (1.1.28-1) unstable; urgency=medium
+
+  * Replace CA-style router web UI validation with direct certificate pinning for self-signed TP-Link router certificates.
+  * Keep the router host-table fallback while verifying the pinned router certificate before login.
+
+ -- Codex Builder <noreply@example.invalid>  Sat, 18 Jul 2026 20:35:00 +0930
+
 pi-probe-discord (1.1.27-1) unstable; urgency=medium
 
   * Add router web UI certificate pinning via PI_PROBE_ROUTER_WEBUI_CA_FILE so LAN scraping can verify the router certificate.

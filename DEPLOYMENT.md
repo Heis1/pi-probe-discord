@@ -201,7 +201,7 @@ To pin the router TLS certificate, save the router certificate to:
 /etc/pi-probe-discord/router-webui-ca.pem
 ```
 
-With `PI_PROBE_ROUTER_WEBUI_CA_FILE` set, router web UI scraping verifies the router certificate instead of accepting any certificate from the LAN.
+With `PI_PROBE_ROUTER_WEBUI_CA_FILE` set, Pi Probe pins the router connection to that exact certificate instead of accepting any certificate from the LAN.
 
 ## Nmap timer inspection and logs
 

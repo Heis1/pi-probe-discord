@@ -251,7 +251,7 @@ To avoid trusting arbitrary certificates on the LAN, export or copy the router's
 /etc/pi-probe-discord/router-webui-ca.pem
 ```
 
-When `PI_PROBE_ROUTER_WEBUI_CA_FILE` points to that file, the router web UI collector verifies the router certificate instead of disabling TLS verification.
+When `PI_PROBE_ROUTER_WEBUI_CA_FILE` points to that file, Pi Probe pins the router connection to that exact certificate before logging in.
 
 ## Firewall examples
 

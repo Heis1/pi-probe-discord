@@ -11,7 +11,7 @@ from tests.test_dashboard import make_config
 
 
 class RouterWebUiTests(unittest.TestCase):
-    def test_collect_router_webui_snapshot_uses_ca_file_for_tls_verification(self) -> None:
+    def test_collect_router_webui_snapshot_uses_pinned_certificate_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             config = make_config(Path(tmp))
             config.router_webui_enabled = True
@@ -31,7 +31,7 @@ class RouterWebUiTests(unittest.TestCase):
             self.assertTrue(snapshot["available"])
             self.assertEqual(snapshot["hostTable"][0]["hostName"], "raspberrypi")
 
-    def test_router_webui_session_uses_ca_file(self) -> None:
+    def test_router_webui_session_checks_pinned_certificate_and_disables_ca_validation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             config = make_config(Path(tmp))
             config.router_webui_enabled = True
@@ -47,7 +47,7 @@ class RouterWebUiTests(unittest.TestCase):
                 mock_session = MagicMock()
                 mock_session_factory.return_value = mock_session
                 collect_router_webui_snapshot(config, datetime(2026, 7, 18, 18, 0, 0).isoformat())
-                self.assertEqual(mock_session.verify, config.router_webui_ca_file)
+                self.assertFalse(mock_session.verify)
 
 
 if __name__ == "__main__":
