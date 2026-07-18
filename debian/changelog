@@ -1,3 +1,9 @@
+pi-probe-discord (1.1.38-1) unstable; urgency=medium
+
+  * Establish a signed dashboard session cookie after one valid token entry so protected Ping, Save, and Scan actions stop re-prompting on every click.
+
+ -- Codex Builder <noreply@example.invalid>  Sat, 18 Jul 2026 23:20:00 +0930
+
 pi-probe-discord (1.1.37-1) unstable; urgency=medium
 
   * Keep dashboard token protection on ping, save override, and manual scan while retrying protected actions after a 401 so stale browser token state is corrected automatically.

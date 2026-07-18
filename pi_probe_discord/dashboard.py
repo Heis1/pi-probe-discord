@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import csv
+import base64
 import hmac
+import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from http.cookies import SimpleCookie
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import ipaddress
@@ -41,6 +44,8 @@ MAX_REASONABLE_PING_MS = 1000.0
 DIAGNOSIS_EVENT_WINDOW_HOURS = 24
 DIAGNOSIS_DECISION_WINDOW_HOURS = 8
 DASHBOARD_ACTION_MAX_BODY_BYTES = 16 * 1024
+DASHBOARD_SESSION_COOKIE = "pi_probe_dashboard_session"
+DASHBOARD_SESSION_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
 
 
 @dataclass
@@ -2216,6 +2221,7 @@ let meta = {};
 let refreshed = {};
 const themeKey = 'pi_probe_dashboard_theme';
 const actionTokenKey = 'pi_probe_dashboard_action_token';
+const actionSessionKey = 'pi_probe_dashboard_action_session_ready';
 let diagView = 'evidence';
 let refreshTimer = null;
 let refreshInFlight = false;
@@ -2259,6 +2265,7 @@ function setActionToken(value) {
   const clean = (value || '').trim();
   if (clean) localStorage.setItem(actionTokenKey, clean);
   else localStorage.removeItem(actionTokenKey);
+  if (!clean) localStorage.removeItem(actionSessionKey);
   const input = document.getElementById('apiToken');
   if (input && input.value !== clean) input.value = clean;
 }
@@ -2430,19 +2437,43 @@ function getActionHeaders() {
 function actionAuthReady() {
   return !inventory.apiTokenRequired || Boolean((document.getElementById('apiToken')?.value || getActionToken() || '').trim());
 }
-function ensureActionToken() {
+async function establishActionSession(forcePrompt = false) {
   if (!inventory.apiTokenRequired) return true;
-  const current = (document.getElementById('apiToken')?.value || getActionToken() || '').trim();
-  if (current) {
-    setActionToken(current);
-    return true;
+  const sessionReady = localStorage.getItem(actionSessionKey) === 'true';
+  let current = (!forcePrompt && sessionReady) ? '' : (document.getElementById('apiToken')?.value || getActionToken() || '').trim();
+  if (!current || forcePrompt) {
+    const entered = window.prompt('Enter dashboard action token', forcePrompt ? '' : current);
+    if (!entered) return false;
+    current = entered.trim();
   }
-  const entered = window.prompt('Enter dashboard action token');
-  if (!entered) return false;
-  setActionToken(entered);
-  renderInventoryMeta();
-  renderDeviceMap();
-  return Boolean(getActionToken().trim());
+  if (!current) return false;
+  setActionToken(current);
+  try {
+    const response = await fetch('/api/auth/session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: current }),
+    });
+    const result = await response.json();
+    if (!response.ok || !result.ok) {
+      localStorage.removeItem(actionSessionKey);
+      return false;
+    }
+    localStorage.setItem(actionSessionKey, 'true');
+    renderInventoryMeta();
+    renderDeviceMap();
+    return true;
+  } catch (_) {
+    localStorage.removeItem(actionSessionKey);
+    return false;
+  }
+}
+async function ensureActionToken(forcePrompt = false) {
+  if (!inventory.apiTokenRequired) return true;
+  if (!forcePrompt && localStorage.getItem(actionSessionKey) === 'true') return true;
+  const current = (document.getElementById('apiToken')?.value || getActionToken() || '').trim();
+  if (current && !forcePrompt) return establishActionSession(false);
+  return establishActionSession(true);
 }
 async function fetchWithActionAuth(url, options = {}, { allowRetry = true } = {}) {
   const buildOptions = () => {
@@ -2457,8 +2488,9 @@ async function fetchWithActionAuth(url, options = {}, { allowRetry = true } = {}
   };
   let response = await fetch(url, buildOptions());
   if (response.status === 401 && inventory.apiTokenRequired && allowRetry) {
+    localStorage.removeItem(actionSessionKey);
     setActionToken('');
-    if (!ensureActionToken()) return response;
+    if (!await ensureActionToken(true)) return response;
     response = await fetch(url, buildOptions());
   }
   return response;
@@ -2471,6 +2503,7 @@ function initActionTokenControl() {
   input.value = getActionToken();
   input.addEventListener('input', () => {
     setActionToken(input.value);
+    localStorage.removeItem(actionSessionKey);
     renderInventoryMeta();
     renderDeviceMap();
   });
@@ -3262,7 +3295,7 @@ function buildDeviceEditor(device) {
   });
 
   ping.addEventListener('click', async () => {
-    if (!ensureActionToken()) {
+    if (!await ensureActionToken()) {
       status.textContent = 'Dashboard action token required.';
       return;
     }
@@ -3302,7 +3335,7 @@ async function pingDashboardDevice(device) {
   }
 }
 async function submitDeviceOverride(device, changes) {
-  if (!ensureActionToken()) {
+  if (!await ensureActionToken()) {
     return {
       ok: false,
       message: 'Dashboard action token required.',
@@ -3339,7 +3372,7 @@ async function triggerNmapScan() {
   const button = document.getElementById('nmapScanButton');
   const status = document.getElementById('nmapScanStatus');
   if (button.disabled) return;
-  if (!ensureActionToken()) {
+  if (!await ensureActionToken()) {
     status.textContent = 'Dashboard action token required.';
     return;
   }
@@ -4165,6 +4198,40 @@ def _load_allowed_ping_targets() -> set[str]:
     return targets
 
 
+def _dashboard_session_payload(now: datetime) -> str:
+    expires_at = int((now + timedelta(seconds=DASHBOARD_SESSION_MAX_AGE_SECONDS)).timestamp())
+    return json.dumps({"exp": expires_at}, separators=(",", ":"))
+
+
+def _dashboard_session_signature(api_token: str, payload: str) -> str:
+    return hmac.new(api_token.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def _dashboard_session_cookie_value(api_token: str, now: datetime) -> str:
+    payload = _dashboard_session_payload(now)
+    signature = _dashboard_session_signature(api_token, payload)
+    return f"{base64.urlsafe_b64encode(payload.encode('utf-8')).decode('ascii')}.{signature}"
+
+
+def _verify_dashboard_session_cookie(api_token: str, raw_cookie: str) -> bool:
+    if not api_token or not raw_cookie:
+        return False
+    try:
+        encoded_payload, supplied_signature = raw_cookie.split(".", 1)
+        payload = base64.urlsafe_b64decode(encoded_payload.encode("ascii")).decode("utf-8")
+    except Exception:
+        return False
+    expected_signature = _dashboard_session_signature(api_token, payload)
+    if not hmac.compare_digest(supplied_signature, expected_signature):
+        return False
+    try:
+        parsed = json.loads(payload)
+        expires_at = int(parsed.get("exp", 0))
+    except Exception:
+        return False
+    return expires_at > int(datetime.now().astimezone().timestamp())
+
+
 def serve_interactive_dashboard(
     output_path: str,
     host: str,
@@ -4206,10 +4273,38 @@ def serve_interactive_dashboard(
             self.end_headers()
             self.wfile.write(body)
 
+        def _send_session_cookie(self, value: str, *, max_age: int = DASHBOARD_SESSION_MAX_AGE_SECONDS) -> None:
+            cookie = (
+                f"{DASHBOARD_SESSION_COOKIE}={value}; Max-Age={max_age}; Path=/; HttpOnly; SameSite=Strict"
+            )
+            if tls_enabled:
+                cookie += "; Secure"
+            self.send_header("Set-Cookie", cookie)
+
+        def _clear_session_cookie(self) -> None:
+            cookie = f"{DASHBOARD_SESSION_COOKIE}=; Max-Age=0; Path=/; HttpOnly; SameSite=Strict"
+            if tls_enabled:
+                cookie += "; Secure"
+            self.send_header("Set-Cookie", cookie)
+
+        def _session_cookie_value(self) -> str:
+            raw_cookie = self.headers.get("Cookie", "")
+            if not raw_cookie:
+                return ""
+            try:
+                parsed = SimpleCookie()
+                parsed.load(raw_cookie)
+            except Exception:
+                return ""
+            morsel = parsed.get(DASHBOARD_SESSION_COOKIE)
+            return morsel.value if morsel is not None else ""
+
         def _actions_authorized(self) -> bool:
             if api_token:
                 supplied = self.headers.get("X-Pi-Probe-Token", "")
-                return hmac.compare_digest(supplied, api_token)
+                if supplied and hmac.compare_digest(supplied, api_token):
+                    return True
+                return _verify_dashboard_session_cookie(api_token, self._session_cookie_value())
             return False
 
         def _read_json_payload(self) -> dict[str, Any] | None:
@@ -4299,11 +4394,42 @@ def serve_interactive_dashboard(
 
         def do_POST(self) -> None:  # noqa: N802
             request_path = urlparse(self.path).path
-            if request_path not in {"/api/nmap/scan", "/api/nmap/override", "/api/device/ping"}:
+            if request_path not in {"/api/auth/session", "/api/nmap/scan", "/api/nmap/override", "/api/device/ping"}:
                 self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "message": "Not found"}, no_store=True)
                 return
+            if request_path == "/api/auth/session":
+                payload = self._read_json_payload()
+                if payload is None:
+                    return
+                supplied = str(payload.get("token") or self.headers.get("X-Pi-Probe-Token", "")).strip()
+                if not api_token or not supplied or not hmac.compare_digest(supplied, api_token):
+                    self.send_response(HTTPStatus.UNAUTHORIZED)
+                    self._clear_session_cookie()
+                    self.send_header("Content-Type", "application/json; charset=utf-8")
+                    self.send_header("Cache-Control", "no-store")
+                    body = json.dumps({"ok": False, "message": "Dashboard action token required"}).encode("utf-8")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
+                body = json.dumps({"ok": True, "message": "Dashboard session established"}).encode("utf-8")
+                self.send_response(HTTPStatus.OK)
+                self._send_session_cookie(_dashboard_session_cookie_value(api_token, datetime.now().astimezone()))
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
             if request_path in {"/api/nmap/scan", "/api/nmap/override", "/api/device/ping"} and not self._actions_authorized():
-                self._send_json(HTTPStatus.UNAUTHORIZED, {"ok": False, "message": "Dashboard action token required"}, no_store=True)
+                self.send_response(HTTPStatus.UNAUTHORIZED)
+                self._clear_session_cookie()
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Cache-Control", "no-store")
+                body = json.dumps({"ok": False, "message": "Dashboard action token required"}).encode("utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
                 return
             if request_path == "/api/nmap/scan":
                 result = run_dashboard_nmap_scan(str(file_path))
