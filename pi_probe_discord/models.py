@@ -79,6 +79,7 @@ class AppConfig:
     router_webui_enabled: bool
     router_webui_url: str
     router_webui_secret_file: str
+    router_webui_ca_file: str
 
 
 @dataclass

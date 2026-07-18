@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import os
 import random
 import re
 import time
@@ -10,15 +11,11 @@ from typing import Any
 from urllib.parse import quote
 
 import requests
-import urllib3
 from Cryptodome.Cipher import AES
 from Cryptodome.Util.Padding import pad, unpad
 
 from .config import load_router_webui_secrets
 from .models import AppConfig
-
-
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 _LOGIN_PARMS_RE = re.compile(r'var\s+(\w+)="?([^";]+)"?;')
 _TOKEN_RE = re.compile(r'var token="([^"]+)";')
@@ -83,10 +80,11 @@ class _RouterWebUiSession:
     base_url: str
     username: str
     password: str
+    ca_file: str = ""
 
     def __post_init__(self) -> None:
         self.session = requests.Session()
-        self.session.verify = False
+        self.session.verify = self.ca_file if self.ca_file else False
         self.headers = {
             "User-Agent": "Mozilla/5.0",
             "Referer": f"{self.base_url}/",
@@ -188,6 +186,7 @@ def collect_router_webui_snapshot(config: AppConfig, now_iso: str) -> dict[str, 
         base_url=config.router_webui_url.rstrip("/"),
         username=secrets["username"],
         password=secrets["password"],
+        ca_file=config.router_webui_ca_file.strip(),
     )
     session.login()
     info = session.call(1, "IGD_DEV_INFO", ["modelName", "description", "X_TP_IsFD"], collection=False)

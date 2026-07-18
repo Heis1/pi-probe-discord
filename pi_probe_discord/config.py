@@ -28,6 +28,7 @@ DEFAULT_NMAP_OVERRIDES_JSON = DEFAULT_DATA_DIR / "nmap" / "overrides.json"
 DEFAULT_NMAP_STATE_JSON = DEFAULT_DATA_DIR / "nmap" / "state.json"
 DEFAULT_TOPOLOGY_CACHE_JSON = DEFAULT_DATA_DIR / "topology" / "latest.json"
 DEFAULT_ROUTER_WEBUI_SECRET_FILE = DEFAULT_CONFIG_DIR / "router-webui.env"
+DEFAULT_ROUTER_WEBUI_CA_FILE = DEFAULT_CONFIG_DIR / "router-webui-ca.pem"
 DEFAULT_NMAP_TARGETS = "192.168.1.0/24"
 DEFAULT_NMAP_ARGUMENTS = "-Pn --top-ports 200 --min-rate 2000 --host-timeout 30s"
 DEFAULT_FIREWALL_LOG_PATHS = ["/var/log/ufw.log", "/var/log/kern.log", "/var/log/syslog"]
@@ -235,4 +236,8 @@ def load_config(base_dir: Path | None = None, require_webhook: bool = True) -> A
             "PI_PROBE_ROUTER_WEBUI_SECRET_FILE",
             str(DEFAULT_ROUTER_WEBUI_SECRET_FILE),
         ),
+        router_webui_ca_file=os.environ.get(
+            "PI_PROBE_ROUTER_WEBUI_CA_FILE",
+            str(DEFAULT_ROUTER_WEBUI_CA_FILE),
+        ).strip(),
     )

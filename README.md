@@ -226,6 +226,7 @@ Main config:
 PI_PROBE_ROUTER_WEBUI_ENABLED="true"
 PI_PROBE_ROUTER_WEBUI_URL="http://192.168.1.1"
 PI_PROBE_ROUTER_WEBUI_SECRET_FILE="/etc/pi-probe-discord/router-webui.env"
+PI_PROBE_ROUTER_WEBUI_CA_FILE="/etc/pi-probe-discord/router-webui-ca.pem"
 ```
 
 Secret file:
@@ -243,6 +244,14 @@ The secret file must:
 - define `PI_PROBE_ROUTER_WEBUI_PASSWORD`
 
 The dashboard payload and normal status views do not expose these values.
+
+To avoid trusting arbitrary certificates on the LAN, export or copy the router's current HTTPS certificate to:
+
+```bash
+/etc/pi-probe-discord/router-webui-ca.pem
+```
+
+When `PI_PROBE_ROUTER_WEBUI_CA_FILE` points to that file, the router web UI collector verifies the router certificate instead of disabling TLS verification.
 
 ## Firewall examples
 

@@ -1,0 +1,54 @@
+from __future__ import annotations
+
+import tempfile
+import unittest
+from datetime import datetime
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+from pi_probe_discord.router_webui import collect_router_webui_snapshot
+from tests.test_dashboard import make_config
+
+
+class RouterWebUiTests(unittest.TestCase):
+    def test_collect_router_webui_snapshot_uses_ca_file_for_tls_verification(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = make_config(Path(tmp))
+            config.router_webui_enabled = True
+            config.router_webui_url = "https://192.168.1.1"
+            config.router_webui_ca_file = str(Path(tmp) / "router-webui-ca.pem")
+
+            with patch("pi_probe_discord.router_webui.load_router_webui_secrets", return_value={"username": "admin", "password": "secret"}), \
+                 patch("pi_probe_discord.router_webui._RouterWebUiSession.login"), \
+                 patch("pi_probe_discord.router_webui._RouterWebUiSession.call") as mock_call:
+                mock_call.side_effect = [
+                    {"modelName": "Archer VR2100", "description": "Router"},
+                    {"userName": "admin"},
+                    [{"IPAddress": "192.168.1.100", "MACAddress": "DC:A6:32:37:7A:6A", "hostName": "raspberrypi", "active": "1"}],
+                ]
+                snapshot = collect_router_webui_snapshot(config, datetime(2026, 7, 18, 18, 0, 0).isoformat())
+
+            self.assertTrue(snapshot["available"])
+            self.assertEqual(snapshot["hostTable"][0]["hostName"], "raspberrypi")
+
+    def test_router_webui_session_uses_ca_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = make_config(Path(tmp))
+            config.router_webui_enabled = True
+            config.router_webui_ca_file = str(Path(tmp) / "router-webui-ca.pem")
+            with patch("pi_probe_discord.router_webui.load_router_webui_secrets", return_value={"username": "admin", "password": "secret"}), \
+                 patch("pi_probe_discord.router_webui._RouterWebUiSession.login"), \
+                 patch("pi_probe_discord.router_webui._RouterWebUiSession.call", side_effect=[
+                     {"modelName": "Archer VR2100", "description": "Router"},
+                     {"userName": "admin"},
+                     [],
+                 ]), \
+                 patch("pi_probe_discord.router_webui.requests.Session") as mock_session_factory:
+                mock_session = MagicMock()
+                mock_session_factory.return_value = mock_session
+                collect_router_webui_snapshot(config, datetime(2026, 7, 18, 18, 0, 0).isoformat())
+                self.assertEqual(mock_session.verify, config.router_webui_ca_file)
+
+
+if __name__ == "__main__":
+    unittest.main()

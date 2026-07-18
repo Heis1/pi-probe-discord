@@ -105,6 +105,7 @@ def make_config(base_dir: Path) -> AppConfig:
         router_webui_enabled=False,
         router_webui_url="http://192.168.1.1",
         router_webui_secret_file=str(base_dir / "router-webui.env"),
+        router_webui_ca_file=str(base_dir / "router-webui-ca.pem"),
     )
 
 

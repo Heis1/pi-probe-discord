@@ -83,6 +83,28 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(secrets["username"], "admin")
             self.assertEqual(secrets["password"], "secret")
 
+    def test_load_config_reads_router_webui_ca_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            env_file = base / "pihole-update-discord.env"
+            ca_file = base / "router-webui-ca.pem"
+            env_file.write_text(
+                "\n".join(
+                    [
+                        'WEBHOOK_URL="https://discord.com/api/webhooks/123/abc"',
+                        'PI_PROBE_ROUTER_WEBUI_ENABLED="true"',
+                        f'PI_PROBE_ROUTER_WEBUI_CA_FILE="{ca_file}"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            os.environ["CONFIG_FILE"] = str(env_file)
+            try:
+                config = load_config(require_webhook=False)
+            finally:
+                os.environ.pop("CONFIG_FILE", None)
+            self.assertEqual(config.router_webui_ca_file, str(ca_file))
+
 
 if __name__ == "__main__":
     unittest.main()

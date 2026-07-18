@@ -183,6 +183,7 @@ Main env:
 PI_PROBE_ROUTER_WEBUI_ENABLED="true"
 PI_PROBE_ROUTER_WEBUI_URL="http://192.168.1.1"
 PI_PROBE_ROUTER_WEBUI_SECRET_FILE="/etc/pi-probe-discord/router-webui.env"
+PI_PROBE_ROUTER_WEBUI_CA_FILE="/etc/pi-probe-discord/router-webui-ca.pem"
 ```
 
 Install the secret template and lock it down:
@@ -193,6 +194,14 @@ sudo nano /etc/pi-probe-discord/router-webui.env
 ```
 
 The secret file must remain owned by `root` with mode `600` or Pi Probe will refuse to load it.
+
+To pin the router TLS certificate, save the router certificate to:
+
+```bash
+/etc/pi-probe-discord/router-webui-ca.pem
+```
+
+With `PI_PROBE_ROUTER_WEBUI_CA_FILE` set, router web UI scraping verifies the router certificate instead of accepting any certificate from the LAN.
 
 ## Nmap timer inspection and logs
 
