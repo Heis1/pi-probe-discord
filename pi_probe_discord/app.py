@@ -49,6 +49,10 @@ from .system_checks import collect_pihole_info, run_updates
 from .version_check import version_status_line
 
 
+def _webhook_configured(config) -> bool:
+    return bool(getattr(config, "webhook_url", "").strip())
+
+
 def _read_last_firewall_alert_sent_at(state_file: Path) -> datetime | None:
     try:
         raw = json.loads(state_file.read_text(encoding="utf-8"))
@@ -157,7 +161,7 @@ def build_run_record(
 
 
 def run_mode(mode: str) -> int:
-    config = load_config()
+    config = load_config(require_webhook=False)
     init_database(config)
 
     hostname = socket.gethostname()
@@ -236,7 +240,7 @@ def run_mode(mode: str) -> int:
                     age = (run_at - last_sent_at).total_seconds()
                     if age < cooldown_seconds:
                         should_send = False
-                if should_send:
+                if should_send and _webhook_configured(config):
                     alert_payload = _build_firewall_alert_payload(hostname, run_at_local, firewall_snapshot, reasons)
                     nmap_rows, _ = load_dashboard_nmap_inventory(config)
                     firewall_chart_ok, _ = generate_firewall_chart(firewall_snapshot, config.firewall_chart_file, devices=nmap_rows)
@@ -285,13 +289,14 @@ def run_mode(mode: str) -> int:
         router_snapshot=router_snapshot,
         dashboard_summary=dashboard_summary,
     )
-    try:
-        if speed_result.chart_generated and Path(config.chart_file).exists():
-            post_webhook_file(config, payload, config.chart_file)
-        else:
-            post_webhook_json(config, payload)
-    except requests.RequestException as exc:
-        raise RuntimeError(f"Discord webhook POST failed: {exc}") from exc
+    if _webhook_configured(config):
+        try:
+            if speed_result.chart_generated and Path(config.chart_file).exists():
+                post_webhook_file(config, payload, config.chart_file)
+            else:
+                post_webhook_json(config, payload)
+        except requests.RequestException as exc:
+            raise RuntimeError(f"Discord webhook POST failed: {exc}") from exc
 
     return 0
 

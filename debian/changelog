@@ -1,3 +1,10 @@
+pi-probe-discord (1.1.33-1) unstable; urgency=medium
+
+  * Allow scheduled speed tests to continue collecting data and refreshing the dashboard when Discord webhook delivery is unconfigured.
+  * Fix dashboard action-token checks so saved browser tokens work for ping and override actions without forcing a re-entry.
+
+ -- Codex Builder <noreply@example.invalid>  Sat, 18 Jul 2026 21:49:00 +0930
+
 pi-probe-discord (1.1.32-1) unstable; urgency=medium
 
   * Break performance timeline lines across large data gaps and cluster dense router-event markers so missing history and bursty events do not render as misleading chart artifacts.

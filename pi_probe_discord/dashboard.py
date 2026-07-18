@@ -2422,22 +2422,22 @@ function setText(elementId, value) {
 function getActionHeaders() {
   const headers = { 'Content-Type': 'application/json' };
   if (inventory.apiTokenRequired) {
-    const token = (document.getElementById('apiToken')?.value || localStorage.getItem(actionTokenKey) || '').trim();
+    const token = (document.getElementById('apiToken')?.value || getActionToken() || '').trim();
     if (token) headers['X-Pi-Probe-Token'] = token;
   }
   return headers;
 }
 function actionAuthReady() {
-  return !inventory.apiTokenRequired || Boolean((document.getElementById('apiToken')?.value || '').trim());
+  return !inventory.apiTokenRequired || Boolean((document.getElementById('apiToken')?.value || getActionToken() || '').trim());
 }
 function initActionTokenControl() {
   const wrap = document.getElementById('apiTokenControl');
   const input = document.getElementById('apiToken');
   if (!wrap || !input) return;
   wrap.style.display = inventory.apiTokenRequired ? 'block' : 'none';
-  input.value = localStorage.getItem(actionTokenKey) || '';
+  input.value = getActionToken();
   input.addEventListener('input', () => {
-    localStorage.setItem(actionTokenKey, input.value.trim());
+    setActionToken(input.value);
     renderInventoryMeta();
     renderDeviceMap();
   });
