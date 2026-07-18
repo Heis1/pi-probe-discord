@@ -1,3 +1,9 @@
+pi-probe-discord (1.1.22-1) unstable; urgency=medium
+
+  * Add a two-stage LAN scan that discovers hosts first and then runs the service scan, so quiet devices stay in inventory.
+
+ -- Codex Builder <noreply@example.invalid>  Sat, 18 Jul 2026 14:40:00 +0930
+
 pi-probe-discord (1.1.21-1) unstable; urgency=medium
 
   * Improve device assessment by weighing hostname, vendor, OS, ports, services, and TLS signals together, and add friendlier naming for common home devices.

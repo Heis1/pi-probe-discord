@@ -54,34 +54,44 @@ def _summarize_reasons(reasons: list[str], *, limit: int = 2) -> str:
     return " · ".join(compact)
 
 
+def _contains_phrase(text: str, *phrases: str) -> bool:
+    normalized = re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
+    padded = f" {normalized} "
+    for phrase in phrases:
+        target = re.sub(r"[^a-z0-9]+", " ", phrase.lower()).strip()
+        if target and f" {target} " in padded:
+            return True
+    return False
+
+
 def _friendly_name_from_signals(hostname: str, vendor: str, category: str, text: str, fallback: str) -> str:
-    if "iphone" in text:
+    if _contains_phrase(text, "iphone"):
         return "Apple iPhone"
-    if "ipad" in text:
+    if _contains_phrase(text, "ipad"):
         return "Apple iPad"
-    if any(token in text for token in ("samsung", "galaxy")) and category == "mobile":
+    if _contains_phrase(text, "samsung", "galaxy") and category == "mobile":
         return "Samsung Phone"
-    if "pixel" in text and category == "mobile":
+    if _contains_phrase(text, "pixel") and category == "mobile":
         return "Google Pixel Phone"
-    if any(token in text for token in ("tcl", "smart tv", "android tv")) and category == "media":
+    if _contains_phrase(text, "tcl", "smart tv", "android tv") and category == "media":
         return "TCL Smart TV"
-    if any(token in text for token in ("firestick", "fire tv")) and category == "media":
+    if _contains_phrase(text, "firestick", "fire tv") and category == "media":
         return "Amazon Fire TV"
-    if "nintendo switch" in text and category == "media":
+    if _contains_phrase(text, "nintendo switch") and category == "media":
         return "Nintendo Switch"
-    if "chromecast" in text and category == "media":
+    if _contains_phrase(text, "chromecast") and category == "media":
         return "Google Chromecast"
-    if "google nest" in text and category in {"media", "iot"}:
+    if _contains_phrase(text, "google nest") and category in {"media", "iot"}:
         return "Google Nest Device"
-    if "google home" in text and category in {"media", "iot"}:
+    if _contains_phrase(text, "google home") and category in {"media", "iot"}:
         return "Google Home Device"
-    if "eufy homebase" in text and category == "iot":
+    if _contains_phrase(text, "eufy homebase") and category == "iot":
         return "Eufy HomeBase"
-    if "eufy" in text and "camera" in text and category == "iot":
+    if _contains_phrase(text, "eufy") and _contains_phrase(text, "camera") and category == "iot":
         return "Eufy Camera"
-    if "lenovo" in text and category == "computers":
+    if _contains_phrase(text, "lenovo") and category == "computers":
         return "Lenovo Computer"
-    if "dell" in text and category == "computers":
+    if _contains_phrase(text, "dell") and category == "computers":
         return "Dell Computer"
     if fallback and not _is_ip_like_name(fallback):
         return fallback
@@ -133,25 +143,25 @@ def _rank_category_signals(
     if {53, 67, 68}.intersection(port_numbers):
         add("infrastructure", 25, "Core network service ports exposed")
 
-    if any(token in text for token in ("pi-hole", "pihole", "server", "nas", "proxmox", "docker", "raspberry", "pi-probe", "synology")):
+    if _contains_phrase(text, "pi hole", "pihole", "server", "nas", "proxmox", "docker", "raspberry", "pi probe", "synology"):
         add("servers", 55, "Server-oriented hostname or vendor signal")
-    if {22, 53, 80, 443}.intersection(port_numbers) and any(token in text for token in ("pi", "server", "nas", "raspberry")):
+    if {22, 53, 80, 443}.intersection(port_numbers) and _contains_phrase(text, "server", "nas", "raspberry", "pi hole", "pihole"):
         add("servers", 30, "Common server ports paired with server keywords")
 
-    if any(token in text for token in ("iphone", "ipad", "pixel", "android", "phone", "samsung", "galaxy")):
+    if _contains_phrase(text, "iphone", "ipad", "pixel", "android", "phone", "samsung", "galaxy"):
         add("mobile", 70, "Mobile device keyword present")
 
-    if any(token in text for token in ("tv", "smart tv", "chromecast", "roku", "apple tv", "fire tv", "firestick", "playstation", "xbox", "nintendo switch", "google home", "google nest")):
+    if _contains_phrase(text, "tv", "smart tv", "chromecast", "roku", "apple tv", "fire tv", "firestick", "playstation", "xbox", "nintendo switch", "google home", "google nest"):
         add("media", 70, "Media device keyword present")
     if {8008, 8009}.intersection(port_numbers):
         add("media", 30, "Cast-style media control ports exposed")
 
-    if any(token in text for token in ("laptop", "desktop", "pc", "lenovo", "thinkpad", "yoga", "macbook", "workstation", "dell", "latitude", "xps", "inspiron")):
+    if _contains_phrase(text, "laptop", "desktop", "pc", "lenovo", "thinkpad", "yoga", "macbook", "workstation", "dell", "latitude", "xps", "inspiron"):
         add("computers", 70, "Computer keyword present")
     if 3389 in port_numbers or 5900 in port_numbers:
         add("computers", 25, "Remote desktop port exposed")
 
-    if any(token in text for token in ("printer", "camera", "plug", "switch", "echo", "ring", "vacuum", "iot", "tuya", "shelly", "eufy", "homebase", "nest cam")):
+    if _contains_phrase(text, "printer", "camera", "plug", "switch", "echo", "ring", "vacuum", "iot", "tuya", "shelly", "eufy", "homebase", "nest cam"):
         add("iot", 55, "IoT-oriented device keyword present")
     if {554, 8080, 9100, 515, 631}.intersection(port_numbers):
         add("iot", 30, "Common IoT or embedded service ports exposed")
@@ -250,6 +260,47 @@ def _load_scan_state(path: Path) -> dict[str, object]:
 def _save_scan_state(path: Path, state: dict[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+
+
+def _host_identity(host: ET.Element) -> str:
+    for address in host.findall("address"):
+        if address.attrib.get("addrtype") == "ipv4":
+            return address.attrib.get("addr", "").strip()
+    for address in host.findall("address"):
+        if address.attrib.get("addrtype") == "mac":
+            return address.attrib.get("addr", "").strip().lower()
+    hostnames = [item.attrib.get("name", "").strip() for item in host.findall("hostnames/hostname")]
+    return next((name for name in hostnames if name), "")
+
+
+def _merge_discovery_hosts(discovery_xml: Path, service_xml: Path) -> None:
+    if not discovery_xml.exists() or not service_xml.exists():
+        return
+    try:
+        discovery_root = ET.parse(discovery_xml).getroot()
+        service_tree = ET.parse(service_xml)
+        service_root = service_tree.getroot()
+    except (ET.ParseError, OSError):
+        return
+
+    known_hosts = {
+        identity
+        for host in service_root.findall("host")
+        if (identity := _host_identity(host))
+    }
+    appended = False
+    for host in discovery_root.findall("host"):
+        status = host.find("status")
+        if status is not None and status.attrib.get("state") != "up":
+            continue
+        identity = _host_identity(host)
+        if not identity or identity in known_hosts:
+            continue
+        service_root.append(host)
+        known_hosts.add(identity)
+        appended = True
+    if appended:
+        service_tree.write(service_xml, encoding="utf-8", xml_declaration=True)
 
 
 def _update_scan_state(
@@ -968,6 +1019,7 @@ def remove_nmap_override(config: AppConfig, *, ip: str = "", mac: str = "", host
 def run_nmap_inventory_scan(config: AppConfig, now: datetime) -> tuple[bool, str]:
     xml_path = Path(config.nmap_inventory_xml)
     xml_path.parent.mkdir(parents=True, exist_ok=True)
+    discovery_xml_path = xml_path.with_name(f"{xml_path.stem}.discovery.xml")
     state_path = Path(config.nmap_state_json)
     lock_path = state_path.with_suffix(".lock")
     nmap_args = shlex.split(config.nmap_arguments)
@@ -982,7 +1034,9 @@ def run_nmap_inventory_scan(config: AppConfig, now: datetime) -> tuple[bool, str
         nmap_args.extend(["--script", "ssl-cert"])
     if "--script-timeout" not in nmap_args:
         nmap_args.extend(["--script-timeout", "20s"])
+    discovery_args = ["nmap", "-sn", "-PR", config.nmap_targets, "-oX", str(discovery_xml_path)]
     args = ["nmap", *nmap_args, config.nmap_targets, "-oX", str(xml_path)]
+    print(f"Running nmap discovery scan: {' '.join(discovery_args)}", file=sys.stderr, flush=True)
     print(f"Running nmap inventory scan: {' '.join(args)}", file=sys.stderr, flush=True)
     with lock_path.open("w", encoding="utf-8") as lock_handle:
         try:
@@ -998,6 +1052,12 @@ def run_nmap_inventory_scan(config: AppConfig, now: datetime) -> tuple[bool, str
         )
         try:
             try:
+                discovery_process = subprocess.Popen(
+                    discovery_args,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                )
                 process = subprocess.Popen(
                     args,
                     stdout=subprocess.PIPE,
@@ -1014,6 +1074,28 @@ def run_nmap_inventory_scan(config: AppConfig, now: datetime) -> tuple[bool, str
                     error_summary="nmap is not installed",
                 )
                 return False, "nmap is not installed"
+            discovery_output: list[str] = []
+            try:
+                assert discovery_process.stdout is not None
+                for line in discovery_process.stdout:
+                    text = line.rstrip()
+                    discovery_output.append(text)
+                    if (
+                        text.startswith("Starting Nmap")
+                        or text.startswith("Nmap scan report for ")
+                        or text.startswith("Host is up")
+                        or text.startswith("MAC Address:")
+                        or text.startswith("Nmap done:")
+                    ):
+                        print(text, file=sys.stderr, flush=True)
+                discovery_code = discovery_process.wait(timeout=180)
+            except subprocess.TimeoutExpired:
+                discovery_process.kill()
+                discovery_process.wait(timeout=5)
+                discovery_code = 124
+            if discovery_code != 0:
+                discovery_error = next((line for line in reversed(discovery_output) if line.strip()), f"nmap discovery exited with {discovery_code}")
+                print(f"Discovery scan warning: {discovery_error}", file=sys.stderr, flush=True)
             output_lines: list[str] = []
             host_down_count = 0
             scan_report_count = 0
@@ -1075,6 +1157,7 @@ def run_nmap_inventory_scan(config: AppConfig, now: datetime) -> tuple[bool, str
                 )
                 return False, f"Nmap scan failed: {stderr}"
 
+            _merge_discovery_hosts(discovery_xml_path, xml_path)
             completed_at = datetime.now().astimezone()
             duration = time.monotonic() - started_monotonic
             _update_scan_state(

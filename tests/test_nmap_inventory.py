@@ -7,7 +7,13 @@ from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
-from pi_probe_discord.nmap_inventory import export_nmap_inventory_json, remove_nmap_override, run_nmap_inventory_scan, upsert_nmap_override
+from pi_probe_discord.nmap_inventory import (
+    _merge_discovery_hosts,
+    export_nmap_inventory_json,
+    remove_nmap_override,
+    run_nmap_inventory_scan,
+    upsert_nmap_override,
+)
 from tests.test_dashboard import make_config
 
 
@@ -16,7 +22,7 @@ class NmapInventoryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
             config = make_config(base)
-            captured: dict[str, object] = {}
+            captured: dict[str, object] = {"calls": []}
 
             class FakeStdout:
                 def __iter__(self):
@@ -24,7 +30,7 @@ class NmapInventoryTests(unittest.TestCase):
 
             class FakeProcess:
                 def __init__(self, args: list[str]) -> None:
-                    captured["args"] = args
+                    captured["calls"].append(args)
                     self.stdout = FakeStdout()
 
                 def wait(self, timeout: int | None = None) -> int:
@@ -38,12 +44,50 @@ class NmapInventoryTests(unittest.TestCase):
                 ok, _ = run_nmap_inventory_scan(config, datetime(2026, 7, 18, 13, 0, 0))
 
             self.assertTrue(ok)
-            args = captured["args"]
+            self.assertEqual(len(captured["calls"]), 2)
+            discovery_args = captured["calls"][0]
+            args = captured["calls"][1]
+            self.assertIn("-sn", discovery_args)
+            self.assertIn("-PR", discovery_args)
             self.assertIn("-Pn", args)
             self.assertIn("--top-ports", args)
             top_ports_index = args.index("--top-ports")
             self.assertEqual(args[top_ports_index + 1], "200")
             self.assertNotIn("-F", args)
+
+    def test_merge_discovery_hosts_keeps_quiet_discovered_hosts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            discovery_xml = base / "discovery.xml"
+            service_xml = base / "service.xml"
+            discovery_xml.write_text(
+                """<?xml version="1.0"?>
+<nmaprun>
+  <host>
+    <status state="up"/>
+    <address addr="192.168.1.107" addrtype="ipv4"/>
+    <address addr="3C:22:7F:49:3B:7E" addrtype="mac" vendor="Unknown"/>
+    <hostnames><hostname name="bambu-printer"/></hostnames>
+  </host>
+</nmaprun>
+""",
+                encoding="utf-8",
+            )
+            service_xml.write_text(
+                """<?xml version="1.0"?>
+<nmaprun>
+  <host>
+    <status state="up"/>
+    <address addr="192.168.1.51" addrtype="ipv4"/>
+  </host>
+</nmaprun>
+""",
+                encoding="utf-8",
+            )
+            _merge_discovery_hosts(discovery_xml, service_xml)
+            payload = service_xml.read_text(encoding="utf-8")
+            self.assertIn("192.168.1.107", payload)
+            self.assertIn("bambu-printer", payload)
 
     def test_export_nmap_inventory_json_identifies_bambu_by_certificate(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -171,6 +215,7 @@ class NmapInventoryTests(unittest.TestCase):
             self.assertEqual(device["category"], "servers")
             self.assertGreaterEqual(device["identificationScore"], 30)
             self.assertTrue(device["identificationReasons"])
+            self.assertNotEqual(device["name"], "Apple iPad")
 
     def test_export_nmap_inventory_json_recognizes_tcl_tv_and_lenovo_computer(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
