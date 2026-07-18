@@ -2439,8 +2439,7 @@ function actionAuthReady() {
 }
 async function establishActionSession(forcePrompt = false) {
   if (!inventory.apiTokenRequired) return true;
-  const sessionReady = localStorage.getItem(actionSessionKey) === 'true';
-  let current = (!forcePrompt && sessionReady) ? '' : (document.getElementById('apiToken')?.value || getActionToken() || '').trim();
+  let current = (document.getElementById('apiToken')?.value || getActionToken() || '').trim();
   if (!current || forcePrompt) {
     const entered = window.prompt('Enter dashboard action token', forcePrompt ? '' : current);
     if (!entered) return false;
@@ -2452,6 +2451,7 @@ async function establishActionSession(forcePrompt = false) {
     const response = await fetch('/api/auth/session', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
       body: JSON.stringify({ token: current }),
     });
     const result = await response.json();
@@ -2470,7 +2470,6 @@ async function establishActionSession(forcePrompt = false) {
 }
 async function ensureActionToken(forcePrompt = false) {
   if (!inventory.apiTokenRequired) return true;
-  if (!forcePrompt && localStorage.getItem(actionSessionKey) === 'true') return true;
   const current = (document.getElementById('apiToken')?.value || getActionToken() || '').trim();
   if (current && !forcePrompt) return establishActionSession(false);
   return establishActionSession(true);
@@ -2483,6 +2482,7 @@ async function fetchWithActionAuth(url, options = {}, { allowRetry = true } = {}
     };
     return {
       ...options,
+      credentials: 'same-origin',
       headers: nextHeaders,
     };
   };
@@ -2507,6 +2507,9 @@ function initActionTokenControl() {
     renderInventoryMeta();
     renderDeviceMap();
   });
+  if (inventory.apiTokenRequired && input.value.trim()) {
+    void establishActionSession(false);
+  }
 }
 function formatFreshness(value) {
   if (!value) return 'Refresh unknown';

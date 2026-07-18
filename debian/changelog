@@ -1,3 +1,9 @@
+pi-probe-discord (1.1.39-1) unstable; urgency=medium
+
+  * Fix dashboard session-cookie establishment by always authenticating from the saved token instead of trusting stale browser state, and explicitly use same-origin credentials for session and action requests.
+
+ -- Codex Builder <noreply@example.invalid>  Sat, 18 Jul 2026 23:28:00 +0930
+
 pi-probe-discord (1.1.38-1) unstable; urgency=medium
 
   * Establish a signed dashboard session cookie after one valid token entry so protected Ping, Save, and Scan actions stop re-prompting on every click.
