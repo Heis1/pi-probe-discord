@@ -2444,6 +2444,25 @@ function ensureActionToken() {
   renderDeviceMap();
   return Boolean(getActionToken().trim());
 }
+async function fetchWithActionAuth(url, options = {}, { allowRetry = true } = {}) {
+  const buildOptions = () => {
+    const nextHeaders = {
+      ...(options.headers || {}),
+      ...getActionHeaders(),
+    };
+    return {
+      ...options,
+      headers: nextHeaders,
+    };
+  };
+  let response = await fetch(url, buildOptions());
+  if (response.status === 401 && inventory.apiTokenRequired && allowRetry) {
+    setActionToken('');
+    if (!ensureActionToken()) return response;
+    response = await fetch(url, buildOptions());
+  }
+  return response;
+}
 function initActionTokenControl() {
   const wrap = document.getElementById('apiTokenControl');
   const input = document.getElementById('apiToken');
@@ -3262,9 +3281,8 @@ function buildDeviceEditor(device) {
 }
 async function pingDashboardDevice(device) {
   try {
-    const response = await fetch('/api/device/ping', {
+    const response = await fetchWithActionAuth('/api/device/ping', {
       method: 'POST',
-      headers: getActionHeaders(),
       body: JSON.stringify({
         ip: device.ip || '',
         hostname: device.hostname || '',
@@ -3298,9 +3316,8 @@ async function submitDeviceOverride(device, changes) {
         ? { hostname: device.hostname }
         : {};
   try {
-    const response = await fetch('/api/nmap/override', {
+    const response = await fetchWithActionAuth('/api/nmap/override', {
       method: 'POST',
-      headers: getActionHeaders(),
       body: JSON.stringify({
         selector,
         ...changes,
@@ -3329,7 +3346,7 @@ async function triggerNmapScan() {
   button.disabled = true;
   status.textContent = 'Running Nmap scan and refreshing dashboard...';
   try {
-    const response = await fetch('/api/nmap/scan', { method: 'POST', headers: getActionHeaders() });
+    const response = await fetchWithActionAuth('/api/nmap/scan', { method: 'POST' });
     const result = await response.json();
     status.textContent = result.message || 'Nmap scan finished.';
     if (!response.ok || !result.ok) {
@@ -4285,7 +4302,7 @@ def serve_interactive_dashboard(
             if request_path not in {"/api/nmap/scan", "/api/nmap/override", "/api/device/ping"}:
                 self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "message": "Not found"}, no_store=True)
                 return
-            if request_path in {"/api/nmap/scan", "/api/nmap/override"} and not self._actions_authorized():
+            if request_path in {"/api/nmap/scan", "/api/nmap/override", "/api/device/ping"} and not self._actions_authorized():
                 self._send_json(HTTPStatus.UNAUTHORIZED, {"ok": False, "message": "Dashboard action token required"}, no_store=True)
                 return
             if request_path == "/api/nmap/scan":
