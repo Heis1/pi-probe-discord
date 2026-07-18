@@ -1,3 +1,9 @@
+pi-probe-discord (1.1.40-1) unstable; urgency=medium
+
+  * Clear invalid saved dashboard action tokens and immediately prompt for a replacement instead of repeatedly retrying a stale token.
+
+ -- Codex Builder <noreply@example.invalid>  Sat, 18 Jul 2026 23:58:00 +0930
+
 pi-probe-discord (1.1.39-1) unstable; urgency=medium
 
   * Fix dashboard session-cookie establishment by always authenticating from the saved token instead of trusting stale browser state, and explicitly use same-origin credentials for session and action requests.

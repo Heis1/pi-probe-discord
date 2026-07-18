@@ -2457,6 +2457,10 @@ async function establishActionSession(forcePrompt = false) {
     const result = await response.json();
     if (!response.ok || !result.ok) {
       localStorage.removeItem(actionSessionKey);
+      if (!forcePrompt) {
+        setActionToken('');
+        return establishActionSession(true);
+      }
       return false;
     }
     localStorage.setItem(actionSessionKey, 'true');
@@ -2465,6 +2469,10 @@ async function establishActionSession(forcePrompt = false) {
     return true;
   } catch (_) {
     localStorage.removeItem(actionSessionKey);
+    if (!forcePrompt) {
+      setActionToken('');
+      return establishActionSession(true);
+    }
     return false;
   }
 }
