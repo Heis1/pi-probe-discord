@@ -14,6 +14,7 @@ from typing import Any
 from urllib.parse import quote
 
 import requests
+from requests.adapters import HTTPAdapter
 from Cryptodome.Cipher import AES
 from Cryptodome.Util.Padding import pad, unpad
 
@@ -54,27 +55,35 @@ def _load_pinned_certificate_fingerprint(certificate_path: str) -> str:
     return _sha256_hex(ssl.PEM_cert_to_DER_cert(pem))
 
 
-def _fetch_peer_certificate_fingerprint(base_url: str) -> str:
+def _parse_https_endpoint(base_url: str) -> tuple[str, int]:
     match = re.match(r"^https?://([^/:]+)(?::(\d+))?", base_url.strip())
     if match is None:
         raise RuntimeError(f"Could not parse router Web UI URL: {base_url}")
-    host = match.group(1)
-    port = int(match.group(2) or 443)
+    return match.group(1), int(match.group(2) or 443)
+
+
+def _fetch_peer_certificate_fingerprint(base_url: str) -> str:
+    host, port = _parse_https_endpoint(base_url)
     context = ssl._create_unverified_context()
     with socket.create_connection((host, port), timeout=15) as sock:
         with context.wrap_socket(sock, server_hostname=host) as tls_sock:
             return _sha256_hex(tls_sock.getpeercert(binary_form=True))
 
 
-def _verify_pinned_certificate(base_url: str, certificate_path: str) -> None:
-    if not certificate_path:
-        return
-    if not Path(certificate_path).exists():
-        raise RuntimeError(f"Router Web UI CA/certificate file not found: {certificate_path}")
-    expected = _load_pinned_certificate_fingerprint(certificate_path)
-    actual = _fetch_peer_certificate_fingerprint(base_url)
-    if expected != actual:
-        raise RuntimeError("Router Web UI certificate pin mismatch.")
+class _PinnedFingerprintAdapter(HTTPAdapter):
+    def __init__(self, fingerprint: str, **kwargs: Any) -> None:
+        self._fingerprint = fingerprint
+        super().__init__(**kwargs)
+
+    def init_poolmanager(self, connections: int, maxsize: int, block: bool = False, **pool_kwargs: Any) -> None:
+        pool_kwargs.setdefault("assert_fingerprint", self._fingerprint)
+        pool_kwargs.setdefault("cert_reqs", ssl.CERT_NONE)
+        return super().init_poolmanager(connections, maxsize, block=block, **pool_kwargs)
+
+    def proxy_manager_for(self, proxy: str, **proxy_kwargs: Any) -> Any:
+        proxy_kwargs.setdefault("assert_fingerprint", self._fingerprint)
+        proxy_kwargs.setdefault("cert_reqs", ssl.CERT_NONE)
+        return super().proxy_manager_for(proxy, **proxy_kwargs)
 
 
 def _parse_object_response(payload: str, *, collection: bool) -> list[dict[str, str]] | dict[str, str]:
@@ -119,7 +128,14 @@ class _RouterWebUiSession:
 
     def __post_init__(self) -> None:
         self.session = requests.Session()
-        self.session.verify = False
+        if self.ca_file:
+            certificate_path = Path(self.ca_file)
+            if not certificate_path.exists():
+                raise RuntimeError(f"Router Web UI CA/certificate file not found: {self.ca_file}")
+            fingerprint = _load_pinned_certificate_fingerprint(self.ca_file)
+            if _fetch_peer_certificate_fingerprint(self.base_url) != fingerprint:
+                raise RuntimeError("Router Web UI certificate pin mismatch.")
+            self.session.mount(self.base_url, _PinnedFingerprintAdapter(fingerprint))
         self.headers = {
             "User-Agent": "Mozilla/5.0",
             "Referer": f"{self.base_url}/",
@@ -134,8 +150,6 @@ class _RouterWebUiSession:
         self._token = "0"
 
     def login(self) -> None:
-        if self.ca_file:
-            _verify_pinned_certificate(self.base_url, self.ca_file)
         self.session.get(f"{self.base_url}/", headers=self.headers, timeout=15)
         parm_response = self.session.post(
             f"{self.base_url}/cgi/getParm?_={int(time.time() * 1000)}",

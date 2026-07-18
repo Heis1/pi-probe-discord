@@ -1,3 +1,9 @@
+pi-probe-discord (1.1.30-1) unstable; urgency=medium
+
+  * Enforce router Web UI HTTPS certificate pinning on every authenticated request instead of falling back to verify=false after a one-time precheck.
+
+ -- Codex Builder <noreply@example.invalid>  Sat, 18 Jul 2026 20:48:00 +0930
+
 pi-probe-discord (1.1.29-1) unstable; urgency=medium
 
   * Fix router Web UI certificate pinning by importing pathlib.Path for pinned certificate file handling.
