@@ -78,7 +78,7 @@ class NmapInventoryTests(unittest.TestCase):
 <nmaprun>
   <host>
     <status state="up"/>
-    <address addr="192.168.1.51" addrtype="ipv4"/>
+    <address addr="192.168.1.50" addrtype="ipv4"/>
   </host>
 </nmaprun>
 """,
@@ -196,7 +196,7 @@ class NmapInventoryTests(unittest.TestCase):
 <nmaprun args="nmap -sV 192.168.1.0/24">
   <host>
     <status state="up"/>
-    <address addr="192.168.1.51" addrtype="ipv4"/>
+    <address addr="192.168.1.50" addrtype="ipv4"/>
     <hostnames><hostname name="pi.hole"/></hostnames>
     <ports>
       <port protocol="tcp" portid="53"><state state="open"/><service name="domain"/></port>
@@ -506,7 +506,7 @@ class NmapInventoryTests(unittest.TestCase):
 <nmaprun args="nmap -sV 192.168.1.0/24">
   <host>
     <status state="up"/>
-    <address addr="192.168.1.51" addrtype="ipv4"/>
+    <address addr="192.168.1.50" addrtype="ipv4"/>
     <ports><port protocol="tcp" portid="443"><state state="open"/><service name="https"/></port></ports>
   </host>
   <host>
@@ -564,7 +564,7 @@ class NmapInventoryTests(unittest.TestCase):
             config = make_config(base)
             message = upsert_nmap_override(
                 config,
-                ip="192.168.1.51",
+                ip="192.168.1.50",
                 name="Pi Probe",
                 category="servers",
                 location="Downstairs",
@@ -573,14 +573,14 @@ class NmapInventoryTests(unittest.TestCase):
             )
             self.assertIn("Saved Nmap override", message)
             payload = json.loads(Path(config.nmap_overrides_json).read_text(encoding="utf-8"))
-            self.assertEqual(payload["devices"][0]["ip"], "192.168.1.51")
+            self.assertEqual(payload["devices"][0]["ip"], "192.168.1.50")
             self.assertEqual(payload["devices"][0]["name"], "Pi Probe")
             self.assertEqual(payload["devices"][0]["category"], "servers")
             self.assertEqual(payload["devices"][0]["location"], "Downstairs")
             self.assertEqual(payload["devices"][0]["role"], "server")
             self.assertEqual(payload["devices"][0]["uplinkIp"], "192.168.1.115")
 
-            message = remove_nmap_override(config, ip="192.168.1.51")
+            message = remove_nmap_override(config, ip="192.168.1.50")
             self.assertIn("Removed Nmap override", message)
             payload = json.loads(Path(config.nmap_overrides_json).read_text(encoding="utf-8"))
             self.assertEqual(payload["devices"], [])

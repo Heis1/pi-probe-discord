@@ -1,3 +1,9 @@
+pi-probe-discord (1.2.1-1) unstable; urgency=medium
+
+  * Parse native Ookla results after the one-time license banner and remove deployment-specific example data.
+
+ -- Codex Builder <noreply@example.invalid>  Sun, 19 Jul 2026 22:45:00 +0930
+
 pi-probe-discord (1.2.0-1) unstable; urgency=medium
 
   * Major release: add live router keep-alive monitoring, router SMTP log ingest,

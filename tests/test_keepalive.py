@@ -16,7 +16,7 @@ class KeepaliveTests(unittest.TestCase):
             state_path = Path(tmp) / "latest.json"
             config = SimpleNamespace(
                 keepalive_enabled=True,
-                keepalive_devices_json='[{"name":"VR2100 Upstairs","host":"192.168.1.1"}]',
+                keepalive_devices_json='[{"name":"Test Router","host":"192.168.1.1"}]',
                 keepalive_state_json=str(state_path),
                 keepalive_timeout_seconds=1,
             )
@@ -25,7 +25,7 @@ class KeepaliveTests(unittest.TestCase):
                 state = run_keepalive(config)
             self.assertTrue(state["devices"][0]["up"])
             self.assertEqual(state["devices"][0]["latencyMs"], 1.23)
-            self.assertEqual(json.loads(state_path.read_text(encoding="utf-8"))["devices"][0]["name"], "VR2100 Upstairs")
+            self.assertEqual(json.loads(state_path.read_text(encoding="utf-8"))["devices"][0]["name"], "Test Router")
 
     def test_load_keepalive_state_returns_empty_before_first_check(self) -> None:
         config = SimpleNamespace(keepalive_enabled=True, keepalive_state_json="/does/not/exist")

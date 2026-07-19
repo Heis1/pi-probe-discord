@@ -13,6 +13,18 @@ except ImportError:
     speedtest = None
 
 
+def _load_ookla_result(stdout: str) -> dict[str, object]:
+    """Ookla can print a one-time license notice before its JSON result."""
+    for line in reversed(stdout.splitlines()):
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict) and "download" in payload and "upload" in payload and "ping" in payload:
+            return payload
+    raise ValueError("Ookla Speedtest did not return a JSON result.")
+
+
 def _official_speedtest_cli() -> SpeedResult | None:
     """Use Ookla's native client when installed; speedtest-cli is unreliable on fast links."""
     binary = Path(os.environ.get("PI_PROBE_OOKLA_SPEEDTEST_BIN", "/usr/local/bin/ookla-speedtest"))
@@ -24,7 +36,7 @@ def _official_speedtest_cli() -> SpeedResult | None:
         if server_id:
             command.extend(["--server-id", server_id])
         completed = subprocess.run(command, check=True, capture_output=True, text=True, timeout=120)
-        payload = json.loads(completed.stdout)
+        payload = _load_ookla_result(completed.stdout)
         download = float(payload["download"]["bandwidth"]) * 8 / 1_000_000
         upload = float(payload["upload"]["bandwidth"]) * 8 / 1_000_000
         ping = float(payload["ping"]["latency"])

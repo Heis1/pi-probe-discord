@@ -290,10 +290,10 @@ class DashboardTests(unittest.TestCase):
                                 "lastSeen": "2026-06-06T10:15:00",
                             },
                             {
-                                "id": "192.168.1.51",
+                                "id": "192.168.1.50",
                                 "name": "Pi-hole",
                                 "hostname": "pi.hole",
-                                "ip": "192.168.1.51",
+                                "ip": "192.168.1.50",
                                 "mac": "AA:BB:CC:DD:EE:FF",
                                 "vendor": "Raspberry Pi",
                                 "status": "up",
@@ -371,7 +371,7 @@ class DashboardTests(unittest.TestCase):
                     config.interactive_dashboard_file,
                     {
                         "action": "set",
-                        "selector": {"ip": "192.168.1.51", "mac": "AA:BB:CC:DD:EE:FF", "hostname": "pi.hole"},
+                        "selector": {"ip": "192.168.1.50", "mac": "AA:BB:CC:DD:EE:FF", "hostname": "test-host"},
                         "name": "Office Pi-hole",
                         "category": "servers",
                     },
@@ -397,8 +397,8 @@ class DashboardTests(unittest.TestCase):
                     config.interactive_dashboard_file,
                     {
                         "action": "set",
-                        "selector": {"ip": "192.168.1.101", "mac": "78:32:1B:BD:41:08", "hostname": "dlink"},
-                        "name": "D-Link International",
+                        "selector": {"ip": "192.168.1.101", "mac": "02:00:00:00:00:08", "hostname": "access-point"},
+                        "name": "Example Access Point",
                         "category": "servers",
                     },
                 )
@@ -407,9 +407,9 @@ class DashboardTests(unittest.TestCase):
             upsert_mock.assert_called_once_with(
                 config,
                 ip="192.168.1.101",
-                mac="78:32:1B:BD:41:08",
-                hostname="dlink",
-                name="D-Link International",
+                mac="02:00:00:00:00:08",
+                hostname="access-point",
+                name="Example Access Point",
                 category="servers",
                 role="",
                 location="",

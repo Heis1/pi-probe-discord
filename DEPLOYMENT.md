@@ -162,8 +162,8 @@ Example configuration:
 ```bash
 PI_PROBE_TOPOLOGY_ENABLED="true"
 PI_PROBE_TOPOLOGY_NODES_JSON='[
-  {"id":"router","name":"Main Router","host":"192.168.1.1","management_ip":"192.168.1.1","community":"public","role":"router","location":"Main Network"},
-  {"id":"extender","name":"Downstairs Extender","host":"192.168.1.115","management_ip":"192.168.1.115","community":"public","role":"extender","location":"Downstairs"}
+  {"id":"router","name":"Main Router","host":"192.168.1.1","management_ip":"192.168.1.1","community":"public","role":"router"},
+  {"id":"access-point","name":"Access Point","host":"192.168.1.2","management_ip":"192.168.1.2","community":"public","role":"access_point"}
 ]'
 PI_PROBE_TOPOLOGY_CACHE_JSON="/var/lib/pi-probe-discord/topology/latest.json"
 PI_PROBE_TOPOLOGY_REFRESH_MINUTES="30"

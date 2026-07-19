@@ -26,13 +26,13 @@ class TopologyTests(unittest.TestCase):
                 ("192.168.1.1", ".1.3.6.1.2.1.31.1.1.1.1"): ".1.3.6.1.2.1.31.1.1.1.1.1 = STRING: br0\n.1.3.6.1.2.1.31.1.1.1.1.2 = STRING: lan1\n",
                 ("192.168.1.1", ".1.3.6.1.2.1.2.2.1.2"): ".1.3.6.1.2.1.2.2.1.2.1 = STRING: br0\n.1.3.6.1.2.1.2.2.1.2.2 = STRING: lan1\n",
                 ("192.168.1.1", ".1.3.6.1.2.1.2.2.1.6"): ".1.3.6.1.2.1.2.2.1.6.1 = Hex-STRING: AA BB CC DD EE 01\n.1.3.6.1.2.1.2.2.1.6.2 = Hex-STRING: AA BB CC DD EE 02\n",
-                ("192.168.1.1", ".1.3.6.1.2.1.17.4.3.1.2"): ".1.3.6.1.2.1.17.4.3.1.2.120.50.27.189.65.8 = INTEGER: 2\n",
+                ("192.168.1.1", ".1.3.6.1.2.1.17.4.3.1.2"): ".1.3.6.1.2.1.17.4.3.1.2.2.0.0.0.0.8 = INTEGER: 2\n",
                 ("192.168.1.1", ".1.3.6.1.2.1.17.7.1.2.2.1.2"): "",
                 ("192.168.1.115", ".1.3.6.1.2.1.17.1.4.1.2"): ".1.3.6.1.2.1.17.1.4.1.2.1 = INTEGER: 1\n",
                 ("192.168.1.115", ".1.3.6.1.2.1.31.1.1.1.1"): ".1.3.6.1.2.1.31.1.1.1.1.1 = STRING: wlan0\n",
                 ("192.168.1.115", ".1.3.6.1.2.1.2.2.1.2"): ".1.3.6.1.2.1.2.2.1.2.1 = STRING: wlan0\n",
-                ("192.168.1.115", ".1.3.6.1.2.1.2.2.1.6"): ".1.3.6.1.2.1.2.2.1.6.1 = Hex-STRING: 78 32 1B BD 41 08\n",
-                ("192.168.1.115", ".1.3.6.1.2.1.17.4.3.1.2"): ".1.3.6.1.2.1.17.4.3.1.2.238.25.135.150.158.124 = INTEGER: 1\n",
+                ("192.168.1.115", ".1.3.6.1.2.1.2.2.1.6"): ".1.3.6.1.2.1.2.2.1.6.1 = Hex-STRING: 02 00 00 00 00 08\n",
+                ("192.168.1.115", ".1.3.6.1.2.1.17.4.3.1.2"): ".1.3.6.1.2.1.17.4.3.1.2.2.0.0.0.0.9 = INTEGER: 1\n",
                 ("192.168.1.115", ".1.3.6.1.2.1.17.7.1.2.2.1.2"): "",
             }
 
@@ -56,8 +56,8 @@ class TopologyTests(unittest.TestCase):
 
     def test_apply_topology_to_inventory_assigns_extender_location_automatically(self) -> None:
         devices = [
-            {"id": "192.168.1.115", "ip": "192.168.1.115", "mac": "78:32:1B:BD:41:08", "name": "D-Link", "category": "infrastructure", "categoryLabel": "Infrastructure"},
-            {"id": "192.168.1.102", "ip": "192.168.1.102", "mac": "EE:19:87:96:9E:7C", "name": "Samsung Galaxy Phone", "category": "mobile", "categoryLabel": "Mobile"},
+            {"id": "192.168.1.115", "ip": "192.168.1.115", "mac": "02:00:00:00:00:08", "name": "Example Access Point", "category": "infrastructure", "categoryLabel": "Infrastructure"},
+            {"id": "192.168.1.102", "ip": "192.168.1.102", "mac": "02:00:00:00:00:09", "name": "Example Phone", "category": "mobile", "categoryLabel": "Mobile"},
         ]
         topology = {
             "available": True,
@@ -80,8 +80,8 @@ class TopologyTests(unittest.TestCase):
                     "role": "extender",
                     "location": "Downstairs",
                     "parentNodeId": "router",
-                    "interfaces": [{"mac": "78:32:1b:bd:41:08"}],
-                    "fdb": [{"mac": "ee:19:87:96:9e:7c"}],
+                    "interfaces": [{"mac": "02:00:00:00:00:08"}],
+                    "fdb": [{"mac": "02:00:00:00:00:09"}],
                     "depth": 1,
                 },
             ],
@@ -127,8 +127,8 @@ class TopologyTests(unittest.TestCase):
                 "hostTable": [
                     {
                         "ip": "192.168.1.100",
-                        "mac": "dc:a6:32:37:7a:6a",
-                        "hostName": "raspberrypi",
+                        "mac": "02:00:00:00:00:0a",
+                        "hostName": "test-host",
                         "active": True,
                         "sourceNodeId": "router-webui",
                         "sourceManagementIp": "192.168.1.1",
@@ -144,12 +144,12 @@ class TopologyTests(unittest.TestCase):
                 snapshot = collect_topology_snapshot(config, datetime(2026, 7, 18, 16, 0, 0))
             self.assertTrue(snapshot["available"])
             self.assertEqual(snapshot["source"], "snmp-bridge-fdb+router-webui")
-            self.assertEqual(snapshot["hostTable"][0]["hostName"], "raspberrypi")
+            self.assertEqual(snapshot["hostTable"][0]["hostName"], "test-host")
             self.assertEqual(snapshot["nodes"][0]["name"], "Archer VR2100")
 
     def test_apply_topology_to_inventory_assigns_router_uplink_from_host_table(self) -> None:
         devices = [
-            {"id": "192.168.1.100", "ip": "192.168.1.100", "mac": "DC:A6:32:37:7A:6A", "name": "Pi-hole", "category": "servers", "categoryLabel": "Servers"},
+            {"id": "192.168.1.100", "ip": "192.168.1.100", "mac": "02:00:00:00:00:0A", "name": "Example Server", "category": "servers", "categoryLabel": "Servers"},
         ]
         topology = {
             "available": True,
@@ -169,8 +169,8 @@ class TopologyTests(unittest.TestCase):
             "hostTable": [
                 {
                     "ip": "192.168.1.100",
-                    "mac": "dc:a6:32:37:7a:6a",
-                    "hostName": "raspberrypi",
+                    "mac": "02:00:00:00:00:0a",
+                    "hostName": "test-host",
                     "active": True,
                     "sourceNodeId": "router-webui",
                     "sourceManagementIp": "192.168.1.1",

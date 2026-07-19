@@ -27,12 +27,12 @@ class RouterWebUiTests(unittest.TestCase):
                 mock_call.side_effect = [
                     {"modelName": "Archer VR2100", "description": "Router"},
                     {"userName": "admin"},
-                    [{"IPAddress": "192.168.1.100", "MACAddress": "DC:A6:32:37:7A:6A", "hostName": "raspberrypi", "active": "1"}],
+                    [{"IPAddress": "192.168.1.100", "MACAddress": "02:00:00:00:00:0A", "hostName": "test-host", "active": "1"}],
                 ]
                 snapshot = collect_router_webui_snapshot(config, datetime(2026, 7, 18, 18, 0, 0).isoformat())
 
             self.assertTrue(snapshot["available"])
-            self.assertEqual(snapshot["hostTable"][0]["hostName"], "raspberrypi")
+            self.assertEqual(snapshot["hostTable"][0]["hostName"], "test-host")
 
     def test_router_webui_session_mounts_pinned_fingerprint_adapter(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

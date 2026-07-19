@@ -260,7 +260,7 @@ def load_config(base_dir: Path | None = None, require_webhook: bool = True) -> A
         keepalive_state_json=os.environ.get("PI_PROBE_KEEPALIVE_STATE_JSON", str(DEFAULT_KEEPALIVE_STATE_JSON)),
         keepalive_timeout_seconds=max(1, int(os.environ.get("PI_PROBE_KEEPALIVE_TIMEOUT_SECONDS", "2"))),
         smtp_log_enabled=_env_bool("PI_PROBE_SMTP_LOG_ENABLED", False),
-        smtp_log_bind_host=os.environ.get("PI_PROBE_SMTP_LOG_BIND_HOST", "192.168.1.51").strip() or "127.0.0.1",
+        smtp_log_bind_host=os.environ.get("PI_PROBE_SMTP_LOG_BIND_HOST", "127.0.0.1").strip() or "127.0.0.1",
         smtp_log_port=max(1, int(os.environ.get("PI_PROBE_SMTP_LOG_PORT", "25"))),
         smtp_log_directory=os.environ.get("PI_PROBE_SMTP_LOG_DIRECTORY", str(DEFAULT_DATA_DIR / "router-mail")),
         discord_bot_token=os.environ.get("PI_PROBE_DISCORD_BOT_TOKEN", "").strip(),
