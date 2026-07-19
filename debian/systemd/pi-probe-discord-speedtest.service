@@ -7,4 +7,6 @@ Wants=network-online.target
 Type=oneshot
 WorkingDirectory=/opt/pi-probe-discord
 Environment=MPLCONFIGDIR=/var/lib/pi-probe-discord/.config/matplotlib
+# The native Ookla client requires HOME for its config and license state.
+Environment=HOME=/var/lib/pi-probe-discord
 ExecStart=/usr/bin/pi-probe-discord speedtest-only

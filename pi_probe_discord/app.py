@@ -44,6 +44,9 @@ from .router_snmp import (
     run_router_snmp_listener_limited,
 )
 from .speedtest_runner import run_speedtest_measurement
+from .keepalive import run_keepalive
+from .smtp_log_receiver import run_smtp_log_receiver
+from .bot_reporter import post_bot_report
 from .storage import build_report, init_database, load_history_from_db, load_probe_runs_from_db, save_run_record
 from .system_checks import collect_pihole_info, run_updates
 from .version_check import version_status_line
@@ -288,6 +291,7 @@ def run_mode(mode: str) -> int:
         firewall_snapshot=firewall_snapshot,
         router_snapshot=router_snapshot,
         dashboard_summary=dashboard_summary,
+        include_diagnostics=(mode == "full"),
     )
     if _webhook_configured(config):
         try:
@@ -297,6 +301,8 @@ def run_mode(mode: str) -> int:
                 post_webhook_json(config, payload)
         except requests.RequestException as exc:
             raise RuntimeError(f"Discord webhook POST failed: {exc}") from exc
+    elif config.discord_bot_token:
+        post_bot_report(config, payload, config.chart_file if speed_result.chart_generated else None)
 
     return 0
 
@@ -304,6 +310,19 @@ def run_mode(mode: str) -> int:
 def render_report(days: int) -> str:
     config = load_config(require_webhook=False)
     return build_report(config, days)
+
+
+def run_keepalive_check() -> str:
+    config = load_config(require_webhook=False)
+    state = run_keepalive(config)
+    return json.dumps(state, indent=2)
+
+
+def run_smtp_log_listener() -> int:
+    config = load_config(require_webhook=False)
+    if not config.smtp_log_enabled:
+        raise RuntimeError("Set PI_PROBE_SMTP_LOG_ENABLED=true before starting the SMTP log receiver.")
+    return run_smtp_log_receiver(config)
 
 
 def render_firewall_report(window_hours: int | None = None, as_json: bool = False) -> str:

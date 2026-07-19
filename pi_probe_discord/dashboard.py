@@ -22,6 +22,7 @@ from urllib.parse import urlparse
 
 from .baselines import average, history_points_for_window
 from .firewall import FirewallConfig, FirewallSnapshot, collect_firewall_snapshot
+from .keepalive import load_keepalive_state
 from .models import AppConfig, RouterSnapshot, SpeedResult
 
 try:
@@ -162,20 +163,24 @@ def _is_extender_hint(text: str) -> bool:
 
 def _key_device_role(row: NmapDeviceRow) -> str:
     text = f"{row.name} {row.hostname} {row.vendor} {row.ip}".lower()
+    if row.role in {"router", "extender", "access_point", "mesh", "switch", "bridge"}:
+        return row.role.replace("_", " ")
     if "pi-probe" in text:
         return "pi-probe server"
     if _is_extender_hint(text):
         return "extender"
     if row.ip.endswith(".1") or ("router" in text and row.category == "infrastructure"):
         return "router"
+    if row.category == "infrastructure":
+        return "infrastructure"
+    if row.category == "servers":
+        return "server"
     return ""
 
 
 def _event_matches_key_device(event: RouterEvent, key_devices: list[dict[str, str]]) -> bool:
     text = f"{event.source} {event.message} {event.event_type}".lower()
     event_type = event.event_type.lower()
-    if _is_extender_hint(text):
-        return True
     if "linkdown" in event_type or event_type in {"snmpv2-mib::warmstart", "snmpv2-mib::coldstart"}:
         return True
     for device in key_devices:
@@ -199,6 +204,7 @@ def build_network_diagnosis(
     now: datetime,
     router_snapshot: RouterSnapshot | None = None,
     config: AppConfig | None = None,
+    keepalive: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     scanned_at = _coerce_datetime(nmap_meta.get("scannedAt"))
     scan_age_label = _format_relative_age(now, scanned_at)
@@ -342,7 +348,7 @@ def build_network_diagnosis(
         )
         indicators.append(f"Diagnosis is scoped to key devices only: {monitored}.")
     else:
-        indicators.append("Diagnosis is scoped to key devices only, but no router, pi-probe server, or extender was confidently identified in inventory.")
+        indicators.append("No core infrastructure or server device was confidently identified in the inventory.")
     if not nmap_rows:
         indicators.append("No Nmap inventory is available yet, so the dashboard cannot confirm whether the extender is currently visible.")
     elif scanned_at is None:
@@ -366,7 +372,7 @@ def build_network_diagnosis(
         )
     if ignored_context_events:
         indicators.append(
-            f"{ignored_context_events} non-key device event(s) were ignored because they did not involve the router, pi-probe server, or extender."
+            f"{ignored_context_events} client-device event(s) were ignored because they did not involve monitored infrastructure or servers."
         )
     if router_snapshot is not None and router_snapshot.link_down_events:
         indicators.append(f"Router SNMP recorded {router_snapshot.link_down_events} linkDown trap(s) in the last {router_snapshot.window_hours} hours.")
@@ -385,20 +391,20 @@ def build_network_diagnosis(
         )
         indicators.append(f"Extender-like device(s) currently visible in inventory: {visible}.")
     elif nmap_rows:
-        indicators.append("No currently visible device in the Nmap inventory looks like a D-Link extender or access point.")
+        indicators.append("No additional unmanaged access point is visible in the current inventory.")
 
     recommendations = [
-        "Run a fresh Nmap scan and compare whether the extender reappears with the same IP, MAC, and open ports.",
+        "Run a fresh Nmap scan and compare whether monitored infrastructure and servers remain present.",
         "Review the event table around the outage time for host-missing, linkDown, warmStart, or coldStart entries.",
         "Capture a /networkdiag report before power-cycling gear if the fault repeats.",
     ]
-    if not suspect_devices:
-        recommendations.insert(0, "Add an Nmap override naming the extender clearly once it is back online, so future disappearance events are easier to identify.")
+    if not key_devices:
+        recommendations.insert(0, "Assign roles to core infrastructure and server devices so future faults can be scoped correctly.")
 
     status = "healthy"
     status_label = "No Current Fault"
-    headline = "No strong extender fault indicators are visible in the recent telemetry."
-    likely_cause = "No specific LAN-side fault is strongly indicated."
+    headline = "Core network devices are present and no current infrastructure fault is detected."
+    likely_cause = "No current router, access-point, or server fault is indicated."
     confidence = "low"
     confidence_label = "Low confidence"
 
@@ -464,6 +470,24 @@ def build_network_diagnosis(
         confidence = "medium"
         confidence_label = "Medium confidence"
 
+    live_keepalive = (keepalive or {}).get("devices", []) if isinstance(keepalive, dict) else []
+    core_normalised = bool(live_keepalive) and inventory_fresh and all(bool(device.get("up")) for device in live_keepalive if isinstance(device, dict))
+    if core_normalised:
+        status = "healthy"
+        status_label = "Normal"
+        headline = "All monitored core devices are reachable and present in the latest inventory."
+        likely_cause = "No live router, access-point, infrastructure, or server fault is detected."
+        confidence = "high"
+        confidence_label = "Live checks"
+        host_missing = []
+        port_closed = []
+        restart_events = []
+        link_events = []
+        suspect_events = []
+        context_fault_events = []
+        has_historical_fault_context = False
+        recommendations = ["No action is required. Historical events remain available in the event history if you need to investigate them."]
+
     suspect_names = sorted(
         {
             row.name or row.hostname or row.ip
@@ -522,8 +546,8 @@ def build_network_diagnosis(
             evidence_items.append(
                 {
                     "label": "No strong evidence",
-                    "value": "Saved telemetry does not yet isolate a specific device-level failure.",
-                    "hint": "Run a scan during or immediately after the next outage.",
+            "value": "No live core-network fault is detected.",
+                    "hint": "Current keep-alive checks and the latest inventory are normal.",
                 }
             )
 
@@ -543,6 +567,7 @@ def build_network_diagnosis(
         "scanAge": scan_age_label,
         "scanAgeMinutes": scan_age_minutes,
         "inventoryDeviceCount": len(nmap_rows),
+        "coreNormalised": core_normalised,
         "infrastructureCount": infra_count,
         "hostMissingCount": len(host_missing),
         "portClosedCount": len(port_closed),
@@ -578,7 +603,7 @@ def build_network_diagnosis(
                 "source": event.source,
                 "message": event.message,
             }
-            for event in (suspect_events or host_missing or port_closed or link_events or restart_events or context_fault_events)[-5:]
+            for event in (suspect_events or host_missing or port_closed or link_events or restart_events)[-5:]
         ],
         "evidenceItems": evidence_items,
         "indicators": indicators,
@@ -1376,6 +1401,7 @@ def _build_dashboard_payload(
     latest_pihole_at = pihole_rows[-1].timestamp if pihole_rows else None
     inventory_scanned_at = _coerce_datetime(nmap_meta.get("scannedAt"))
     diagnosis_updated_at = _latest_timestamp([latest_event_at, inventory_scanned_at, latest_pihole_at, latest_speed_at]) or generated_at
+    keepalive = load_keepalive_state(config) if config is not None else {"enabled": False, "checkedAt": "", "devices": []}
 
     metadata = {
         "service": SERVICE_NAME,
@@ -1392,6 +1418,7 @@ def _build_dashboard_payload(
             "inventory": inventory_scanned_at.isoformat() if inventory_scanned_at is not None else "",
             "pihole": latest_pihole_at.isoformat() if latest_pihole_at is not None else "",
             "diagnosis": diagnosis_updated_at.isoformat(),
+            "keepalive": str(keepalive.get("checkedAt") or ""),
         },
     }
     diagnosis = build_network_diagnosis(
@@ -1400,6 +1427,7 @@ def _build_dashboard_payload(
         nmap_meta,
         now=datetime.now().astimezone(),
         config=config,
+        keepalive=keepalive,
     )
     firewall_snapshot: FirewallSnapshot | None = None
     firewall_error = ""
@@ -1425,6 +1453,7 @@ def _build_dashboard_payload(
         "pihole": pihole_data,
         "devices": device_data,
         "firewall": firewall_data,
+        "keepalive": keepalive,
         "inventory": {
             "scannedAt": nmap_meta.get("scannedAt", ""),
             "network": nmap_meta.get("network", ""),
@@ -1677,7 +1706,30 @@ body.theme-clean { background: linear-gradient(180deg, #f8fafc, var(--bg)); }
 label { display:block; color: var(--muted); font-size: 12px; font-weight: 700; margin-bottom: 6px; text-transform: uppercase; letter-spacing: .06em; }
 select, input { width: 100%; border: 1px solid var(--border); background: rgba(2,6,23,.28); color: var(--text); border-radius: 12px; padding: 10px 11px; }
 body.theme-clean select, body.theme-clean input { background: rgba(255,255,255,.72); }
-.diag-section, .firewall-section { margin-bottom: 18px; }
+.diag-section, .firewall-section, .keepalive-section { margin-bottom: 18px; }
+.diag-shell.normal .diag-stat, .diag-shell.normal .diag-actions-row, .diag-shell.normal .diag-grid { display:none; }
+.diag-shell.normal .diag-hero { border-color:rgba(34,197,94,.48); background:linear-gradient(135deg, rgba(20,83,45,.36), rgba(8,15,28,.42)); }
+.diag-shell.normal .diag-cause { color:#86efac; font-size:28px; }
+.keepalive-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px; }
+.keepalive-card { border:1px solid var(--border); border-left:4px solid #94a3b8; border-radius:14px; padding:13px; background:var(--panel-2); }
+.keepalive-card.up { border-left-color:var(--accent-2); }
+.keepalive-card.down { border-left-color:var(--danger); }
+.keepalive-status { margin-top:8px; font-size:12px; font-weight:900; text-transform:uppercase; letter-spacing:.07em; }
+.keepalive-meta { margin-top:5px; color:var(--muted); font-size:12px; }
+.security-grid { display:grid; grid-template-columns:1.3fr repeat(3,minmax(120px,.55fr)); gap:12px; }
+.security-hero { border:1px solid var(--border); border-left:4px solid var(--accent-2); border-radius:16px; padding:15px; background:var(--panel-2); }
+.security-hero.attention { border-left-color:var(--danger); }
+.security-kicker { color:var(--muted); font-size:11px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; }
+.security-title { margin-top:6px; font-size:21px; font-weight:900; letter-spacing:-.025em; }
+.security-copy { margin-top:6px; color:var(--muted); font-size:13px; line-height:1.4; }
+.security-stat { border:1px solid var(--border); border-radius:16px; padding:14px; background:var(--panel-2); }
+.security-stat b { display:block; margin-top:8px; font-size:23px; }
+.security-stat span { color:var(--muted); font-size:11px; font-weight:800; letter-spacing:.07em; text-transform:uppercase; }
+.security-actions { margin-top:14px; display:grid; gap:8px; }
+.security-action { border:1px solid var(--border); border-radius:12px; padding:11px 12px; background:rgba(2,6,23,.16); display:flex; justify-content:space-between; gap:12px; }
+.security-action b { font-size:13px; }
+.security-action span { color:var(--muted); font-size:12px; text-align:right; }
+.security-details { margin-top:12px; color:var(--muted); font-size:12px; }
 .grid { display:grid; grid-template-columns: minmax(0, 1.3fr) minmax(360px, .95fr); gap: 18px; align-items:start; }
 .stack { display:grid; gap: 18px; }
 .panel { padding: 18px; }
@@ -2040,9 +2092,9 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
         <div class="chip" id="refreshStatus"></div>
       </div>
       <div class="hero-grid">
-        <div class="kpi"><div class="label">Median download</div><div class="value" id="kpiMedian"></div><div class="sub">Typical observed downstream performance</div><div class="sub" id="kpiMedianFreshness"></div></div>
-        <div class="kpi"><div class="label">Average upload</div><div class="value" id="kpiUpload"></div><div class="sub">Mean upload across visible tests</div><div class="sub" id="kpiUploadFreshness"></div></div>
-        <div class="kpi"><div class="label">Average ping</div><div class="value" id="kpiPing"></div><div class="sub">Mean latency across visible tests</div><div class="sub" id="kpiPingFreshness"></div></div>
+        <div class="kpi"><div class="label">Latest download</div><div class="value" id="kpiLatestDown"></div><div class="sub" id="kpiMedian"></div><div class="sub" id="kpiMedianFreshness"></div></div>
+        <div class="kpi"><div class="label">Latest upload</div><div class="value" id="kpiLatestUp"></div><div class="sub" id="kpiUpload"></div><div class="sub" id="kpiUploadFreshness"></div></div>
+        <div class="kpi"><div class="label">Latest ping</div><div class="value" id="kpiLatestPing"></div><div class="sub" id="kpiPing"></div><div class="sub" id="kpiPingFreshness"></div></div>
         <div class="kpi"><div class="label">Reliability floor</div><div class="value" id="kpiFloor"></div><div class="sub">5th percentile download result</div><div class="sub" id="kpiFloorFreshness"></div></div>
       </div>
     </div>
@@ -2058,6 +2110,7 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
         <div class="chip" id="kpiStreak"></div>
       </div>
       <div class="copy" id="worstWindow"></div>
+      <div class="action-row"><button id="speedtestButton" class="action-button" type="button">Run speed test</button><div id="speedtestStatus" class="helper-text"></div></div>
       <div class="linkline" id="dashboardLinkWrap"></div>
     </div>
   </section>
@@ -2080,12 +2133,12 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
   </section>
 
   <section class="panel diag-section">
-    <div class="panel-head"><div><h2>Network Fault Diagnosis</h2><p>Correlates router traps, device scan changes, and inventory freshness to highlight likely LAN-side failures.</p></div><div class="panel-stamp" id="diagnosisFreshness"></div></div>
+    <div class="panel-head"><div><h2>Core Network Health</h2><p>Monitors routers, access points, infrastructure, and servers. Mobile and client-device churn is excluded.</p></div><div class="panel-stamp" id="diagnosisFreshness"></div></div>
     <div class="diag-shell">
       <div class="diag-topline">
         <div class="diag-hero">
           <div class="diag-hero-head">
-            <div class="diag-kicker">Likely Cause</div>
+            <div class="diag-kicker">Current State</div>
             <div class="diag-state-pill" id="diagState"></div>
           </div>
           <div class="diag-cause" id="diagCause"></div>
@@ -2097,21 +2150,21 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
           <div class="mini" id="diagConfidenceNote"></div>
         </div>
         <div class="diag-stat">
-          <div class="label">Primary Suspect</div>
+          <div class="label">Affected Device</div>
           <div class="value" id="diagSuspect"></div>
           <div class="mini" id="diagScanAge"></div>
         </div>
         <div class="diag-stat">
-          <div class="label">Evidence</div>
+          <div class="label">Core Visibility</div>
           <div class="value" id="diagEvidenceSummary"></div>
           <div class="mini" id="diagLinkDown"></div>
         </div>
       </div>
       <div class="diag-actions-row">
-        <button id="diagEvidenceToggle" class="diag-toggle active" type="button">Evidence</button>
-        <button id="diagActionsToggle" class="diag-toggle" type="button">Next Actions</button>
-        <button id="diagFocusEvents" class="diag-toggle" type="button">Focus Related Events</button>
-        <button id="diagFocusExtender" class="diag-toggle" type="button">Show Suspect Device</button>
+        <button id="diagEvidenceToggle" class="diag-toggle active" type="button">Core Signals</button>
+        <button id="diagActionsToggle" class="diag-toggle" type="button">Recommended Checks</button>
+        <button id="diagFocusEvents" class="diag-toggle" type="button">Show Related Events</button>
+        <button id="diagFocusExtender" class="diag-toggle" type="button">Show Affected Device</button>
       </div>
       <div class="diag-grid">
         <div id="diagPrimaryList" class="diag-list"></div>
@@ -2124,37 +2177,30 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
     </div>
   </section>
 
+  <section class="panel keepalive-section">
+    <div class="panel-head"><div><h2>Router Keep-Alive</h2><p>Independent ICMP checks run every minute, so router reachability is not inferred from the slower inventory scan.</p></div><div class="panel-stamp" id="keepaliveFreshness"></div></div>
+    <div id="keepaliveCards" class="keepalive-grid"></div>
+    <div id="keepaliveEmpty" class="empty" style="display:none">Router keep-alive monitoring is not configured.</div>
+  </section>
+
   <section class="panel firewall-section">
-    <div class="panel-head"><div><h2>Firewall Noise Sources</h2><p>Matches blocked firewall sources to scanned LAN devices so repeated noise has a name, hardware context, and next action.</p></div><div class="panel-stamp" id="firewallFreshness"></div></div>
-    <div id="firewallShell" class="firewall-shell">
-      <div class="firewall-topline">
-        <div id="firewallHero" class="firewall-hero">
-          <div class="firewall-kicker">Current Assessment</div>
-          <div class="firewall-title" id="firewallSummary"></div>
-          <div class="firewall-copy" id="firewallCopy"></div>
-        </div>
-        <div class="firewall-stat"><div class="label">Blocked</div><div class="value" id="firewallBlocked"></div><div class="mini" id="firewallBlockedMini"></div></div>
-        <div class="firewall-stat"><div class="label">Noisy Sources</div><div class="value" id="firewallNoisySources"></div><div class="mini" id="firewallNoisyMini"></div></div>
-        <div class="firewall-stat"><div class="label">SSH Attempts</div><div class="value" id="firewallSsh"></div><div class="mini" id="firewallPolicy"></div></div>
-        <div class="firewall-stat"><div class="label">Top Port</div><div class="value" id="firewallTopPort"></div><div class="mini" id="firewallLogSource"></div></div>
-      </div>
-      <div id="firewallSources" class="firewall-source-grid"></div>
-    </div>
-    <div id="firewallEmpty" class="empty" style="display:none">Firewall data is not available for this dashboard yet.</div>
+    <div class="panel-head"><div><h2>Security Signal</h2><p>Highlights activity that needs attention. Ordinary LAN broadcast and multicast chatter stays out of the way.</p></div><div class="panel-stamp" id="securityFreshness"></div></div>
+    <div id="securityShell"></div>
   </section>
 
   <section class="grid">
     <div class="stack">
       <div class="panel">
-        <div class="panel-head"><div><h2>Performance Timeline</h2><p>Normal, degraded, outage, and failed tests are separated. Router event markers can be filtered by severity and type.</p></div><div class="panel-stamp" id="timelineFreshness"></div></div>
+        <div class="panel-head"><div><h2>Speed Over Time</h2><p>Each point is one scheduled test. Use the metric selector to compare download, upload, or ping without unrelated event markers.</p></div><div class="panel-stamp" id="timelineFreshness"></div></div>
         <div id="timeline" class="chart"></div>
       </div>
       <div class="panel">
-        <div class="panel-head"><div><h2>Recent Router and Network Events</h2><p>Most recent 10 SNMP or imported overlay events available to the dashboard.</p></div><div class="panel-stamp" id="eventsFreshness"></div></div>
+        <div class="panel-head"><div><h2>Recent Router and Network Events</h2><p>Shows the latest three events by default. Expand when historical context is needed.</p></div><div class="panel-stamp" id="eventsFreshness"></div></div>
+        <div class="action-row"><button id="eventHistoryButton" class="action-button" type="button">Show all events</button></div>
         <div class="table-wrap"><table><thead><tr><th>Time</th><th>Type</th><th>Severity</th><th>Source</th><th>Message</th></tr></thead><tbody id="eventRows"></tbody></table></div>
       </div>
       <div class="panel">
-      <div class="panel-head"><div><h2>Network Devices</h2><p>LAN inventory derived from the latest Nmap export plus topology enrichment when bridge-table collection is enabled.</p></div><div class="panel-stamp" id="inventoryFreshness"></div></div>
+      <div class="panel-head"><div><h2>Network Devices</h2><p>LAN inventory grouped by device category, with roles and service evidence kept on each device.</p></div><div class="panel-stamp" id="inventoryFreshness"></div></div>
         <div id="inventoryMeta" class="chart-meta"></div>
         <div class="action-row">
           <button id="nmapScanButton" class="action-button" type="button">Run Nmap Scan</button>
@@ -2175,11 +2221,11 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
     </div>
     <div class="stack">
       <div class="panel">
-        <div class="panel-head"><div><h2>Latency Relationship</h2><p>Scatter of download versus ping. Failed, degraded, and outage tests are emphasised.</p></div><div class="panel-stamp" id="scatterFreshness"></div></div>
+        <div class="panel-head"><div><h2>Ping Over Time</h2><p>Lower is better. This shows latency directly, rather than implying a relationship with download speed.</p></div><div class="panel-stamp" id="scatterFreshness"></div></div>
         <div id="scatter" class="chart-small"></div>
       </div>
       <div class="panel">
-        <div class="panel-head"><div><h2>DNS Activity Correlation</h2><p>Hourly DNS load and blocked requests plotted against average download when Pi-hole hourly data exists.</p></div><div class="panel-stamp" id="dnsFreshness"></div></div>
+        <div class="panel-head"><div><h2>DNS Activity</h2><p>Hourly Pi-hole query and blocked-request volumes. This is operational context, not evidence that DNS caused a speed change.</p></div><div class="panel-stamp" id="dnsFreshness"></div></div>
         <div id="dnsCorrelation" class="chart-small"></div>
         <div id="dnsLegend" class="chart-meta"></div>
         <div id="dnsEmpty" class="empty" style="display:none">No Pi-hole hourly data yet.</div>
@@ -2218,6 +2264,7 @@ let rawEvents = [];
 let piholeRows = [];
 let deviceRows = [];
 let firewall = {};
+let keepalive = {};
 let inventory = {};
 let topology = {};
 let stats = {};
@@ -2231,6 +2278,7 @@ const actionTokenKey = 'pi_probe_dashboard_action_token';
 const actionSessionKey = 'pi_probe_dashboard_action_session_ready';
 let actionTokenStatusMessage = '';
 let diagView = 'evidence';
+let eventHistoryExpanded = false;
 let refreshTimer = null;
 let refreshInFlight = false;
 let refreshAbortController = null;
@@ -2243,6 +2291,7 @@ function hydratePayload(nextPayload) {
   piholeRows = Array.isArray(payload.pihole) ? payload.pihole : [];
   deviceRows = Array.isArray(payload.devices) ? payload.devices : [];
   firewall = payload.firewall || {};
+  keepalive = payload.keepalive || {};
   inventory = payload.inventory || {};
   topology = payload.topology || {};
   stats = payload.stats || {};
@@ -2638,7 +2687,8 @@ function renderFreshness() {
   });
   setFreshness('timelineFreshness', refreshed.speed, 'Data');
   setFreshness('diagnosisFreshness', refreshed.diagnosis, 'Data');
-  setFreshness('firewallFreshness', refreshed.dashboard || meta.generated_at, 'Built');
+  setFreshness('keepaliveFreshness', refreshed.keepalive, 'Checked');
+  setFreshness('securityFreshness', refreshed.dashboard || meta.generated_at, 'Reviewed');
   setFreshness('eventsFreshness', refreshed.events, 'Data');
   setFreshness('inventoryFreshness', refreshed.inventory, 'Scan');
   setFreshness('heatmapFreshness', refreshed.speed, 'Data');
@@ -2692,7 +2742,10 @@ function renderTable(events) {
     body.appendChild(row);
     return;
   }
-  events.slice(-10).reverse().forEach(event => {
+  const visibleEvents = eventHistoryExpanded ? events : events.slice(-3);
+  const historyButton = document.getElementById('eventHistoryButton');
+  if (historyButton) historyButton.textContent = eventHistoryExpanded ? 'Show latest 3' : 'Show all events';
+  visibleEvents.reverse().forEach(event => {
     const row = document.createElement('tr');
     const timeCell = document.createElement('td');
     timeCell.className = 'time-cell';
@@ -2763,17 +2816,96 @@ function renderInventoryMeta() {
     status.textContent = inventory.scanArguments ? `Configured scan: nmap ${inventory.scanArguments} ${inventory.scanTargets}` : 'Run a fresh scan to update the device inventory.';
   }
 }
+function renderKeepalive() {
+  const cards = document.getElementById('keepaliveCards');
+  const empty = document.getElementById('keepaliveEmpty');
+  clearNode(cards);
+  const devices = Array.isArray(keepalive.devices) ? keepalive.devices : [];
+  if (!keepalive.enabled || !devices.length) {
+    cards.style.display = 'none';
+    empty.style.display = 'block';
+    return;
+  }
+  cards.style.display = 'grid';
+  empty.style.display = 'none';
+  devices.forEach(device => {
+    const card = document.createElement('div');
+    card.className = `keepalive-card ${device.up ? 'up' : 'down'}`;
+    const title = document.createElement('div');
+    title.className = 'device-name';
+    title.textContent = device.name || device.host || 'Router';
+    const status = document.createElement('div');
+    status.className = 'keepalive-status';
+    status.textContent = device.up ? 'Reachable' : 'Unreachable';
+    const meta = document.createElement('div');
+    meta.className = 'keepalive-meta';
+    meta.textContent = `${device.host || 'host unavailable'}${device.latencyMs !== null && device.latencyMs !== undefined ? ` · ${Number(device.latencyMs).toFixed(2)} ms` : ''}${device.error ? ` · ${device.error}` : ''}`;
+    card.append(title, status, meta);
+    cards.appendChild(card);
+  });
+}
+function renderFirewallSignal() {
+  const shell = document.getElementById('securityShell');
+  clearNode(shell);
+  if (!firewall.available) {
+    shell.className = 'empty';
+    shell.textContent = 'Security data is unavailable.';
+    return;
+  }
+  const actionable = (firewall.sources || []).filter(source => source.scope === 'External');
+  const externalBlocked = actionable.reduce((total, source) => total + Number(source.count || 0), 0);
+  const attention = actionable.length > 0 || Number(firewall.sshAttempts || 0) > 0;
+  const grid = document.createElement('div');
+  grid.className = 'security-grid';
+  const hero = document.createElement('div');
+  hero.className = `security-hero${attention ? ' attention' : ''}`;
+  hero.innerHTML = `<div class="security-kicker">Current security state</div><div class="security-title">${attention ? 'Review external activity' : 'No external threat signal'}</div><div class="security-copy">${attention ? 'External sources or administration-port attempts were blocked. Review the sources below.' : 'Blocked entries are local network chatter. The firewall is containing it; no action is required.'}</div>`;
+  grid.appendChild(hero);
+  [[externalBlocked, 'External blocked'], [firewall.sshAttempts || 0, 'SSH attempts'], [firewall.blocked || 0, 'Total blocked']].forEach(([value, label]) => {
+    const stat = document.createElement('div');
+    stat.className = 'security-stat';
+    stat.innerHTML = `<span>${label}</span><b>${value}</b>`;
+    grid.appendChild(stat);
+  });
+  shell.appendChild(grid);
+  const actions = document.createElement('div');
+  actions.className = 'security-actions';
+  if (actionable.length) {
+    actionable.forEach(source => {
+      const item = document.createElement('div');
+      item.className = 'security-action';
+      item.innerHTML = `<b>${source.ip} · ${source.count} blocked</b><span>${source.action || 'Keep blocked and review.'}</span>`;
+      actions.appendChild(item);
+    });
+  } else {
+    const item = document.createElement('div');
+    item.className = 'security-action';
+    item.innerHTML = `<b>No action required</b><span>Local broadcast/multicast traffic is excluded from this decision view.</span>`;
+    actions.appendChild(item);
+  }
+  shell.appendChild(actions);
+  const details = document.createElement('details');
+  details.className = 'security-details';
+  const summary = document.createElement('summary');
+  summary.textContent = `Local traffic details (${(firewall.sources || []).filter(source => source.scope !== 'External').length} source(s))`;
+  const copy = document.createElement('div');
+  copy.textContent = (firewall.sources || []).filter(source => source.scope !== 'External').map(source => `${source.device?.name || source.ip}: ${source.count} blocked`).join(' · ') || 'No local source detail is available.';
+  details.append(summary, copy);
+  shell.appendChild(details);
+}
 function renderDiagnosis() {
+  const normal = diagnosis.status === 'healthy' && diagnosis.coreNormalised;
+  document.querySelector('.diag-shell').classList.toggle('normal', normal);
   const stateNode = document.getElementById('diagState');
-  setText('diagCause', diagnosis.likelyCause || diagnosis.headline || 'No diagnosis summary available.');
-  setText('diagHeadline', diagnosis.headline || 'No diagnosis summary available.');
+  setText('diagCause', normal ? 'Normal' : (diagnosis.likelyCause || diagnosis.headline || 'No diagnosis summary available.'));
+  setText('diagHeadline', normal ? 'All monitored core devices are reachable and the latest inventory is current.' : (diagnosis.headline || 'No diagnosis summary available.'));
   setText('diagConfidence', diagnosis.confidenceLabel || 'Unknown');
   setText('diagConfidenceNote', `Current ${diagnosis.decisionWindowHours || 8}h: ${diagnosis.hostMissingCount || 0} missing-host, ${diagnosis.portClosedCount || 0} port-change, ${diagnosis.restartCount || 0} restart`);
   setText('diagSuspect', diagnosis.primarySuspect || 'Unknown');
   setText('diagScanAge', `Inventory ${diagnosis.scanAge || 'unknown'}${diagnosis.inventoryFresh ? '' : ' · stale'}`);
   setText('diagEvidenceSummary', `${diagnosis.inventoryDeviceCount || 0} visible / ${diagnosis.infrastructureCount || 0} infra`);
   setText('diagLinkDown', `${diagnosis.linkDownCount || 0} linkDown now · context ${diagnosis.historicalFaultCount || 0} event(s), last ${diagnosis.latestContextFaultAge || diagnosis.latestFaultAge || 'unknown'}`);
-  stateNode.textContent = diagnosis.statusLabel || 'Resolved';
+  stateNode.textContent = normal ? 'Normal' : (diagnosis.statusLabel || 'Resolved');
   stateNode.className = `diag-state-pill ${diagnosis.status || 'healthy'}`;
 
   const list = document.getElementById('diagPrimaryList');
@@ -2971,20 +3103,8 @@ function renderDeviceMap() {
   map.style.display = 'grid';
   empty.style.display = 'none';
   const categoryOrder = ['Infrastructure', 'Servers', 'Computers', 'Mobile', 'Media', '3D Printer', 'IoT', 'Unknown'];
-  const zonePriority = ['Main Network', 'Downstairs', 'Upstairs', 'Office', 'Garage', 'Workshop', 'Unassigned'];
-  const zoneMap = new Map();
-  deviceRows.forEach(device => {
-    const zoneName = (device.location || '').trim() || 'Unassigned';
-    if (!zoneMap.has(zoneName)) zoneMap.set(zoneName, []);
-    zoneMap.get(zoneName).push(device);
-  });
-  const orderedZones = Array.from(zoneMap.keys()).sort((left, right) => {
-    const leftRank = zonePriority.indexOf(left);
-    const rightRank = zonePriority.indexOf(right);
-    const normLeft = leftRank === -1 ? Number.MAX_SAFE_INTEGER : leftRank;
-    const normRight = rightRank === -1 ? Number.MAX_SAFE_INTEGER : rightRank;
-    return normLeft - normRight || left.localeCompare(right);
-  });
+  const zoneMap = new Map([['Devices by category', deviceRows]]);
+  const orderedZones = ['Devices by category'];
   orderedZones.forEach(zoneName => {
     const zoneRows = zoneMap.get(zoneName) || [];
     const zone = document.createElement('section');
@@ -3036,7 +3156,6 @@ function renderDeviceMap() {
         meta.className = 'device-meta';
         [
           device.manufacturer || device.vendor || 'Unknown vendor',
-          device.location || '',
           device.role ? device.role.replaceAll('_', ' ') : '',
           device.uplinkName ? `Via ${device.uplinkName}` : '',
           device.mac ? `MAC ${device.mac}` : '',
@@ -3046,7 +3165,6 @@ function renderDeviceMap() {
         ].filter(Boolean).forEach(label => {
           const chip = document.createElement('span');
           chip.className = 'device-chip';
-          if (label === device.location) chip.classList.add('location');
           if (device.uplinkName && label === `Via ${device.uplinkName}`) chip.classList.add('link');
           if (label.startsWith(`${device.portCount || 0} open port`)) chip.classList.add('primary');
           if (label.startsWith('Seen ')) chip.classList.add(freshnessClass(device.lastSeen));
@@ -3055,12 +3173,6 @@ function renderDeviceMap() {
         });
         const services = document.createElement('div');
         services.className = 'device-services';
-        if (device.placementLabel && device.placementLabel !== device.location) {
-          const placement = document.createElement('span');
-          placement.className = 'device-chip link';
-          placement.textContent = device.placementLabel;
-          services.appendChild(placement);
-        }
         if (isPrinter && device.deviceId) {
           const chip = document.createElement('span');
           chip.className = 'device-chip primary';
@@ -3455,6 +3567,24 @@ async function triggerNmapScan() {
     button.disabled = false;
   }
 }
+async function triggerSpeedtest() {
+  const button = document.getElementById('speedtestButton');
+  const status = document.getElementById('speedtestStatus');
+  if (!await ensureActionToken()) { status.textContent = 'Dashboard action token required.'; return; }
+  button.disabled = true;
+  status.textContent = 'Starting test...';
+  try {
+    const response = await fetchWithActionAuth('/api/speedtest/run', { method: 'POST' });
+    const result = await response.json();
+    if (!response.ok || !result.ok) throw new Error(result.message || `HTTP ${response.status}`);
+    status.textContent = 'Test running. Refreshing results shortly.';
+    window.setTimeout(() => void fetchDashboardData('manual-speedtest'), 25000);
+  } catch (error) {
+    status.textContent = `Speed test failed to start: ${error instanceof Error ? error.message : 'request error'}`;
+  } finally {
+    window.setTimeout(() => { button.disabled = false; }, 3000);
+  }
+}
 function heatmapColor(value, maxValue) {
   if (value === null || value === undefined) return 'rgba(148,163,184,.20)';
   if (value >= thresholds.heatmapGoodMbps) return '#15803d';
@@ -3525,7 +3655,7 @@ function renderHeatmapSummary(summary) {
     wrap.appendChild(card);
   });
 }
-function renderTimeline(data, events) {
+function renderTimeline(data) {
   const metric = document.getElementById('metric').value;
   const surface = chartSurface('timeline', 390);
   const theme = chartTheme();
@@ -3548,27 +3678,6 @@ function renderTimeline(data, events) {
     label: new Date(value).toLocaleDateString(undefined, { day: '2-digit', month: 'short' })
   }));
   drawAxes(surface, yMin, yMax, xTicks);
-  const eventLines = svgEl('g');
-  clusterTimelineEvents(events, scaleX).forEach(cluster => {
-    const x = cluster.x;
-    eventLines.appendChild(svgEl('line', {
-      x1: x, y1: surface.top, x2: x, y2: surface.top + plotHeight,
-      stroke: cluster.severity === 'critical' ? '#ef4444' : cluster.severity === 'warning' ? '#f59e0b' : '#94a3b8',
-      'stroke-dasharray': '4 4'
-    }));
-    if (cluster.count > 1) {
-      const label = svgEl('text', {
-        x,
-        y: surface.top + 12,
-        'text-anchor': 'middle',
-        fill: cluster.severity === 'critical' ? '#fca5a5' : cluster.severity === 'warning' ? '#fcd34d' : theme.muted,
-        'font-size': 10
-      });
-      label.textContent = String(cluster.count);
-      eventLines.appendChild(label);
-    }
-  });
-  surface.svg.appendChild(eventLines);
   buildTimelineSegments(points).forEach(segment => {
     const line = svgEl('path', {
       d: pathFromPoints(segment.map(item => [scaleX(item.ts), scaleY(Number(item[metric]))])),
@@ -3655,28 +3764,29 @@ function renderHeatmap(data) {
   });
   renderHeatmapLegend({ coverage, goodCells, warnCells, badCells, severeCells });
 }
-function renderScatter(data) {
+function renderLatencyTrend(data) {
   const surface = chartSurface('scatter', 320);
-  const points = data.filter(item => item.download !== null && item.ping !== null);
+  const points = data.filter(item => item.ping !== null).map(item => ({ ...item, ts: new Date(item.datetime).getTime() })).filter(item => !Number.isNaN(item.ts)).sort((a, b) => a.ts - b.ts);
   if (!points.length) return;
-  const [xMin, xMax] = extent(points.map(item => item.download), 1);
+  const [xMin, xMax] = extent(points.map(item => item.ts), points[0].ts + 1);
   const [yMin, yMax] = extent(points.map(item => item.ping), 1);
-  drawAxes(surface, yMin, yMax, makeTicks(xMin, xMax, 6).map(value => ({
-    x: scaleLinear(xMin, xMax, surface.left, surface.width - surface.right)(value),
-    label: value.toFixed(0)
-  })));
   const scaleX = scaleLinear(xMin, xMax, surface.left, surface.width - surface.right);
-  const scaleY = scaleLinear(yMin, yMax, surface.height - surface.bottom, surface.top);
+  const scaleY = scaleLinear(Math.max(0, yMin * .9), yMax * 1.05, surface.height - surface.bottom, surface.top);
+  drawAxes(surface, Math.max(0, yMin * .9), yMax * 1.05, makeTicks(xMin, xMax, Math.min(6, points.length)).map(value => ({
+    x: scaleX(value),
+    label: new Date(value).toLocaleDateString(undefined, { day: '2-digit', month: 'short' })
+  })));
+  buildTimelineSegments(points).forEach(segment => surface.svg.appendChild(svgEl('path', { d: pathFromPoints(segment.map(item => [scaleX(item.ts), scaleY(item.ping)])), fill: 'none', stroke: '#a78bfa', 'stroke-width': 2.4 })));
   points.forEach(item => {
     const circle = svgEl('circle', {
-      cx: scaleX(item.download),
+      cx: scaleX(item.ts),
       cy: scaleY(item.ping),
       r: item.status === 'failed' ? 5 : 4,
       fill: item.status === 'degraded' ? '#f59e0b' : item.status === 'outage' ? '#ef4444' : item.status === 'failed' ? '#f97316' : '#38bdf8',
       opacity: 0.82
     });
     const title = svgEl('title');
-    title.textContent = `${item.label} • ${item.download.toFixed(2)} Mbps • ${item.ping.toFixed(2)} ms • ${item.status}`;
+    title.textContent = `${item.label} • ${item.ping.toFixed(2)} ms • ${item.status}`;
     circle.appendChild(title);
     surface.svg.appendChild(circle);
   });
@@ -3694,10 +3804,6 @@ function renderDnsCorrelation(data) {
   }
   dnsChart.style.display = 'block';
   dnsEmpty.style.display = 'none';
-  const hourlyDownload = Array.from({length:24}, (_,hour) => {
-    const values = data.filter(item => item.hour === hour).map(item => item.download).filter(v => v !== null);
-    return values.length ? average(values) : null;
-  });
   const dnsByHour = Array.from({length:24}, (_,hour) => {
     const subset = piholeRows.filter(item => new Date(item.datetime).getHours() === hour);
     return {
@@ -3706,18 +3812,14 @@ function renderDnsCorrelation(data) {
     };
   });
   const surface = chartSurface('dnsCorrelation', 320);
-  const downloadScaleValues = hourlyDownload.map(value => value || 0);
   const queryScaleValues = dnsByHour.flatMap(item => [item.dns || 0, item.blocked || 0]);
-  const [leftMin, leftMax] = extent(downloadScaleValues, 1);
-  const [rightMin, rightMax] = extent(queryScaleValues, 1);
-  drawAxes(surface, leftMin, leftMax, Array.from({ length: 24 }, (_, hour) => hour).filter(hour => hour % 3 === 0).map(hour => ({
+  const [, maxQueries] = extent(queryScaleValues, 1);
+  drawAxes(surface, 0, maxQueries, Array.from({ length: 24 }, (_, hour) => hour).filter(hour => hour % 3 === 0).map(hour => ({
     x: scaleLinear(0, 23, surface.left, surface.width - surface.right)(hour),
     label: String(hour)
   })));
-  drawRightAxis(surface, rightMin, rightMax, value => `${Math.round(value)}`);
   const scaleX = scaleLinear(0, 23, surface.left, surface.width - surface.right);
-  const scaleLeft = scaleLinear(leftMin, leftMax, surface.height - surface.bottom, surface.top);
-  const scaleRight = scaleLinear(rightMin, rightMax, surface.height - surface.bottom, surface.top);
+  const scaleRight = scaleLinear(0, maxQueries, surface.height - surface.bottom, surface.top);
   const barWidth = (surface.width - surface.left - surface.right) / 24 / 2.4;
   dnsByHour.forEach((item, hour) => {
     const x = scaleX(hour);
@@ -3726,23 +3828,12 @@ function renderDnsCorrelation(data) {
     surface.svg.appendChild(svgEl('rect', { x: x - barWidth - 1, y: scaleRight(item.dns || 0), width: barWidth, height: dnsHeight, fill: 'rgba(34,197,94,.55)' }));
     surface.svg.appendChild(svgEl('rect', { x: x + 1, y: scaleRight(item.blocked || 0), width: barWidth, height: blockedHeight, fill: 'rgba(245,158,11,.55)' }));
   });
-  const line = svgEl('path', {
-    d: pathFromPoints(hourlyDownload.map((value, hour) => [scaleX(hour), scaleLeft(value || 0)])),
-    fill: 'none',
-    stroke: '#38bdf8',
-    'stroke-width': 2.4
-  });
-  surface.svg.appendChild(line);
   const leftLabel = svgEl('text', { x: 18, y: surface.top + (surface.height - surface.top - surface.bottom) / 2, fill: chartTheme().muted, 'font-size': 11, transform: `rotate(-90 18 ${surface.top + (surface.height - surface.top - surface.bottom) / 2})` });
-  leftLabel.textContent = 'Average download (Mbps)';
+  leftLabel.textContent = 'Requests per hour';
   surface.svg.appendChild(leftLabel);
-  const rightLabel = svgEl('text', { x: surface.width - 6, y: surface.top + (surface.height - surface.top - surface.bottom) / 2, fill: chartTheme().muted, 'font-size': 11, transform: `rotate(90 ${surface.width - 6} ${surface.top + (surface.height - surface.top - surface.bottom) / 2})`, 'text-anchor': 'middle' });
-  rightLabel.textContent = 'Avg DNS requests / blocked';
-  surface.svg.appendChild(rightLabel);
 
   clearNode(dnsLegend);
   const legendItems = [
-    { color: '#38bdf8', label: `Avg download ${average(hourlyDownload.filter(value => value !== null)).toFixed(1)} Mbps` },
     { color: 'rgba(34,197,94,.75)', label: `Avg DNS queries ${average(dnsByHour.map(item => item.dns || 0)).toFixed(0)}/hr` },
     { color: 'rgba(245,158,11,.75)', label: `Avg blocked ${average(dnsByHour.map(item => item.blocked || 0)).toFixed(1)}/hr` }
   ];
@@ -3785,10 +3876,16 @@ function renderSummary(data) {
   const downloads = data.map(item => item.download).filter(v => v !== null);
   const heroSide = document.querySelector('.hero-side');
   const builtAt = meta.generated_at ? new Date(meta.generated_at).toLocaleString() : 'unknown';
+  const latestDown = stats.latestDownload !== null && stats.latestDownload !== undefined ? `${Number(stats.latestDownload).toFixed(1)} Mbps down` : 'download n/a';
+  const latestUp = stats.latestUpload !== null && stats.latestUpload !== undefined ? `${Number(stats.latestUpload).toFixed(1)} Mbps up` : 'upload n/a';
+  const latestPing = stats.latestPing !== null && stats.latestPing !== undefined ? `${Number(stats.latestPing).toFixed(2)} ms ping` : 'ping n/a';
   setText('subtitle', `Interactive history view · dataset ${stats.start} – ${stats.end} · built ${builtAt}`);
-  setText('kpiMedian', (quantile(downloads, .5) || 0).toFixed(1) + ' Mbps');
-  setText('kpiUpload', average(data.map(item => item.upload)).toFixed(1) + ' Mbps');
-  setText('kpiPing', average(data.map(item => item.ping)).toFixed(2) + ' ms');
+  setText('kpiLatestDown', stats.latestDownload !== null && stats.latestDownload !== undefined ? `${Number(stats.latestDownload).toFixed(1)} Mbps` : 'n/a');
+  setText('kpiLatestUp', stats.latestUpload !== null && stats.latestUpload !== undefined ? `${Number(stats.latestUpload).toFixed(1)} Mbps` : 'n/a');
+  setText('kpiLatestPing', stats.latestPing !== null && stats.latestPing !== undefined ? `${Number(stats.latestPing).toFixed(2)} ms` : 'n/a');
+  setText('kpiMedian', `30-day median: ${(quantile(downloads, .5) || 0).toFixed(1)} Mbps`);
+  setText('kpiUpload', `30-day average: ${average(data.map(item => item.upload)).toFixed(1)} Mbps`);
+  setText('kpiPing', `30-day average: ${average(data.map(item => item.ping)).toFixed(2)} ms`);
   setText('kpiFloor', (quantile(downloads, .05) || 0).toFixed(1) + ' Mbps');
   const pct = downloads.length ? downloads.filter(v => v >= threshold).length / downloads.length * 100 : 0;
   setText('kpiThreshold', pct.toFixed(1) + `% ≥ ${threshold} Mbps`);
@@ -3819,9 +3916,6 @@ function renderSummary(data) {
     failed: 'Latest connection test failed',
     no_data: 'No connection data yet'
   };
-  const latestDown = stats.latestDownload !== null && stats.latestDownload !== undefined ? `${Number(stats.latestDownload).toFixed(1)} Mbps down` : 'download n/a';
-  const latestUp = stats.latestUpload !== null && stats.latestUpload !== undefined ? `${Number(stats.latestUpload).toFixed(1)} Mbps up` : 'upload n/a';
-  const latestPing = stats.latestPing !== null && stats.latestPing !== undefined ? `${Number(stats.latestPing).toFixed(2)} ms ping` : 'ping n/a';
   setText('verdictBadge', verdictBadgeMap[stats.verdict] || 'Status');
   setText('verdict', verdictHeadlineMap[stats.verdict] || stats.verdictLabel);
   if (stats.verdict === 'normal') {
@@ -3852,12 +3946,13 @@ function render() {
   const events = filteredEvents();
   renderFreshness();
   renderSummary(data);
-  renderTimeline(data, events);
+  renderTimeline(data);
   renderHeatmap(data);
-  renderScatter(data);
+  renderLatencyTrend(data);
   renderDnsCorrelation(data);
+  renderKeepalive();
+  renderFirewallSignal();
   renderDiagnosis();
-  renderFirewallNoise();
   renderTable(events);
   renderInventoryMeta();
   renderTopology();
@@ -3913,7 +4008,9 @@ document.getElementById('threshold').addEventListener('input', render);
 document.getElementById('dayFilter').addEventListener('change', render);
 document.getElementById('severityFilter').addEventListener('change', render);
 document.getElementById('eventTypeFilter').addEventListener('change', render);
+document.getElementById('eventHistoryButton').addEventListener('click', () => { eventHistoryExpanded = !eventHistoryExpanded; renderTable(filteredEvents()); });
 document.getElementById('nmapScanButton').addEventListener('click', triggerNmapScan);
+document.getElementById('speedtestButton').addEventListener('click', triggerSpeedtest);
 document.getElementById('diagEvidenceToggle').addEventListener('click', () => { diagView = 'evidence'; renderDiagnosis(); });
 document.getElementById('diagActionsToggle').addEventListener('click', () => { diagView = 'actions'; renderDiagnosis(); });
 document.getElementById('diagFocusEvents').addEventListener('click', focusDiagnosisEvents);
@@ -4130,7 +4227,7 @@ def run_dashboard_nmap_scan(output_path: str) -> dict[str, Any]:
     from .pihole_hourly import export_pihole_hourly_csv
     from .storage import load_history_from_db, load_probe_runs_from_db
 
-    config = load_config()
+    config = load_config(require_webhook=False)
     now = datetime.now().astimezone()
     scan_ok, scan_message = run_nmap_inventory_scan(config, now)
     response: dict[str, Any] = {
@@ -4181,7 +4278,7 @@ def apply_dashboard_nmap_override(output_path: str, payload: dict[str, Any]) -> 
     from .pihole_hourly import export_pihole_hourly_csv
     from .storage import load_history_from_db, load_probe_runs_from_db
 
-    config = load_config()
+    config = load_config(require_webhook=False)
     selector = payload.get("selector") if isinstance(payload.get("selector"), dict) else {}
     ip = str(selector.get("ip") or "").strip()
     mac = str(selector.get("mac") or "").strip()
@@ -4241,6 +4338,21 @@ def ping_dashboard_device(payload: dict[str, Any]) -> dict[str, Any]:
     if output:
         return {"ok": False, "message": f"{label} unreachable: {output.splitlines()[-1][:160]}"}
     return {"ok": False, "message": f"{label} unreachable"}
+
+
+def run_dashboard_speedtest() -> dict[str, Any]:
+    """Start the existing one-shot speed-test service without blocking the web request."""
+    try:
+        subprocess.run(
+            ["systemctl", "start", "--no-block", "pi-probe-discord-speedtest.service"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return {"ok": False, "message": str(exc)}
+    return {"ok": True, "message": "Speed test started."}
 
 
 def _load_allowed_ping_targets() -> set[str]:
@@ -4455,7 +4567,7 @@ def serve_interactive_dashboard(
 
         def do_POST(self) -> None:  # noqa: N802
             request_path = urlparse(self.path).path
-            if request_path not in {"/api/auth/session", "/api/nmap/scan", "/api/nmap/override", "/api/device/ping"}:
+            if request_path not in {"/api/auth/session", "/api/nmap/scan", "/api/nmap/override", "/api/device/ping", "/api/speedtest/run"}:
                 self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "message": "Not found"}, no_store=True)
                 return
             if request_path == "/api/auth/session":
@@ -4500,6 +4612,17 @@ def serve_interactive_dashboard(
                 result = run_dashboard_nmap_scan(str(file_path))
                 status = HTTPStatus.OK if result.get("ok") else HTTPStatus.INTERNAL_SERVER_ERROR
                 self._send_json(status, result, no_store=True)
+                return
+            if request_path == "/api/speedtest/run":
+                payload = self._read_json_payload()
+                if payload is None:
+                    return
+                supplied = str(payload.pop("token", "")).strip()
+                if not self._actions_authorized(supplied):
+                    self._send_json(HTTPStatus.UNAUTHORIZED, {"ok": False, "message": "Dashboard action token required"}, no_store=True)
+                    return
+                result = run_dashboard_speedtest()
+                self._send_json(HTTPStatus.OK if result.get("ok") else HTTPStatus.INTERNAL_SERVER_ERROR, result, no_store=True)
                 return
             if request_path == "/api/nmap/override":
                 payload = self._read_json_payload()

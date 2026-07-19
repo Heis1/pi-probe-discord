@@ -1,3 +1,83 @@
+pi-probe-discord (1.2.0-1) unstable; urgency=medium
+
+  * Major release: add live router keep-alive monitoring, router SMTP log ingest,
+    Discord bot channel delivery, official Ookla Speedtest support, and a
+    simplified actionable dashboard.
+
+ -- Codex Builder <noreply@example.invalid>  Sun, 19 Jul 2026 22:25:00 +0930
+
+pi-probe-discord (1.1.54-1) unstable; urgency=medium
+
+  * Lead the dashboard with the latest speed result and add an on-demand speed-test action.
+
+ -- Codex Builder <noreply@example.invalid>  Sun, 19 Jul 2026 22:05:00 +0930
+
+pi-probe-discord (1.1.53-1) unstable; urgency=medium
+
+  * Simplify dashboard charts into independent speed, ping, and DNS activity views.
+
+ -- Codex Builder <noreply@example.invalid>  Sun, 19 Jul 2026 21:45:00 +0930
+
+pi-probe-discord (1.1.52-1) unstable; urgency=medium
+
+  * Provide HOME to the native Ookla Speedtest systemd service to prevent startup crashes.
+
+ -- Codex Builder <noreply@example.invalid>  Sun, 19 Jul 2026 21:30:00 +0930
+
+pi-probe-discord (1.1.51-1) unstable; urgency=medium
+
+  * Prefer the native Ookla Speedtest CLI over the unreliable legacy Python client on high-speed links.
+
+ -- Codex Builder <noreply@example.invalid>  Sun, 19 Jul 2026 21:20:00 +0930
+
+pi-probe-discord (1.1.50-1) unstable; urgency=medium
+
+  * Reduce hourly speed alerts to the current result, time-matched baseline, clear assessment, and next action.
+
+ -- Codex Builder <noreply@example.invalid>  Sun, 19 Jul 2026 21:05:00 +0930
+
+pi-probe-discord (1.1.49-1) unstable; urgency=medium
+
+  * Send scheduled Discord bot reports through the REST API so they do not contend with the live bot gateway session.
+
+ -- Codex Builder <noreply@example.invalid>  Sun, 19 Jul 2026 20:50:00 +0930
+
+pi-probe-discord (1.1.48-1) unstable; urgency=medium
+
+  * Deliver scheduled speed checks through the configured Discord bot system channel or allowed-user direct messages when no webhook is configured.
+
+ -- Codex Builder <noreply@example.invalid>  Sun, 19 Jul 2026 20:40:00 +0930
+
+pi-probe-discord (1.1.47-1) unstable; urgency=medium
+
+  * Simplify normalized core health to a compact green Normal state and show forensic evidence only during a live fault.
+
+ -- Codex Builder <noreply@example.invalid>  Sun, 19 Jul 2026 20:30:00 +0930
+
+pi-probe-discord (1.1.46-1) unstable; urgency=medium
+
+  * Report core network health as normal when live keep-alive checks and fresh inventory confirm recovery, leaving historical events out of the active diagnosis.
+
+ -- Codex Builder <noreply@example.invalid>  Sun, 19 Jul 2026 20:20:00 +0930
+
+pi-probe-discord (1.1.45-1) unstable; urgency=medium
+
+  * Focus core network health diagnosis on infrastructure and servers while excluding transient client-device churn.
+
+ -- Codex Builder <noreply@example.invalid>  Sun, 19 Jul 2026 20:10:00 +0930
+
+pi-probe-discord (1.1.44-1) unstable; urgency=medium
+
+  * Focus the dashboard firewall view on actionable external security signals and group inventory devices by category rather than location.
+
+ -- Codex Builder <noreply@example.invalid>  Sun, 19 Jul 2026 20:00:00 +0930
+
+pi-probe-discord (1.1.43-1) unstable; urgency=medium
+
+  * Add configurable one-minute router keep-alive checks, dashboard health panel, and a local SMTP receiver that archives and decodes router mail logs.
+
+ -- Codex Builder <noreply@example.invalid>  Sun, 19 Jul 2026 19:30:00 +0930
+
 pi-probe-discord (1.1.42-1) unstable; urgency=medium
 
   * Add explicit dashboard token validation feedback and accept action tokens from protected request bodies as well as headers to avoid repeated prompt loops and silent 401 failures.

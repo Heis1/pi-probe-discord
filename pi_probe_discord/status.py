@@ -20,6 +20,9 @@ class StatusAssessment:
     ping_state: str
     problem_download_threshold: float
     problem_ping_threshold: float
+    download_baseline: float | None = None
+    upload_baseline: float | None = None
+    ping_baseline: float | None = None
 
 def _recent_average(points: list[tuple[datetime, float]], now: datetime, window: timedelta) -> float | None:
     values = [value for moment, value in points if moment >= now - window]
@@ -99,6 +102,9 @@ def assess_internet_health(history: dict[str, list[dict[str, Any]]], now: dateti
             ping_state=ping_state,
             problem_download_threshold=unstable_download_threshold,
             problem_ping_threshold=unstable_ping_threshold,
+            download_baseline=download_baseline,
+            upload_baseline=upload_baseline,
+            ping_baseline=ping_baseline,
         )
 
     if (
@@ -117,6 +123,9 @@ def assess_internet_health(history: dict[str, list[dict[str, Any]]], now: dateti
             ping_state=ping_state,
             problem_download_threshold=unstable_download_threshold,
             problem_ping_threshold=unstable_ping_threshold,
+            download_baseline=download_baseline,
+            upload_baseline=upload_baseline,
+            ping_baseline=ping_baseline,
         )
 
     return StatusAssessment(
@@ -130,4 +139,7 @@ def assess_internet_health(history: dict[str, list[dict[str, Any]]], now: dateti
         ping_state=ping_state,
         problem_download_threshold=unstable_download_threshold,
         problem_ping_threshold=unstable_ping_threshold,
+        download_baseline=download_baseline,
+        upload_baseline=upload_baseline,
+        ping_baseline=ping_baseline,
     )

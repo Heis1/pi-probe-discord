@@ -80,6 +80,18 @@ class AppConfig:
     router_webui_url: str
     router_webui_secret_file: str
     router_webui_ca_file: str
+    keepalive_enabled: bool
+    keepalive_devices_json: str
+    keepalive_state_json: str
+    keepalive_timeout_seconds: int
+    smtp_log_enabled: bool
+    smtp_log_bind_host: str
+    smtp_log_port: int
+    smtp_log_directory: str
+    discord_bot_token: str
+    discord_report_channel_id: int
+    discord_command_guild_id: int
+    discord_allowed_user_ids: list[int]
 
 
 @dataclass

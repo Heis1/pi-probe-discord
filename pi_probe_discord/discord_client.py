@@ -24,6 +24,7 @@ def build_embed(
     firewall_snapshot: FirewallSnapshot | None = None,
     router_snapshot: RouterSnapshot | None = None,
     dashboard_summary: dict[str, Any] | None = None,
+    include_diagnostics: bool = True,
 ) -> dict[str, Any]:
     warnings: list[str] = []
     warnings.extend(pihole_result.warnings)
@@ -60,7 +61,8 @@ def build_embed(
     elif assessment.label == "INTERNET SLOWER THAN NORMAL":
         title = "⚠️ Internet Slower Than Usual"
     elif assessment.label == "INTERNET DEGRADED":
-        title = "❌ Internet Problem Detected"
+        title = "❌ Internet Speed Reduced"
+        description = "Download speed is significantly below its usual level for this time of day."
 
     if not update_result.ok:
         title = "❌ Update Failed"
@@ -72,6 +74,44 @@ def build_embed(
     speed_value = speed_result.summary
     if warnings:
         speed_value += "\n" + "\n".join(f"- {item}" for item in warnings[:5])
+
+    if not include_diagnostics:
+        baseline_value = (
+            f"Download {assessment.download_baseline:.1f} Mbps | "
+            f"Upload {assessment.upload_baseline:.1f} Mbps | "
+            f"Ping {assessment.ping_baseline:.1f} ms"
+            if assessment.download_baseline is not None
+            and assessment.upload_baseline is not None
+            and assessment.ping_baseline is not None
+            else "Still establishing a local baseline"
+        )
+        download_change = ""
+        if assessment.download_baseline and speed_result.download_mbps is not None:
+            change = (speed_result.download_mbps / assessment.download_baseline - 1) * 100
+            download_change = f" Download is {abs(change):.0f}% {'below' if change < 0 else 'above'} usual."
+        if assessment.label == "INTERNET DEGRADED":
+            action = "Recheck at the next interval. If it remains reduced, check the WAN/ISP connection before changing Wi-Fi equipment."
+        elif assessment.label == "INTERNET SLOWER THAN NORMAL":
+            action = "No immediate action. Recheck at the next interval and investigate only if the slowdown persists."
+        elif assessment.label == "INTERNET HEALTHY":
+            action = "No action required."
+        else:
+            action = "Allow a few more scheduled checks to establish a reliable baseline."
+        fields = [
+            {"name": "Measured now", "value": speed_value[:1024], "inline": False},
+            {"name": "Usual at this time", "value": baseline_value[:1024], "inline": False},
+            {"name": "Assessment", "value": (assessment.detail + download_change)[:1024], "inline": False},
+            {"name": "Next action", "value": action, "inline": False},
+        ]
+        return {
+            "embeds": [{
+                "title": title,
+                "description": description,
+                "color": color,
+                "fields": fields,
+                "footer": {"text": f"{hostname} | {run_at_local}"},
+            }]
+        }
 
     fields: list[dict[str, Any]] = [
         {"name": "What This Means", "value": assessment.headline[:1024], "inline": False},

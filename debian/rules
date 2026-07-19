@@ -43,6 +43,9 @@ override_dh_auto_install:
 	install -m 0644 debian/systemd/pi-probe-discord-nmap.service debian/pi-probe-discord/lib/systemd/system/pi-probe-discord-nmap.service
 	install -m 0644 debian/systemd/pi-probe-discord-nmap.timer debian/pi-probe-discord/lib/systemd/system/pi-probe-discord-nmap.timer
 	install -m 0644 debian/systemd/pi-probe-discord-snmp-listener.service debian/pi-probe-discord/lib/systemd/system/pi-probe-discord-snmp-listener.service
+	install -m 0644 debian/systemd/pi-probe-discord-keepalive.service debian/pi-probe-discord/lib/systemd/system/pi-probe-discord-keepalive.service
+	install -m 0644 debian/systemd/pi-probe-discord-keepalive.timer debian/pi-probe-discord/lib/systemd/system/pi-probe-discord-keepalive.timer
+	install -m 0644 debian/systemd/pi-probe-discord-smtp-log.service debian/pi-probe-discord/lib/systemd/system/pi-probe-discord-smtp-log.service
 
 override_dh_installsystemd:
 	dh_installsystemd --no-enable --no-start

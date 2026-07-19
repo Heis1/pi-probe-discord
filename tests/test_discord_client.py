@@ -84,6 +84,18 @@ def make_config(base_dir: Path) -> AppConfig:
         router_webui_url="http://192.168.1.1",
         router_webui_secret_file=str(base_dir / "router-webui.env"),
         router_webui_ca_file=str(base_dir / "router-webui-ca.pem"),
+        keepalive_enabled=False,
+        keepalive_devices_json="[]",
+        keepalive_state_json=str(base_dir / "keepalive" / "latest.json"),
+        keepalive_timeout_seconds=2,
+        smtp_log_enabled=False,
+        smtp_log_bind_host="127.0.0.1",
+        smtp_log_port=25,
+        smtp_log_directory=str(base_dir / "router-mail"),
+        discord_bot_token="",
+        discord_report_channel_id=0,
+        discord_command_guild_id=0,
+        discord_allowed_user_ids=[],
     )
 
 
@@ -124,6 +136,25 @@ class DiscordClientTests(unittest.TestCase):
         self.assertIn("Dashboard Summary", field_names)
         self.assertIn("Reliability Snapshot", field_names)
         self.assertIn("Open Interactive Dashboard", field_names)
+
+    def test_compact_speed_embed_excludes_unrelated_diagnostics(self) -> None:
+        config = make_config(Path(tempfile.mkdtemp()))
+        payload = build_embed(
+            config=config,
+            hostname="probe-host",
+            run_at_local="2026-06-06 12:00:00 ACST",
+            history={
+                "download": [{"x": "2026-06-06T12:00:00", "y": 120.0}],
+                "upload": [{"x": "2026-06-06T12:00:00", "y": 40.0}],
+                "ping": [{"x": "2026-06-06T12:00:00", "y": 12.0}],
+            },
+            update_result=UpdateResult(ok=True, summary="not run"),
+            pihole_result=PiholeResult(service_status="not run", blocking_status="not run", gravity_age="not run", blocklist_count="not run", update_status="unknown"),
+            speed_result=SpeedResult(ok=True, summary="Download 120 Mbps | Upload 40 Mbps | Ping 12 ms", download_mbps=120.0, upload_mbps=40.0, ping_ms=12.0),
+            include_diagnostics=False,
+        )
+        fields = {field["name"] for field in payload["embeds"][0]["fields"]}
+        self.assertEqual(fields, {"Measured now", "Usual at this time", "Assessment", "Next action"})
 
 
 if __name__ == "__main__":
