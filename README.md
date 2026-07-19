@@ -72,6 +72,35 @@ pi-probe-discord doctor
 
 ## Dashboard setup
 
+The interactive dashboard is the day-to-day view of the connection. It is designed to answer three questions quickly:
+
+1. **What did the latest test measure?** The top row shows the most recent download, upload, and ping result first. The 30-day median and averages beneath each value are context, not the headline.
+2. **Is the network normal right now?** `Core Network Health` is green and says `Normal` only when the monitored router/access point keep-alives are reachable and the inventory is current. Historical router events do not keep a fault active after recovery.
+3. **What should I do next?** The connection panel explains the current state and provides a `Run speed test` button when an immediate measurement is needed.
+
+### Dashboard panels
+
+- **Connection status:** latest result, target attainment, recent failures, and an on-demand speed-test action.
+- **Router Keep-Alive:** independent minute-by-minute reachability for configured routers and access points, including latency.
+- **Core Network Health:** live infrastructure-only diagnosis. Phones and other client devices are excluded from fault classification.
+- **Speed Over Time / Ping Over Time:** separate views of throughput and latency. Router events are kept in their own recent-events panel rather than being overlaid on the charts.
+- **DNS Activity:** Pi-hole request and blocked-request volume for operational context. It does not claim DNS traffic caused a speed change.
+- **Network Devices and Security Signal:** inventory, device categorisation, and only actionable external/security activity. Historical LAN broadcast noise is de-emphasised.
+
+### Run a test now
+
+Open the dashboard and select `Run speed test`. The browser starts the packaged one-shot service and refreshes after the test completes. If `PI_PROBE_INTERACTIVE_DASHBOARD_API_TOKEN` is set, enter that token in the dashboard before using actions.
+
+From the Pi CLI, the equivalent command is:
+
+```bash
+sudo pi-probe-discord speedtest-only
+```
+
+The dashboard uses the native Ookla client when installed, so start a new baseline after switching from the legacy Python client. Do not compare old `speedtest-cli` history directly with new Ookla measurements.
+
+### Enable and access it
+
 Recommended dashboard settings in `/etc/pi-probe-discord/pihole-update-discord.env`:
 
 ```bash
