@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Pi Probe Discord router keep-alive checks
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+Persistent=true
+Unit=pi-probe-discord-keepalive.service
+
+[Install]
+WantedBy=timers.target

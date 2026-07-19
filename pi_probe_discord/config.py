@@ -34,6 +34,8 @@ DEFAULT_NMAP_ARGUMENTS = "-Pn --top-ports 200 --min-rate 2000 --host-timeout 30s
 DEFAULT_FIREWALL_LOG_PATHS = ["/var/log/ufw.log", "/var/log/kern.log", "/var/log/syslog"]
 DEFAULT_ROUTER_SNMP_LOG_PATH = "/var/log/snmptrapd.log"
 DEFAULT_LOG_FILE = DEFAULT_DATA_DIR / "pihole-update-discord.log"
+DEFAULT_KEEPALIVE_STATE_JSON = DEFAULT_DATA_DIR / "keepalive" / "latest.json"
+DEFAULT_BOT_CONFIG_FILE = DEFAULT_CONFIG_DIR / "pi-probe-discord-bot.env"
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -55,6 +57,18 @@ def _env_severity_map(name: str) -> dict[str, str]:
         if sev in {"critical", "warning", "info"}:
             parsed[key.strip().lower()] = sev
     return parsed
+
+
+def _env_int_list(name: str) -> list[int]:
+    values: list[int] = []
+    for value in os.environ.get(name, "").split(","):
+        try:
+            parsed = int(value.strip())
+        except ValueError:
+            continue
+        if parsed > 0:
+            values.append(parsed)
+    return values
 
 
 def load_dotenv_style(path: Path) -> None:
@@ -128,6 +142,7 @@ def load_config(base_dir: Path | None = None, require_webhook: bool = True) -> A
     root = base_dir or Path(__file__).resolve().parent.parent
     config_file = Path(os.environ.get("CONFIG_FILE", str(DEFAULT_CONFIG_FILE)))
     load_dotenv_style(config_file)
+    load_dotenv_style(Path(os.environ.get("PI_PROBE_DISCORD_BOT_ENV_FILE", str(DEFAULT_BOT_CONFIG_FILE))))
 
     webhook_url = os.environ.get("WEBHOOK_URL") or os.environ.get("DISCORD_WEBHOOK_URL")
     if require_webhook and not webhook_url:
@@ -240,4 +255,16 @@ def load_config(base_dir: Path | None = None, require_webhook: bool = True) -> A
             "PI_PROBE_ROUTER_WEBUI_CA_FILE",
             str(DEFAULT_ROUTER_WEBUI_CA_FILE),
         ).strip(),
+        keepalive_enabled=_env_bool("PI_PROBE_KEEPALIVE_ENABLED", False),
+        keepalive_devices_json=os.environ.get("PI_PROBE_KEEPALIVE_DEVICES_JSON", "[]").strip() or "[]",
+        keepalive_state_json=os.environ.get("PI_PROBE_KEEPALIVE_STATE_JSON", str(DEFAULT_KEEPALIVE_STATE_JSON)),
+        keepalive_timeout_seconds=max(1, int(os.environ.get("PI_PROBE_KEEPALIVE_TIMEOUT_SECONDS", "2"))),
+        smtp_log_enabled=_env_bool("PI_PROBE_SMTP_LOG_ENABLED", False),
+        smtp_log_bind_host=os.environ.get("PI_PROBE_SMTP_LOG_BIND_HOST", "192.168.1.51").strip() or "127.0.0.1",
+        smtp_log_port=max(1, int(os.environ.get("PI_PROBE_SMTP_LOG_PORT", "25"))),
+        smtp_log_directory=os.environ.get("PI_PROBE_SMTP_LOG_DIRECTORY", str(DEFAULT_DATA_DIR / "router-mail")),
+        discord_bot_token=os.environ.get("PI_PROBE_DISCORD_BOT_TOKEN", "").strip(),
+        discord_report_channel_id=max(0, int(os.environ.get("PI_PROBE_DISCORD_REPORT_CHANNEL_ID", "0"))),
+        discord_command_guild_id=max(0, int(os.environ.get("PI_PROBE_DISCORD_COMMAND_GUILD_ID", "0"))),
+        discord_allowed_user_ids=_env_int_list("PI_PROBE_DISCORD_ALLOWED_USER_IDS"),
     )

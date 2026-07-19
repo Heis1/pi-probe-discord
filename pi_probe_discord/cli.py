@@ -14,6 +14,8 @@ from .app import (
     render_report,
     render_router_report,
     run_dashboard_server,
+    run_keepalive_check,
+    run_smtp_log_listener,
     run_mode,
     run_router_listener,
     save_nmap_override,
@@ -45,6 +47,8 @@ def parse_mode(argv: list[str]) -> tuple[str, int | None]:
         "nmap-devices",
         "nmap-override",
         "network-diagnose",
+        "keepalive",
+        "smtp-log-listener",
     }:
         return argv[1], None
     if len(argv) >= 2 and argv[1] == "dashboard-html":
@@ -57,7 +61,7 @@ def parse_mode(argv: list[str]) -> tuple[str, int | None]:
         return "doctor", None
     if len(argv) >= 2:
         raise ValueError(
-            "Usage: pihole_update_report.py [full|speedtest-only|update-only|install|firewall|firewall-chart|router|router-listener|doctor|dashboard-html|dashboard-serve|dashboard-check|nmap-scan|nmap-devices|nmap-override|network-diagnose] | report [days]"
+            "Usage: pihole_update_report.py [full|speedtest-only|update-only|keepalive|install|firewall|firewall-chart|router|router-listener|doctor|dashboard-html|dashboard-serve|dashboard-check|nmap-scan|nmap-devices|nmap-override|network-diagnose] | report [days]"
         )
     return "full", None
 
@@ -169,6 +173,19 @@ def main(argv: list[str] | None = None) -> int:
             print(str(exc), file=sys.stderr)
             return 1
         return 0
+    if mode == "keepalive":
+        try:
+            print(run_keepalive_check())
+        except RuntimeError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        return 0
+    if mode == "smtp-log-listener":
+        try:
+            return run_smtp_log_listener()
+        except RuntimeError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
     if mode == "nmap-scan":
         try:
             return run_nmap_scan()

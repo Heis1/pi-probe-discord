@@ -14,6 +14,7 @@ Depends:
  python3-discord,
  python3-requests,
  python3-matplotlib,
+ python3-aiosmtpd,
  speedtest-cli
 Recommends:
  snmp

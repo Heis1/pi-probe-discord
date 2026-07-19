@@ -106,6 +106,18 @@ def make_config(base_dir: Path) -> AppConfig:
         router_webui_url="http://192.168.1.1",
         router_webui_secret_file=str(base_dir / "router-webui.env"),
         router_webui_ca_file=str(base_dir / "router-webui-ca.pem"),
+        keepalive_enabled=False,
+        keepalive_devices_json="[]",
+        keepalive_state_json=str(base_dir / "keepalive" / "latest.json"),
+        keepalive_timeout_seconds=2,
+        smtp_log_enabled=False,
+        smtp_log_bind_host="127.0.0.1",
+        smtp_log_port=25,
+        smtp_log_directory=str(base_dir / "router-mail"),
+        discord_bot_token="",
+        discord_report_channel_id=0,
+        discord_command_guild_id=0,
+        discord_allowed_user_ids=[],
     )
 
 
@@ -451,7 +463,7 @@ class DashboardTests(unittest.TestCase):
             self.assertIn("SNMPv2-MIB::warmStart", html)
             self.assertIn("192.168.1.1", html)
 
-    def test_build_network_diagnosis_flags_extender_disappearance(self) -> None:
+    def test_build_network_diagnosis_ignores_unassigned_legacy_extender_events(self) -> None:
         now = datetime(2026, 7, 2, 17, 0, 0)
         diagnosis = build_network_diagnosis(
             [
@@ -501,9 +513,9 @@ class DashboardTests(unittest.TestCase):
                 auth_fail_events=0,
             ),
         )
-        self.assertEqual(diagnosis["status"], "critical")
-        self.assertEqual(diagnosis["hostMissingCount"], 1)
-        self.assertIn("extender", diagnosis["headline"].lower())
+        self.assertEqual(diagnosis["status"], "healthy")
+        self.assertEqual(diagnosis["hostMissingCount"], 0)
+        self.assertIn("core network", diagnosis["headline"].lower())
 
     def test_ping_dashboard_device_reports_latency(self) -> None:
         with patch("pi_probe_discord.dashboard._run_optional_command", return_value=(True, "64 bytes from 192.168.1.1: icmp_seq=1 ttl=64 time=2.31 ms")):

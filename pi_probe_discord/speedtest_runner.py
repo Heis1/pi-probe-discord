@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+from pathlib import Path
 import subprocess
 
 from .models import SpeedResult
@@ -9,6 +11,36 @@ try:
     import speedtest  # type: ignore
 except ImportError:
     speedtest = None
+
+
+def _official_speedtest_cli() -> SpeedResult | None:
+    """Use Ookla's native client when installed; speedtest-cli is unreliable on fast links."""
+    binary = Path(os.environ.get("PI_PROBE_OOKLA_SPEEDTEST_BIN", "/usr/local/bin/ookla-speedtest"))
+    if not binary.is_file() or not os.access(binary, os.X_OK):
+        return None
+    try:
+        command = [str(binary), "--accept-license", "--accept-gdpr", "--format=json"]
+        server_id = os.environ.get("PI_PROBE_SPEEDTEST_SERVER_ID", "").strip()
+        if server_id:
+            command.extend(["--server-id", server_id])
+        completed = subprocess.run(command, check=True, capture_output=True, text=True, timeout=120)
+        payload = json.loads(completed.stdout)
+        download = float(payload["download"]["bandwidth"]) * 8 / 1_000_000
+        upload = float(payload["upload"]["bandwidth"]) * 8 / 1_000_000
+        ping = float(payload["ping"]["latency"])
+        server = payload.get("server", {})
+        server_name = " ".join(str(server.get(key, "")).strip() for key in ("name", "location") if server.get(key)).strip()
+        warnings = [f"Ookla server: {server_name}"] if server_name else []
+        return SpeedResult(
+            ok=True,
+            summary=f"Download {download:.2f} Mbps | Upload {upload:.2f} Mbps | Ping {ping:.2f} ms",
+            download_mbps=download,
+            upload_mbps=upload,
+            ping_ms=ping,
+            warnings=warnings,
+        )
+    except (OSError, subprocess.SubprocessError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        return SpeedResult(ok=False, summary="Ookla Speedtest failed.", warnings=[str(exc)])
 
 
 def _fallback_speedtest_cli() -> SpeedResult:
@@ -38,6 +70,10 @@ def _fallback_speedtest_cli() -> SpeedResult:
 
 
 def run_speedtest_measurement() -> SpeedResult:
+    official_result = _official_speedtest_cli()
+    if official_result is not None:
+        return official_result
+
     if speedtest is None:
         fallback = _fallback_speedtest_cli()
         if fallback.ok:

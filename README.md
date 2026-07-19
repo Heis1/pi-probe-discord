@@ -1,14 +1,31 @@
 # pi-probe-discord
 
-`pi-probe-discord` runs internet checks on a Pi, stores local history in SQLite, and posts results to Discord.
+`pi-probe-discord` is a Pi-hosted home-network monitor. It runs reliable internet checks, watches core network devices, stores local history in SQLite, and posts concise results to Discord.
 
 ## What it does
 
-- scheduled speed tests and full reports
-- Discord embeds with health verdicts and PNG snapshots
-- optional premium dashboard PNG for Discord
-- optional interactive HTML dashboard for local, LAN, or Tailscale access
-- optional firewall, Pi-hole, router SNMP, and update reporting
+- scheduled or on-demand internet speed tests using the native Ookla CLI
+- Discord delivery through either a webhook or a configured bot channel
+- concise speed alerts with current result, time-matched baseline, and next action
+- interactive dashboard that leads with the latest result and offers a `Run speed test` action
+- live router/access-point keep-alive checks and normalised core-network health
+- optional router SMTP log ingest, remote syslog, firewall, Pi-hole, SNMP, Nmap, and update reporting
+
+## Version 1.2 highlights
+
+- **Trustworthy speed tests:** the probe prefers the native Ookla client over the legacy Python `speedtest-cli` implementation. This avoids unreliable readings on high-speed links and records the selected test server.
+- **Live network health:** routers and access points can be monitored independently every minute. The dashboard shows a compact green `Normal` state only when live checks and current inventory agree.
+- **Actionable dashboard:** latest download, upload, and ping are shown first. Speed, ping, and DNS activity are separate views; historical router noise is not presented as a current fault.
+- **Discord that lands in the right place:** scheduled reports post directly to the configured bot channel, without competing with the long-running Discord bot gateway connection.
+
+Use the native Ookla CLI on a Raspberry Pi 64-bit installation:
+
+```bash
+curl -fL -o /tmp/ookla-speedtest.tgz https://install.speedtest.net/app/cli/ookla-speedtest-1.2.0-linux-aarch64.tgz
+tar -xzf /tmp/ookla-speedtest.tgz -C /tmp
+sudo install -m 0755 /tmp/speedtest /usr/local/bin/ookla-speedtest
+/usr/local/bin/ookla-speedtest --accept-license --accept-gdpr
+```
 
 ## Quick start
 
@@ -24,11 +41,13 @@ Edit config:
 sudo nano /etc/pi-probe-discord/pihole-update-discord.env
 ```
 
-Minimum required setting:
+Configure one Discord delivery method:
 
 ```bash
 WEBHOOK_URL="https://discord.com/api/webhooks/replace/this"
 ```
+
+Or configure `PI_PROBE_DISCORD_BOT_TOKEN` and `PI_PROBE_DISCORD_REPORT_CHANNEL_ID` in `/etc/pi-probe-discord/pi-probe-discord-bot.env`.
 
 Health check:
 
