@@ -59,6 +59,9 @@ class FirewallSnapshot:
     notes: list[str]
     log_source: str
     log_error: str | None = None
+    auth_failures: int = 0
+    auth_successes: int = 0
+    ssh_sessions: int = 0
 
 
 @dataclass
@@ -138,11 +141,23 @@ def parse_ufw_log_line(line: str, now: datetime | None = None) -> UfwLogEntry | 
         forti = {item.group("key"): item.group("value").strip('"') for item in FORTI_KV_RE.finditer(line)}
         if forti.get("type") in {"traffic", "utm", "event"}:
             action = forti.get("action", "OTHER").upper()
+            raw_lower = line.lower()
+            ui = forti.get("ui", "").lower()
+            source_match = re.search(r"(?:from|ssh|https)\\(([^)]+)\\)", line, re.IGNORECASE)
+            src = forti.get("srcip") or (source_match.group(1) if source_match else "")
+            is_ssh = "ssh" in ui or "ssh" in raw_lower
+            is_login = "login" in raw_lower or action == "LOGIN"
+            if is_login and (forti.get("status", "").lower() in {"fail", "failed", "failure"} or "fail" in raw_lower or "invalid" in raw_lower):
+                action = "AUTH_FAIL"
+            elif is_login and (forti.get("status", "").lower() in {"success", "succeeded"} or "successful" in raw_lower):
+                action = "AUTH_SUCCESS"
+            elif is_ssh and action in {"ACCEPT", "ALLOW", "LOGIN"}:
+                action = "SSH_SESSION"
             if action in {"DENY", "DROP", "BLOCK"}:
                 action = "BLOCK"
             elif action in {"ACCEPT", "ALLOW", "PASSED"}:
                 action = "ALLOW"
-            fields = {"SRC": forti.get("srcip", ""), "DST": forti.get("dstip", ""), "DPT": forti.get("dstport", ""), "PROTO": forti.get("proto", "unknown"), "IN": forti.get("srcintf", "unknown")}
+            fields = {"SRC": src, "DST": forti.get("dstip", ""), "DPT": forti.get("dstport", "") or ("22" if is_ssh else ("443" if is_login else "")), "PROTO": forti.get("proto", "unknown"), "IN": forti.get("srcintf", "unknown")}
             return UfwLogEntry(timestamp=now, action=action, raw=line, fields={key: value for key, value in fields.items() if value})
         if "UFW" not in line:
             return None
@@ -223,13 +238,20 @@ def summarize_entries(
     ipv6 = 0
     ssh_attempts = 0
     dns_attempts = 0
+    auth_failures = auth_successes = ssh_sessions = 0
     multicast_hits = 0
 
     for entry in recent:
-        if entry.action == "BLOCK":
+        if entry.action in {"BLOCK", "AUTH_FAIL"}:
             blocked += 1
         if entry.action == "ALLOW":
             allowed += 1
+        if entry.action == "AUTH_FAIL":
+            auth_failures += 1
+        elif entry.action == "AUTH_SUCCESS":
+            auth_successes += 1
+        elif entry.action == "SSH_SESSION":
+            ssh_sessions += 1
 
         src = entry.fields.get("SRC")
         dst = entry.fields.get("DST")
@@ -298,6 +320,9 @@ def summarize_entries(
         notes=notes[:6],
         log_source=log_source,
         log_error=log_error,
+        auth_failures=auth_failures,
+        auth_successes=auth_successes,
+        ssh_sessions=ssh_sessions,
     )
 
 

@@ -1158,6 +1158,9 @@ def _build_firewall_dashboard_payload(
         "totalEntries": snapshot.total_entries,
         "noisySources": noisy_source_count,
         "sshAttempts": snapshot.ssh_attempts,
+        "authFailures": snapshot.auth_failures,
+        "authSuccesses": snapshot.auth_successes,
+        "sshSessions": snapshot.ssh_sessions,
         "dnsAttempts": snapshot.dns_attempts,
         "policy": f"{snapshot.status.default_incoming} in / {snapshot.status.default_outgoing} out",
         "logging": snapshot.status.logging,
@@ -2940,7 +2943,7 @@ function renderFirewallSignal() {
   }
   const actionable = (firewall.sources || []).filter(source => source.scope === 'External');
   const externalBlocked = actionable.reduce((total, source) => total + Number(source.count || 0), 0);
-  const attention = actionable.length > 0 || Number(firewall.sshAttempts || 0) > 0;
+  const attention = actionable.length > 0 || Number(firewall.sshAttempts || 0) > 0 || Number(firewall.authFailures || 0) > 0;
   const fortiSyslog = String(firewall.logSource || '').includes('fortiwifi.log');
   const grid = document.createElement('div');
   grid.className = 'security-grid';
@@ -2948,7 +2951,7 @@ function renderFirewallSignal() {
   hero.className = `security-hero${attention ? ' attention' : ''}`;
   hero.innerHTML = `<div class="security-kicker">${fortiSyslog ? 'FortiWiFi syslog active' : 'Current security state'}</div><div class="security-title">${attention ? 'Review external activity' : (fortiSyslog ? `${firewall.totalEntries || 0} FortiWiFi events received` : 'No external threat signal')}</div><div class="security-copy">${attention ? 'External sources or administration-port attempts were blocked. Review the sources below.' : (fortiSyslog ? `${firewall.blocked || 0} denied events in the current window; ordinary LAN chatter is shown below for visibility.` : 'Blocked entries are local network chatter. The firewall is containing it; no action is required.')}</div>`;
   grid.appendChild(hero);
-  [[fortiSyslog ? (firewall.totalEntries || 0) : externalBlocked, fortiSyslog ? 'FortiWiFi events' : 'External blocked'], [firewall.sshAttempts || 0, 'SSH attempts'], [firewall.blocked || 0, 'Total blocked']].forEach(([value, label]) => {
+  [[fortiSyslog ? (firewall.totalEntries || 0) : externalBlocked, fortiSyslog ? 'FortiWiFi events' : 'External blocked'], [firewall.authFailures || 0, 'Failed admin logins'], [firewall.sshSessions || 0, 'Live SSH sessions'], [firewall.blocked || 0, 'Total blocked']].forEach(([value, label]) => {
     const stat = document.createElement('div');
     stat.className = 'security-stat';
     stat.innerHTML = `<span>${label}</span><b>${value}</b>`;
