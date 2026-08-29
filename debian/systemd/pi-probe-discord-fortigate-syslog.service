@@ -9,3 +9,6 @@ WorkingDirectory=/opt/pi-probe-discord
 ExecStart=/usr/bin/pi-probe-discord fortigate-syslog-listener
 Restart=on-failure
 RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
