@@ -2941,13 +2941,14 @@ function renderFirewallSignal() {
   const actionable = (firewall.sources || []).filter(source => source.scope === 'External');
   const externalBlocked = actionable.reduce((total, source) => total + Number(source.count || 0), 0);
   const attention = actionable.length > 0 || Number(firewall.sshAttempts || 0) > 0;
+  const fortiSyslog = String(firewall.logSource || '').includes('fortiwifi.log');
   const grid = document.createElement('div');
   grid.className = 'security-grid';
   const hero = document.createElement('div');
   hero.className = `security-hero${attention ? ' attention' : ''}`;
-  hero.innerHTML = `<div class="security-kicker">Current security state</div><div class="security-title">${attention ? 'Review external activity' : 'No external threat signal'}</div><div class="security-copy">${attention ? 'External sources or administration-port attempts were blocked. Review the sources below.' : 'Blocked entries are local network chatter. The firewall is containing it; no action is required.'}</div>`;
+  hero.innerHTML = `<div class="security-kicker">${fortiSyslog ? 'FortiWiFi syslog active' : 'Current security state'}</div><div class="security-title">${attention ? 'Review external activity' : (fortiSyslog ? `${firewall.totalEntries || 0} FortiWiFi events received` : 'No external threat signal')}</div><div class="security-copy">${attention ? 'External sources or administration-port attempts were blocked. Review the sources below.' : (fortiSyslog ? `${firewall.blocked || 0} denied events in the current window; ordinary LAN chatter is shown below for visibility.` : 'Blocked entries are local network chatter. The firewall is containing it; no action is required.')}</div>`;
   grid.appendChild(hero);
-  [[externalBlocked, 'External blocked'], [firewall.sshAttempts || 0, 'SSH attempts'], [firewall.blocked || 0, 'Total blocked']].forEach(([value, label]) => {
+  [[fortiSyslog ? (firewall.totalEntries || 0) : externalBlocked, fortiSyslog ? 'FortiWiFi events' : 'External blocked'], [firewall.sshAttempts || 0, 'SSH attempts'], [firewall.blocked || 0, 'Total blocked']].forEach(([value, label]) => {
     const stat = document.createElement('div');
     stat.className = 'security-stat';
     stat.innerHTML = `<span>${label}</span><b>${value}</b>`;
@@ -2972,8 +2973,9 @@ function renderFirewallSignal() {
   shell.appendChild(actions);
   const details = document.createElement('details');
   details.className = 'security-details';
+  details.open = fortiSyslog;
   const summary = document.createElement('summary');
-  summary.textContent = `Local traffic details (${(firewall.sources || []).filter(source => source.scope !== 'External').length} source(s))`;
+  summary.textContent = `${fortiSyslog ? 'FortiWiFi local traffic details' : 'Local traffic details'} (${(firewall.sources || []).filter(source => source.scope !== 'External').length} source(s))`;
   const copy = document.createElement('div');
   copy.textContent = (firewall.sources || []).filter(source => source.scope !== 'External').map(source => `${source.device?.name || source.ip}: ${source.count} blocked`).join(' · ') || 'No local source detail is available.';
   details.append(summary, copy);
