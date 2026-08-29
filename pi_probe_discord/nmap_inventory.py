@@ -397,6 +397,20 @@ def _merge_discovery_hosts(discovery_xml: Path, service_xml: Path) -> None:
         service_tree.write(service_xml, encoding="utf-8", xml_declaration=True)
 
 
+def _discovered_ipv4_hosts(discovery_xml: Path) -> list[str]:
+    try:
+        root = ET.parse(discovery_xml).getroot()
+    except (ET.ParseError, OSError):
+        return []
+    return [
+        address.attrib.get("addr", "").strip()
+        for host in root.findall("host")
+        if host.find("status") is not None and host.find("status").attrib.get("state") == "up"
+        for address in host.findall("address")
+        if address.attrib.get("addrtype") == "ipv4" and address.attrib.get("addr", "").strip()
+    ]
+
+
 def _update_scan_state(
     path: Path,
     *,
@@ -1193,12 +1207,6 @@ def run_nmap_inventory_scan(config: AppConfig, now: datetime) -> tuple[bool, str
                     stderr=subprocess.STDOUT,
                     text=True,
                 )
-                process = subprocess.Popen(
-                    args,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                )
             except FileNotFoundError:
                 _update_scan_state(
                     state_path,
@@ -1231,6 +1239,15 @@ def run_nmap_inventory_scan(config: AppConfig, now: datetime) -> tuple[bool, str
             if discovery_code != 0:
                 discovery_error = next((line for line in reversed(discovery_output) if line.strip()), f"nmap discovery exited with {discovery_code}")
                 print(f"Discovery scan warning: {discovery_error}", file=sys.stderr, flush=True)
+            discovered_hosts = _discovered_ipv4_hosts(discovery_xml_path) or targets
+            args = ["nmap", *nmap_args, *discovered_hosts, "-oX", str(xml_path)]
+            print(f"Running nmap inventory scan: {' '.join(args)}", file=sys.stderr, flush=True)
+            process = subprocess.Popen(
+                args,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
             output_lines: list[str] = []
             host_down_count = 0
             scan_report_count = 0
