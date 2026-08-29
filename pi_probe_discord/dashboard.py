@@ -2084,7 +2084,10 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
 .linkline a { color: var(--accent); text-decoration: none; font-weight: 700; }
 .action-inline { display:flex; flex-wrap:wrap; gap: 8px; align-items:center; }
 .action-inline input { min-width: 220px; }
-@media (max-width: 1180px) {
+/* Keep the analytics panels readable on a narrowed desktop window, including
+   browsers using a reduced page zoom.  The charts need substantially more
+   room than ordinary cards, so collapse them before they can crowd each other. */
+@media (max-width: 1500px) {
   .hero, .grid, .diag-grid { grid-template-columns: 1fr; }
   .controls { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .hero-grid, .score-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
