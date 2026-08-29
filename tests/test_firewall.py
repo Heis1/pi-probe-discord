@@ -20,6 +20,17 @@ def test_parse_ipv4_tcp_block() -> None:
     assert entry.fields["DPT"] == "22"
 
 
+def test_parses_fortiwifi_denied_traffic_syslog() -> None:
+    entry = parse_ufw_log_line(
+        'date=2026-08-29 time=16:00:00 type="traffic" subtype="forward" srcip=203.0.113.9 srcintf="wan1" dstip=10.10.10.1 dstport=22 proto=6 action="deny"',
+        now=datetime(2026, 8, 29, 16, 0, 0),
+    )
+    assert entry is not None
+    assert entry.action == "BLOCK"
+    assert entry.fields["SRC"] == "203.0.113.9"
+    assert entry.fields["DPT"] == "22"
+
+
 def test_parse_ipv4_udp_block() -> None:
     now = datetime(2026, 5, 2, 12, 0, 0)
     line = "May  2 11:58:01 host kernel: [UFW BLOCK] IN=wlan0 OUT= MAC=aa SRC=5.6.7.8 DST=10.0.0.2 LEN=44 TTL=40 PROTO=UDP SPT=5353 DPT=5353"

@@ -357,6 +357,20 @@ For a Pi upstream of the FortiWiFi, configure its host route and the narrow Fort
 
 The collector uses FortiOS monitor endpoints for system status and one-minute CPU, memory, and session values. Fortinet documents the monitor resource endpoint and API-token workflow in its [FortiOS monitoring reference](https://docs.fortinet.com/document/fortigate/7.4.6/fortinet-carrier-grade-nat-field-reference-architecture-guide/725722/rest-api-for-monitoring).
 
+### FortiWiFi syslog visibility
+
+Pi Probe can also receive FortiWiFi syslog locally and include denied traffic in the existing Security Signal dashboard panel. Enable the UDP receiver and add its log to the firewall sources:
+
+```ini
+PI_PROBE_FORTIGATE_SYSLOG_ENABLED="true"
+PI_PROBE_FORTIGATE_SYSLOG_PORT="5514"
+PI_PROBE_FORTIGATE_SYSLOG_ALLOWED_SOURCES="10.10.10.1"
+PI_PROBE_FORTIGATE_SYSLOG_LOG_FILE="/var/lib/pi-probe-discord/fortigate-syslog/fortigate.log"
+PI_PROBE_FIREWALL_LOG_PATHS="/var/lib/pi-probe-discord/fortigate-syslog/fortigate.log,/var/log/ufw.log,/var/log/kern.log,/var/log/syslog"
+```
+
+Start `pi-probe-discord-fortigate-syslog.service`. In FortiWiFi **Log & Report → Log Settings**, enable **Send logs to syslog**, set the Pi to `192.168.1.51`, port `5514`, and use UDP. Start with traffic and event logs; denied traffic is the most useful signal and allowed traffic can be intentionally noisy.
+
 ## Firewall examples
 
 LAN-only example:

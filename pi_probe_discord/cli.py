@@ -17,6 +17,7 @@ from .app import (
     run_keepalive_check,
     run_fortigate_check,
     run_smtp_log_listener,
+    run_fortigate_syslog_listener,
     run_mode,
     run_router_listener,
     save_nmap_override,
@@ -51,6 +52,7 @@ def parse_mode(argv: list[str]) -> tuple[str, int | None]:
         "keepalive",
         "fortigate",
         "smtp-log-listener",
+        "fortigate-syslog-listener",
     }:
         return argv[1], None
     if len(argv) >= 2 and argv[1] == "dashboard-html":
@@ -192,6 +194,12 @@ def main(argv: list[str] | None = None) -> int:
     if mode == "smtp-log-listener":
         try:
             return run_smtp_log_listener()
+        except RuntimeError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+    if mode == "fortigate-syslog-listener":
+        try:
+            return run_fortigate_syslog_listener()
         except RuntimeError as exc:
             print(str(exc), file=sys.stderr)
             return 1

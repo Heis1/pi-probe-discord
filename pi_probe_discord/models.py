@@ -100,6 +100,11 @@ class AppConfig:
     fortigate_state_json: str = ""
     fortigate_timeout_seconds: int = 8
     fortigate_tls_verify: bool = True
+    fortigate_syslog_enabled: bool = False
+    fortigate_syslog_bind_host: str = "0.0.0.0"
+    fortigate_syslog_port: int = 5514
+    fortigate_syslog_log_file: str = "/var/lib/pi-probe-discord/fortigate-syslog/fortigate.log"
+    fortigate_syslog_allowed_sources: list[str] = field(default_factory=list)
     discord_reporting_enabled: bool = True
     discord_report_modes: list[str] = field(default_factory=lambda: ["full", "speedtest-only", "update-only", "firewall"])
 

@@ -38,6 +38,7 @@ DEFAULT_KEEPALIVE_STATE_JSON = DEFAULT_DATA_DIR / "keepalive" / "latest.json"
 DEFAULT_BOT_CONFIG_FILE = DEFAULT_CONFIG_DIR / "pi-probe-discord-bot.env"
 DEFAULT_FORTIGATE_SECRET_FILE = DEFAULT_CONFIG_DIR / "fortigate.env"
 DEFAULT_FORTIGATE_STATE_JSON = DEFAULT_DATA_DIR / "fortigate" / "latest.json"
+DEFAULT_FORTIGATE_SYSLOG_FILE = DEFAULT_DATA_DIR / "fortigate-syslog" / "fortigate.log"
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -308,4 +309,9 @@ def load_config(base_dir: Path | None = None, require_webhook: bool = True) -> A
         fortigate_state_json=os.environ.get("PI_PROBE_FORTIGATE_STATE_JSON", str(DEFAULT_FORTIGATE_STATE_JSON)),
         fortigate_timeout_seconds=max(1, int(os.environ.get("PI_PROBE_FORTIGATE_TIMEOUT_SECONDS", "8"))),
         fortigate_tls_verify=_env_bool("FORTIGATE_TLS_VERIFY", _env_bool("PI_PROBE_FORTIGATE_TLS_VERIFY", True)),
+        fortigate_syslog_enabled=_env_bool("PI_PROBE_FORTIGATE_SYSLOG_ENABLED", False),
+        fortigate_syslog_bind_host=os.environ.get("PI_PROBE_FORTIGATE_SYSLOG_BIND_HOST", "0.0.0.0").strip() or "0.0.0.0",
+        fortigate_syslog_port=max(1, int(os.environ.get("PI_PROBE_FORTIGATE_SYSLOG_PORT", "5514"))),
+        fortigate_syslog_log_file=os.environ.get("PI_PROBE_FORTIGATE_SYSLOG_LOG_FILE", str(DEFAULT_FORTIGATE_SYSLOG_FILE)).strip() or str(DEFAULT_FORTIGATE_SYSLOG_FILE),
+        fortigate_syslog_allowed_sources=[item.strip() for item in os.environ.get("PI_PROBE_FORTIGATE_SYSLOG_ALLOWED_SOURCES", "").split(",") if item.strip()],
     )

@@ -14,6 +14,7 @@ JOURNALCTL_COMMAND = ["journalctl", "-k", "--since", "-24 hours", "--no-pager"]
 
 LOG_ENTRY_RE = re.compile(r"\[UFW\s+(?P<action>[A-Z]+)\]\s+(?P<data>.*)$")
 KV_RE = re.compile(r"\b([A-Z]+)=([^\s]+)")
+FORTI_KV_RE = re.compile(r'\b(?P<key>[a-z]+)=(?P<value>"[^"]*"|[^\s]+)')
 SYSLOG_TS_RE = re.compile(r"^(?P<mon>[A-Z][a-z]{2})\s+(?P<day>\d{1,2})\s+(?P<time>\d{2}:\d{2}:\d{2})")
 MONTHS = {"Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4, "May": 5, "Jun": 6, "Jul": 7, "Aug": 8, "Sep": 9, "Oct": 10, "Nov": 11, "Dec": 12}
 
@@ -134,6 +135,15 @@ def parse_ufw_log_line(line: str, now: datetime | None = None) -> UfwLogEntry | 
     now = now or datetime.now().astimezone()
     match = LOG_ENTRY_RE.search(line)
     if not match:
+        forti = {item.group("key"): item.group("value").strip('"') for item in FORTI_KV_RE.finditer(line)}
+        if forti.get("type") in {"traffic", "utm", "event"}:
+            action = forti.get("action", "OTHER").upper()
+            if action in {"DENY", "DROP", "BLOCK"}:
+                action = "BLOCK"
+            elif action in {"ACCEPT", "ALLOW", "PASSED"}:
+                action = "ALLOW"
+            fields = {"SRC": forti.get("srcip", ""), "DST": forti.get("dstip", ""), "DPT": forti.get("dstport", ""), "PROTO": forti.get("proto", "unknown"), "IN": forti.get("srcintf", "unknown")}
+            return UfwLogEntry(timestamp=now, action=action, raw=line, fields={key: value for key, value in fields.items() if value})
         if "UFW" not in line:
             return None
         return UfwLogEntry(timestamp=_parse_syslog_timestamp(line, now), action="OTHER", raw=line, fields={})
