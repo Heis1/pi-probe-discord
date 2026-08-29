@@ -4,6 +4,7 @@ import argparse
 import os
 import shutil
 import subprocess
+from datetime import datetime
 from pathlib import Path
 
 from .config import (
@@ -238,6 +239,14 @@ def _print_systemd_cleanup_guidance(units: list[str]) -> None:
     print("If you also want to remove old unit files, inspect /etc/systemd/system and delete only the ones you recognize.")
 
 
+def _backup_existing_config(config_path: Path) -> Path:
+    timestamp = datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
+    backup_path = config_path.with_name(f"{config_path.name}.backup-{timestamp}")
+    shutil.copy2(config_path, backup_path)
+    os.chmod(backup_path, 0o600)
+    return backup_path
+
+
 def run_install(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description="Interactive installer for pi-probe-discord")
     parser.add_argument("--install-dir", default="/opt/pi-probe-discord")
@@ -266,6 +275,14 @@ def run_install(argv: list[str]) -> int:
 
     _inspect_and_clean_user_crontab()
     _print_systemd_cleanup_guidance(_inspect_related_systemd_units())
+
+    if config_path.exists():
+        print(f"Existing custom configuration found: {config_path}")
+        if not _prompt_yes_no("Back it up and replace it with newly entered installer settings?", default=False):
+            print("Existing configuration left unchanged. No installer changes were made.")
+            return 0
+        backup_path = _backup_existing_config(config_path)
+        print(f"Backed up existing configuration to: {backup_path}")
 
     webhook = _prompt_webhook("https://discord.com/api/webhooks/replace/this")
     speedtest_minutes = int(_prompt("Publish speedtest results every how many minutes?", str(DEFAULT_SPEEDTEST_MINUTES)))

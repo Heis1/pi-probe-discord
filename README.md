@@ -2,6 +2,16 @@
 
 `pi-probe-discord` is a Pi-hosted home-network monitor. It runs reliable internet checks, watches core network devices, stores local history in SQLite, and posts concise results to Discord.
 
+## This deployment
+
+This repository is tailored for the deployed home network rather than being a generic monitoring template. It monitors the Pi-hosted services, Pi-hole and internet performance, a FortiWiFi 30E at `10.10.10.1`, and a FortiAP-U431F at `10.10.10.105`. The interactive dashboard combines live keep-alive checks, FortiWiFi API health, and inventory across both `192.168.1.0/24` and `10.10.10.0/24`.
+
+HTTPS is backed by the local **Pi Probe Local CA**. Its private key remains root-only on the Pi; clients trust its CA certificate instead. Your deployment settings live in `/etc/pi-probe-discord/pihole-update-discord.env`, while secrets such as the FortiWiFi API token remain in separate protected files.
+
+### Preserve local customisation
+
+Normal package upgrades preserve the configuration file and data directory. Do not use `--reconfigure` casually: it launches the interactive installer. When an existing configuration is detected, the installer now requires explicit confirmation and creates a timestamped `pihole-update-discord.env.backup-YYYYMMDD-HHMMSS` file before replacing it.
+
 ## What it does
 
 - scheduled or on-demand internet speed tests using the native Ookla CLI

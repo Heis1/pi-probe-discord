@@ -348,6 +348,8 @@ class DashboardTests(unittest.TestCase):
             self.assertIn("scanTargets", html)
             self.assertIn('"mac": "AA:BB:CC:DD:EE:FF"', html)
             self.assertIn("Clear override", html)
+            self.assertIn("@media (max-width: 760px)", html)
+            self.assertIn(".device-editor { grid-template-columns: 1fr; }", html)
             self.assertEqual(status["service"], "pi-probe-discord-dashboard")
             self.assertEqual(status["test_count"], 2)
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+import tempfile
 from pathlib import Path
 
 from pi_probe_discord import installer
@@ -55,6 +56,14 @@ class PackagingTests(unittest.TestCase):
         self.assertIn('PI_PROBE_DASHBOARD_REFRESH_SECONDS="60"', env_template)
         self.assertIn('PI_PROBE_INTERACTIVE_DASHBOARD_API_TOKEN=""', env_template)
         self.assertIn('PI_PROBE_NMAP_SCAN_MINUTES="360"', env_template)
+
+    def test_installer_backs_up_existing_config_with_private_permissions(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "pihole-update-discord.env"
+            config_path.write_text('WEBHOOK_URL="existing"\n', encoding="utf-8")
+            backup_path = installer._backup_existing_config(config_path)
+            self.assertEqual(backup_path.read_text(encoding="utf-8"), 'WEBHOOK_URL="existing"\n')
+            self.assertEqual(backup_path.stat().st_mode & 0o777, 0o600)
 
 
 if __name__ == "__main__":

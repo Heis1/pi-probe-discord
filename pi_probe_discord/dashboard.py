@@ -1663,6 +1663,8 @@ body {
 }
 body.theme-clean { background: linear-gradient(180deg, #f8fafc, var(--bg)); }
 .wrap { max-width: 1720px; margin: 0 auto; padding: 24px; }
+.wrap, .hero > *, .grid > *, .panel-head > *, .device-zone-head > *, .cluster-head > *,
+.diag-hero-head > *, .diag-item-head > *, .firewall-source-head > * { min-width: 0; }
 .hero { display:grid; grid-template-columns: 1.2fr .8fr; gap: 18px; margin-bottom: 18px; }
 .hero, .panel, .kpi { backdrop-filter: blur(12px); }
 .panel, .kpi, .controls {
@@ -2083,8 +2085,47 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
 .action-inline { display:flex; flex-wrap:wrap; gap: 8px; align-items:center; }
 .action-inline input { min-width: 220px; }
 @media (max-width: 1180px) {
-  .hero, .grid, .controls, .hero-grid, .score-grid, .diag-topline, .diag-grid, .chart-summary, .firewall-topline, .firewall-source-grid { grid-template-columns: 1fr; }
+  .hero, .grid, .diag-grid { grid-template-columns: 1fr; }
+  .controls { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .hero-grid, .score-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .diag-topline { grid-template-columns: minmax(0, 1fr) repeat(3, minmax(120px, .55fr)); }
+  .chart-summary, .firewall-source-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .firewall-topline { grid-template-columns: minmax(0, 1.25fr) repeat(2, minmax(120px, .55fr)); }
+  .security-grid { grid-template-columns: minmax(0, 1fr) repeat(3, minmax(110px, .55fr)); }
   .device-zone-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 980px) {
+  .diag-topline, .firewall-topline, .security-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .diag-hero, .firewall-hero, .security-hero { grid-column: 1 / -1; }
+  .firewall-source-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 760px) {
+  .wrap { padding: 14px; }
+  .controls, .hero-grid, .score-grid, .chart-summary, .diag-topline, .firewall-topline,
+  .firewall-source-grid, .security-grid { grid-template-columns: 1fr; }
+  .panel { padding: 15px; }
+  .hero-main, .hero-side { padding: 17px; }
+  .panel-head, .device-zone-head { flex-direction: column; }
+  .panel-stamp { align-self: flex-start; }
+  .keepalive-grid { grid-template-columns: 1fr; }
+  .action-inline input { min-width: 0; }
+  .security-action { align-items: flex-start; flex-direction: column; }
+  .security-action span { text-align: left; }
+}
+@media (max-width: 480px) {
+  .wrap { padding: 10px; }
+  .hero { gap: 12px; margin-bottom: 12px; }
+  .controls, .diag-section, .firewall-section, .keepalive-section, .grid { margin-bottom: 12px; }
+  .panel, .hero-main, .hero-side { padding: 13px; border-radius: 17px; }
+  .hero-main h1 { font-size: 27px; }
+  .panel-head h2 { font-size: 20px; }
+  .kpi .value { font-size: 25px; }
+  .device-editor { grid-template-columns: 1fr; }
+  .device-editor .span-2 { grid-column: auto; }
+  .device-actions, .device-tool-row, .device-status { grid-column: auto; flex-wrap: wrap; }
+  .action-button, .diag-toggle { width: 100%; }
+  .chart { height: 290px; }
+  .chart-small { height: 250px; }
 }
 </style>
 </head>
