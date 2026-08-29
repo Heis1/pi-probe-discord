@@ -92,6 +92,16 @@ class AppConfig:
     discord_report_channel_id: int
     discord_command_guild_id: int
     discord_allowed_user_ids: list[int]
+    fortigate_enabled: bool = False
+    fortigate_url: str = ""
+    fortigate_vdom: str = "root"
+    fortigate_secret_file: str = ""
+    fortigate_ca_file: str = ""
+    fortigate_state_json: str = ""
+    fortigate_timeout_seconds: int = 8
+    fortigate_tls_verify: bool = True
+    discord_reporting_enabled: bool = True
+    discord_report_modes: list[str] = field(default_factory=lambda: ["full", "speedtest-only", "update-only", "firewall"])
 
 
 @dataclass

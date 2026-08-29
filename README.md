@@ -63,12 +63,23 @@ pi-probe-discord speedtest-only
 pi-probe-discord report 7
 pi-probe-discord firewall
 pi-probe-discord router
+pi-probe-discord fortigate
 pi-probe-discord network-diagnose
 pi-probe-discord dashboard-html
 pi-probe-discord dashboard-serve
 pi-probe-discord dashboard-check
 pi-probe-discord doctor
 ```
+
+Speed tests are intentionally rate-limited to at least 30 minutes. If an old installer-created timer override is causing minute-by-minute runs, stop it immediately and remove the override before re-enabling the timer:
+
+```bash
+sudo systemctl disable --now pi-probe-discord-speedtest.timer
+sudo rm -rf /etc/systemd/system/pi-probe-discord-speedtest.timer.d
+sudo systemctl daemon-reload
+```
+
+The packaged timer runs its first test ten minutes after activation, then schedules the next one an hour after each completed test. This avoids overlapping or runaway one-shot tests.
 
 ## Dashboard setup
 
@@ -300,6 +311,41 @@ To avoid trusting arbitrary certificates on the LAN, export or copy the router's
 ```
 
 When `PI_PROBE_ROUTER_WEBUI_CA_FILE` points to that file, Pi Probe pins the router connection to that exact certificate before logging in.
+
+## FortiWiFi 30E reporting
+
+Pi Probe can poll a FortiWiFi/FortiGate through its read-only FortiOS Monitor API and place gateway identity, CPU, memory, and active-session reporting on the dashboard. It sends only `GET` requests; the API token stays in a root-only file and is never put in dashboard JSON.
+
+Set the gateway, access-point, and FortiAP reachability checks in `/etc/pi-probe-discord/pihole-update-discord.env`:
+
+```bash
+PI_PROBE_KEEPALIVE_ENABLED="true"
+PI_PROBE_KEEPALIVE_DEVICES_JSON='[{"name":"Upstairs Router","host":"192.168.1.1","role":"router"},{"name":"FortiWiFi 30E","host":"10.10.10.1","role":"firewall"},{"name":"AX20 Downstairs","host":"10.10.10.2","role":"access_point"},{"name":"FortiAP-U431F","host":"10.10.10.105","role":"access_point"}]'
+PI_PROBE_FORTIGATE_ENABLED="true"
+FORTIGATE_BASE_URL="https://10.10.10.1"
+PI_PROBE_FORTIGATE_VDOM="root"
+PI_PROBE_FORTIGATE_CA_FILE="/etc/pi-probe-discord/fortigate-ca.pem"
+```
+
+Replace `10.10.10.1` with the FortiWiFi management address if it differs. Create a least-privilege REST API administrator on the FortiWiFi, restrict its trusted hosts to the Pi's IP, then install its token without adding it to the main configuration:
+
+```bash
+sudo install -o root -g root -m 600 /usr/share/pi-probe-discord/fortigate.env.example /etc/pi-probe-discord/fortigate.env
+sudo nano /etc/pi-probe-discord/fortigate.env
+sudo install -o root -g pi-probe-discord -m 640 /path/to/fortigate-ca.pem /etc/pi-probe-discord/fortigate-ca.pem
+sudo systemctl enable --now pi-probe-discord-fortigate.timer pi-probe-discord-keepalive.timer
+sudo pi-probe-discord fortigate
+```
+
+To include devices behind the FortiWiFi in the inventory and dashboard, add its routed subnet to the Nmap targets. Targets are space-separated:
+
+```bash
+PI_PROBE_NMAP_TARGETS="192.168.1.0/24 10.10.10.0/24"
+```
+
+For a Pi upstream of the FortiWiFi, configure its host route and the narrow FortiGate `wan -> internal` policy outside this application. The program never changes Linux routes or FortiGate firewall rules. A one-shot `pi-probe-discord fortigate` result identifies the precise failing stage (`route`, `tcp`, `tls`, `authentication`, `http`, `api`, or `parsing`) without logging the API token.
+
+The collector uses FortiOS monitor endpoints for system status and one-minute CPU, memory, and session values. Fortinet documents the monitor resource endpoint and API-token workflow in its [FortiOS monitoring reference](https://docs.fortinet.com/document/fortigate/7.4.6/fortinet-carrier-grade-nat-field-reference-architecture-guide/725722/rest-api-for-monitoring).
 
 ## Firewall examples
 

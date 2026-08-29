@@ -1164,8 +1164,13 @@ def run_nmap_inventory_scan(config: AppConfig, now: datetime) -> tuple[bool, str
         nmap_args.extend(["--script", "ssl-cert"])
     if "--script-timeout" not in nmap_args:
         nmap_args.extend(["--script-timeout", "20s"])
-    discovery_args = ["nmap", "-sn", "-PR", config.nmap_targets, "-oX", str(discovery_xml_path)]
-    args = ["nmap", *nmap_args, config.nmap_targets, "-oX", str(xml_path)]
+    targets = shlex.split(config.nmap_targets)
+    if not targets:
+        return False, "No Nmap scan targets configured"
+    # Let Nmap choose ARP discovery for directly attached LANs and IP/TCP discovery
+    # for routed subnets.  Forced ARP discovery cannot reach a routed network.
+    discovery_args = ["nmap", "-sn", *targets, "-oX", str(discovery_xml_path)]
+    args = ["nmap", *nmap_args, *targets, "-oX", str(xml_path)]
     print(f"Running nmap discovery scan: {' '.join(discovery_args)}", file=sys.stderr, flush=True)
     print(f"Running nmap inventory scan: {' '.join(args)}", file=sys.stderr, flush=True)
     with lock_path.open("w", encoding="utf-8") as lock_handle:

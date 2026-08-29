@@ -19,6 +19,13 @@ class PackagingTests(unittest.TestCase):
         self.assertIn("Persistent=true", contents)
         self.assertIn("Unit=pi-probe-discord-nmap.service", contents)
 
+    def test_speedtest_timer_runs_hourly_after_completion(self) -> None:
+        timer_path = REPO_ROOT / "debian" / "systemd" / "pi-probe-discord-speedtest.timer"
+        contents = timer_path.read_text(encoding="utf-8")
+        self.assertIn("OnActiveSec=1h", contents)
+        self.assertIn("OnUnitInactiveSec=1h", contents)
+        self.assertNotIn("RandomizedDelaySec=", contents)
+
     def test_nmap_service_uses_existing_cli_and_env_file(self) -> None:
         service_path = REPO_ROOT / "debian" / "systemd" / "pi-probe-discord-nmap.service"
         contents = service_path.read_text(encoding="utf-8")
@@ -33,8 +40,15 @@ class PackagingTests(unittest.TestCase):
         self.assertIn("PI_PROBE_NMAP_SCAN_MINUTES", contents)
         self.assertIn('if [ "$minutes" -lt 5 ]; then', contents)
         self.assertIn('OnUnitActiveSec=${minutes}min', contents)
-        self.assertIn('enable_if_file_exists pi-probe-discord-nmap.timer "$NMAP_TIMER_OVERRIDE_FILE"', contents)
         self.assertIn("restart_if_enabled pi-probe-discord-nmap.timer", contents)
+        self.assertNotIn("enable_if_file_exists", contents)
+
+    def test_package_upgrade_does_not_enable_user_disabled_timers(self) -> None:
+        postinst_path = REPO_ROOT / "debian" / "postinst"
+        contents = postinst_path.read_text(encoding="utf-8")
+        self.assertNotIn("systemctl enable --now pi-probe-discord-speedtest.timer", contents)
+        self.assertNotIn("systemctl enable --now pi-probe-discord-full.timer", contents)
+        self.assertNotIn("systemctl enable --now pi-probe-discord-nmap.timer", contents)
 
     def test_installer_template_documents_new_dashboard_and_nmap_settings(self) -> None:
         env_template = installer.ENV_TEMPLATE

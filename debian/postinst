@@ -61,17 +61,9 @@ fi
 restart_if_enabled() {
     unit="$1"
     if command -v systemctl >/dev/null 2>&1; then
-        if systemctl is-enabled "$unit" >/dev/null 2>&1 || systemctl is-active "$unit" >/dev/null 2>&1; then
+        if systemctl is-enabled "$unit" >/dev/null 2>&1; then
             systemctl restart "$unit" || true
         fi
-    fi
-}
-
-enable_if_file_exists() {
-    unit="$1"
-    path="$2"
-    if [ -f "$path" ]; then
-        systemctl enable --now "$unit" || true
     fi
 }
 
@@ -137,9 +129,6 @@ if command -v systemctl >/dev/null 2>&1; then
     restart_if_enabled pi-probe-discord-snmp-listener.service
     restart_if_enabled pi-probe-discord-keepalive.timer
     restart_if_enabled pi-probe-discord-smtp-log.service
-    enable_if_file_exists pi-probe-discord-speedtest.timer /etc/systemd/system/pi-probe-discord-speedtest.timer.d/override.conf
-    enable_if_file_exists pi-probe-discord-full.timer /etc/systemd/system/pi-probe-discord-full.timer.d/override.conf
-    enable_if_file_exists pi-probe-discord-nmap.timer "$NMAP_TIMER_OVERRIDE_FILE"
     if env_flag_enabled PI_PROBE_KEEPALIVE_ENABLED; then
         systemctl enable --now pi-probe-discord-keepalive.timer || true
     fi

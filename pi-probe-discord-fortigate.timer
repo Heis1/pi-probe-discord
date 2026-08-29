@@ -1,0 +1,11 @@
+[Unit]
+Description=Poll FortiGate reporting for Pi Probe Discord
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=1min
+Persistent=true
+Unit=pi-probe-discord-fortigate.service
+
+[Install]
+WantedBy=timers.target

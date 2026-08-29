@@ -48,7 +48,7 @@ class NmapInventoryTests(unittest.TestCase):
             discovery_args = captured["calls"][0]
             args = captured["calls"][1]
             self.assertIn("-sn", discovery_args)
-            self.assertIn("-PR", discovery_args)
+            self.assertNotIn("-PR", discovery_args)
             self.assertIn("-Pn", args)
             self.assertIn("--top-ports", args)
             top_ports_index = args.index("--top-ports")

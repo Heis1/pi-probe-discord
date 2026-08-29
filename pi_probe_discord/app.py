@@ -45,6 +45,7 @@ from .router_snmp import (
 )
 from .speedtest_runner import run_speedtest_measurement
 from .keepalive import run_keepalive
+from .fortigate import collect_fortigate_snapshot
 from .smtp_log_receiver import run_smtp_log_receiver
 from .bot_reporter import post_bot_report
 from .storage import build_report, init_database, load_history_from_db, load_probe_runs_from_db, save_run_record
@@ -52,8 +53,14 @@ from .system_checks import collect_pihole_info, run_updates
 from .version_check import version_status_line
 
 
-def _webhook_configured(config) -> bool:
-    return bool(getattr(config, "webhook_url", "").strip())
+def _reporting_enabled_for_mode(config, mode: str) -> bool:
+    return bool(getattr(config, "discord_reporting_enabled", True)) and mode.lower() in {
+        str(item).strip().lower() for item in getattr(config, "discord_report_modes", [])
+    }
+
+
+def _webhook_configured(config, mode: str) -> bool:
+    return _reporting_enabled_for_mode(config, mode) and bool(getattr(config, "webhook_url", "").strip())
 
 
 def _read_last_firewall_alert_sent_at(state_file: Path) -> datetime | None:
@@ -243,7 +250,7 @@ def run_mode(mode: str) -> int:
                     age = (run_at - last_sent_at).total_seconds()
                     if age < cooldown_seconds:
                         should_send = False
-                if should_send and _webhook_configured(config):
+                if should_send and _webhook_configured(config, "firewall"):
                     alert_payload = _build_firewall_alert_payload(hostname, run_at_local, firewall_snapshot, reasons)
                     nmap_rows, _ = load_dashboard_nmap_inventory(config)
                     firewall_chart_ok, _ = generate_firewall_chart(firewall_snapshot, config.firewall_chart_file, devices=nmap_rows)
@@ -293,7 +300,9 @@ def run_mode(mode: str) -> int:
         dashboard_summary=dashboard_summary,
         include_diagnostics=(mode == "full"),
     )
-    if _webhook_configured(config):
+    if not _reporting_enabled_for_mode(config, mode):
+        pass
+    elif _webhook_configured(config, mode):
         try:
             if speed_result.chart_generated and Path(config.chart_file).exists():
                 post_webhook_file(config, payload, config.chart_file)
@@ -304,6 +313,10 @@ def run_mode(mode: str) -> int:
     elif config.discord_bot_token:
         post_bot_report(config, payload, config.chart_file if speed_result.chart_generated else None)
 
+    if mode == "speedtest-only":
+        detail = " | ".join([speed_result.summary, *speed_result.warnings])
+        print(f"Speed test {'passed' if speed_result.ok else 'failed'}: {detail}")
+        return 0 if speed_result.ok else 1
     return 0
 
 
@@ -316,6 +329,11 @@ def run_keepalive_check() -> str:
     config = load_config(require_webhook=False)
     state = run_keepalive(config)
     return json.dumps(state, indent=2)
+
+
+def run_fortigate_check() -> str:
+    config = load_config(require_webhook=False)
+    return json.dumps(collect_fortigate_snapshot(config), indent=2)
 
 
 def run_smtp_log_listener() -> int:
@@ -450,9 +468,10 @@ def render_network_diagnosis(as_json: bool = False) -> str:
 
 def run_router_listener() -> int:
     config = load_config(require_webhook=False)
-    init_database(config)
     if not config.router_snmp_listener_enabled:
-        raise RuntimeError("Router SNMP listener is disabled. Set PI_PROBE_ROUTER_SNMP_LISTENER_ENABLED=true.")
+        print("Router SNMP listener is disabled; not starting.")
+        return 0
+    init_database(config)
     on_event_inserted = None
     if config.interactive_dashboard_enabled:
         def _refresh_dashboard() -> None:

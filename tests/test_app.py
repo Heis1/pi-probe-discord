@@ -5,12 +5,32 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from pi_probe_discord.app import run_mode
+from pi_probe_discord.app import _reporting_enabled_for_mode, run_mode, run_router_listener
 from pi_probe_discord.models import SpeedResult
 from tests.test_dashboard import make_config
 
 
 class AppTests(unittest.TestCase):
+    def test_report_modes_can_limit_discord_to_speedtests(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = make_config(Path(tmp))
+            config.discord_report_modes = ["speedtest-only"]
+
+        self.assertTrue(_reporting_enabled_for_mode(config, "speedtest-only"))
+        self.assertFalse(_reporting_enabled_for_mode(config, "full"))
+        self.assertFalse(_reporting_enabled_for_mode(config, "firewall"))
+
+    def test_router_listener_exits_cleanly_when_disabled(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = make_config(Path(tmp))
+            config.router_snmp_listener_enabled = False
+            with patch("pi_probe_discord.app.load_config", return_value=config), \
+                 patch("pi_probe_discord.app.init_database") as init_database:
+                result = run_router_listener()
+
+        self.assertEqual(result, 0)
+        init_database.assert_not_called()
+
     def test_speedtest_only_runs_without_webhook(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             config = make_config(Path(tmp))

@@ -15,6 +15,7 @@ from .app import (
     render_router_report,
     run_dashboard_server,
     run_keepalive_check,
+    run_fortigate_check,
     run_smtp_log_listener,
     run_mode,
     run_router_listener,
@@ -48,6 +49,7 @@ def parse_mode(argv: list[str]) -> tuple[str, int | None]:
         "nmap-override",
         "network-diagnose",
         "keepalive",
+        "fortigate",
         "smtp-log-listener",
     }:
         return argv[1], None
@@ -176,6 +178,13 @@ def main(argv: list[str] | None = None) -> int:
     if mode == "keepalive":
         try:
             print(run_keepalive_check())
+        except RuntimeError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+    if mode == "fortigate":
+        try:
+            print(run_fortigate_check())
+            return 0
         except RuntimeError as exc:
             print(str(exc), file=sys.stderr)
             return 1

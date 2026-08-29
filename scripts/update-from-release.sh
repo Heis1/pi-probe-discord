@@ -262,9 +262,9 @@ resolve_deb_path() {
     printf '%s\n' "$destination"
 }
 
-restart_if_present() {
+restart_if_enabled() {
     local unit="$1"
-    if systemctl list-unit-files "$unit" >/dev/null 2>&1; then
+    if systemctl is-enabled "$unit" >/dev/null 2>&1; then
         systemctl restart "$unit"
     fi
 }
@@ -338,8 +338,8 @@ main() {
     apt-get install -y "$deb_path"
 
     systemctl daemon-reload
-    restart_if_present "pi-probe-discord-speedtest.timer"
-    restart_if_present "pi-probe-discord-full.timer"
+    restart_if_enabled "pi-probe-discord-speedtest.timer"
+    restart_if_enabled "pi-probe-discord-full.timer"
     restart_if_enabled_or_active "pi-probe-discord-bot.service"
     restart_if_enabled_or_active "pi-probe-discord-snmp-listener.service"
 

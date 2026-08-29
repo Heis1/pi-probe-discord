@@ -23,6 +23,7 @@ from urllib.parse import urlparse
 from .baselines import average, history_points_for_window
 from .firewall import FirewallConfig, FirewallSnapshot, collect_firewall_snapshot
 from .keepalive import load_keepalive_state
+from .fortigate import load_fortigate_state
 from .models import AppConfig, RouterSnapshot, SpeedResult
 
 try:
@@ -780,6 +781,10 @@ def _rows_from_run_records(
     rows: list[DashboardRow] = []
     cutoff = now - timedelta(days=days)
     for item in run_rows:
+        # update-only maintenance runs are stored for reporting, but they are
+        # not speed-test attempts and must never become dashboard outages.
+        if str(item.get("speed_summary") or "").strip() == "Speed test not run for this mode.":
+            continue
         recorded_at = _coerce_datetime(item.get("recorded_at"))
         if recorded_at is None or recorded_at < cutoff:
             continue
@@ -1402,6 +1407,7 @@ def _build_dashboard_payload(
     inventory_scanned_at = _coerce_datetime(nmap_meta.get("scannedAt"))
     diagnosis_updated_at = _latest_timestamp([latest_event_at, inventory_scanned_at, latest_pihole_at, latest_speed_at]) or generated_at
     keepalive = load_keepalive_state(config) if config is not None else {"enabled": False, "checkedAt": "", "devices": []}
+    fortigate = load_fortigate_state(config) if config is not None else {"enabled": False, "checkedAt": "", "available": False, "system": {}, "metrics": {}}
 
     metadata = {
         "service": SERVICE_NAME,
@@ -1419,6 +1425,7 @@ def _build_dashboard_payload(
             "pihole": latest_pihole_at.isoformat() if latest_pihole_at is not None else "",
             "diagnosis": diagnosis_updated_at.isoformat(),
             "keepalive": str(keepalive.get("checkedAt") or ""),
+            "fortigate": str(fortigate.get("checkedAt") or ""),
         },
     }
     diagnosis = build_network_diagnosis(
@@ -1454,6 +1461,7 @@ def _build_dashboard_payload(
         "devices": device_data,
         "firewall": firewall_data,
         "keepalive": keepalive,
+        "fortigate": fortigate,
         "inventory": {
             "scannedAt": nmap_meta.get("scannedAt", ""),
             "network": nmap_meta.get("network", ""),
@@ -2134,6 +2142,7 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
 
   <section class="panel diag-section">
     <div class="panel-head"><div><h2>Core Network Health</h2><p>Monitors routers, access points, infrastructure, and servers. Mobile and client-device churn is excluded.</p></div><div class="panel-stamp" id="diagnosisFreshness"></div></div>
+    <div class="action-row"><button id="coreCheckButton" class="action-button" type="button">Check now</button><div id="coreCheckStatus" class="helper-text"></div></div>
     <div class="diag-shell">
       <div class="diag-topline">
         <div class="diag-hero">
@@ -2179,8 +2188,16 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
 
   <section class="panel keepalive-section">
     <div class="panel-head"><div><h2>Router Keep-Alive</h2><p>Independent ICMP checks run every minute, so router reachability is not inferred from the slower inventory scan.</p></div><div class="panel-stamp" id="keepaliveFreshness"></div></div>
+    <div class="action-row"><button id="keepaliveCheckButton" class="action-button" type="button">Check now</button><div id="keepaliveCheckStatus" class="helper-text"></div></div>
     <div id="keepaliveCards" class="keepalive-grid"></div>
     <div id="keepaliveEmpty" class="empty" style="display:none">Router keep-alive monitoring is not configured.</div>
+  </section>
+
+  <section class="panel keepalive-section">
+    <div class="panel-head"><div><h2>FortiWiFi Health</h2><p>Read-only FortiOS API reporting from the FortiWiFi gateway.</p></div><div class="panel-stamp" id="fortigateFreshness"></div></div>
+    <div class="action-row"><button id="fortigateCheckButton" class="action-button" type="button">Check now</button><div id="fortigateCheckStatus" class="helper-text"></div></div>
+    <div id="fortigateCards" class="keepalive-grid"></div>
+    <div id="fortigateEmpty" class="empty" style="display:none">FortiWiFi reporting is not configured.</div>
   </section>
 
   <section class="panel firewall-section">
@@ -2203,7 +2220,7 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
       <div class="panel-head"><div><h2>Network Devices</h2><p>LAN inventory grouped by device category, with roles and service evidence kept on each device.</p></div><div class="panel-stamp" id="inventoryFreshness"></div></div>
         <div id="inventoryMeta" class="chart-meta"></div>
         <div class="action-row">
-          <button id="nmapScanButton" class="action-button" type="button">Run Nmap Scan</button>
+          <button id="nmapScanButton" class="action-button" type="button">Run Nmap Scan (check now)</button>
           <div id="nmapScanStatus" class="helper-text"></div>
         </div>
         <div id="topologyLegend" class="topology-legend"></div>
@@ -2265,6 +2282,7 @@ let piholeRows = [];
 let deviceRows = [];
 let firewall = {};
 let keepalive = {};
+let fortigate = {};
 let inventory = {};
 let topology = {};
 let stats = {};
@@ -2292,6 +2310,7 @@ function hydratePayload(nextPayload) {
   deviceRows = Array.isArray(payload.devices) ? payload.devices : [];
   firewall = payload.firewall || {};
   keepalive = payload.keepalive || {};
+  fortigate = payload.fortigate || {};
   inventory = payload.inventory || {};
   topology = payload.topology || {};
   stats = payload.stats || {};
@@ -2688,6 +2707,7 @@ function renderFreshness() {
   setFreshness('timelineFreshness', refreshed.speed, 'Data');
   setFreshness('diagnosisFreshness', refreshed.diagnosis, 'Data');
   setFreshness('keepaliveFreshness', refreshed.keepalive, 'Checked');
+  setFreshness('fortigateFreshness', refreshed.fortigate, 'Checked');
   setFreshness('securityFreshness', refreshed.dashboard || meta.generated_at, 'Reviewed');
   setFreshness('eventsFreshness', refreshed.events, 'Data');
   setFreshness('inventoryFreshness', refreshed.inventory, 'Scan');
@@ -2842,6 +2862,28 @@ function renderKeepalive() {
     meta.textContent = `${device.host || 'host unavailable'}${device.latencyMs !== null && device.latencyMs !== undefined ? ` · ${Number(device.latencyMs).toFixed(2)} ms` : ''}${device.error ? ` · ${device.error}` : ''}`;
     card.append(title, status, meta);
     cards.appendChild(card);
+  });
+}
+function renderFortigate() {
+  const cards = document.getElementById('fortigateCards');
+  const empty = document.getElementById('fortigateEmpty');
+  clearNode(cards);
+  if (!fortigate.enabled) { cards.style.display = 'none'; empty.style.display = 'block'; return; }
+  cards.style.display = 'grid'; empty.style.display = 'none';
+  const system = fortigate.system || {};
+  const metrics = fortigate.metrics || {};
+  const values = [
+    ['Gateway', system.hostname || system.model_name || system.model || 'FortiWiFi'],
+    ['CPU', metrics.cpuPercent === null || metrics.cpuPercent === undefined ? 'Unavailable' : `${Number(metrics.cpuPercent).toFixed(1)}%`],
+    ['Memory', metrics.memoryPercent === null || metrics.memoryPercent === undefined ? 'Unavailable' : `${Number(metrics.memoryPercent).toFixed(1)}%`],
+    ['Sessions', metrics.sessions === null || metrics.sessions === undefined ? 'Unavailable' : Number(metrics.sessions).toLocaleString()],
+  ];
+  values.forEach(([label, value]) => {
+    const card = document.createElement('div'); card.className = `keepalive-card ${fortigate.available ? 'up' : 'down'}`;
+    const title = document.createElement('div'); title.className = 'device-name'; title.textContent = label;
+    const status = document.createElement('div'); status.className = 'keepalive-status'; status.textContent = value;
+    const meta = document.createElement('div'); meta.className = 'keepalive-meta'; meta.textContent = fortigate.available ? `${system.version || 'FortiOS'}${system.serial ? ` · ${system.serial}` : ''}` : (fortigate.error || 'FortiGate API unavailable');
+    card.append(title, status, meta); cards.appendChild(card);
   });
 }
 function renderFirewallSignal() {
@@ -3585,6 +3627,24 @@ async function triggerSpeedtest() {
     window.setTimeout(() => { button.disabled = false; }, 3000);
   }
 }
+async function triggerLiveCheck(check) {
+  const button = document.getElementById(`${check}CheckButton`);
+  const status = document.getElementById(`${check}CheckStatus`);
+  if (button.disabled) return;
+  if (!await ensureActionToken()) { status.textContent = 'Dashboard action token required.'; return; }
+  button.disabled = true;
+  status.textContent = 'Checking now...';
+  try {
+    const response = await fetchWithActionAuth('/api/live/check', { method: 'POST', body: JSON.stringify({ check }) });
+    const result = await response.json();
+    status.textContent = result.message || 'Check completed.';
+    if (response.ok && result.ok) await fetchDashboardData('manual-check');
+  } catch (error) {
+    status.textContent = `Check failed: ${error instanceof Error ? error.message : 'request error'}`;
+  } finally {
+    button.disabled = false;
+  }
+}
 function heatmapColor(value, maxValue) {
   if (value === null || value === undefined) return 'rgba(148,163,184,.20)';
   if (value >= thresholds.heatmapGoodMbps) return '#15803d';
@@ -3951,6 +4011,7 @@ function render() {
   renderLatencyTrend(data);
   renderDnsCorrelation(data);
   renderKeepalive();
+  renderFortigate();
   renderFirewallSignal();
   renderDiagnosis();
   renderTable(events);
@@ -4011,6 +4072,9 @@ document.getElementById('eventTypeFilter').addEventListener('change', render);
 document.getElementById('eventHistoryButton').addEventListener('click', () => { eventHistoryExpanded = !eventHistoryExpanded; renderTable(filteredEvents()); });
 document.getElementById('nmapScanButton').addEventListener('click', triggerNmapScan);
 document.getElementById('speedtestButton').addEventListener('click', triggerSpeedtest);
+document.getElementById('coreCheckButton').addEventListener('click', () => triggerLiveCheck('core'));
+document.getElementById('keepaliveCheckButton').addEventListener('click', () => triggerLiveCheck('keepalive'));
+document.getElementById('fortigateCheckButton').addEventListener('click', () => triggerLiveCheck('fortigate'));
 document.getElementById('diagEvidenceToggle').addEventListener('click', () => { diagView = 'evidence'; renderDiagnosis(); });
 document.getElementById('diagActionsToggle').addEventListener('click', () => { diagView = 'actions'; renderDiagnosis(); });
 document.getElementById('diagFocusEvents').addEventListener('click', focusDiagnosisEvents);
@@ -4355,6 +4419,33 @@ def run_dashboard_speedtest() -> dict[str, Any]:
     return {"ok": True, "message": "Speed test started."}
 
 
+def run_dashboard_live_check(check: str) -> dict[str, Any]:
+    """Run a lightweight, read-only live dashboard check synchronously."""
+    from .config import load_config
+    from .fortigate import collect_fortigate_snapshot
+    from .keepalive import run_keepalive
+
+    config = load_config(require_webhook=False)
+    check = check.strip().lower()
+    if check == "keepalive":
+        state = run_keepalive(config)
+        return {"ok": True, "message": "Keep-alive check completed.", "keepalive": state}
+    if check == "fortigate":
+        state = collect_fortigate_snapshot(config)
+        return {
+            "ok": bool(state.get("available")),
+            "message": "FortiWiFi check completed." if state.get("available") else str(state.get("error") or "FortiWiFi check failed."),
+            "fortigate": state,
+        }
+    if check == "core":
+        keepalive = run_keepalive(config)
+        fortigate = collect_fortigate_snapshot(config) if config.fortigate_enabled else {"enabled": False}
+        healthy = all(bool(device.get("up")) for device in keepalive.get("devices", []) if isinstance(device, dict))
+        healthy = healthy and (not config.fortigate_enabled or bool(fortigate.get("available")))
+        return {"ok": healthy, "message": "Core network check completed." if healthy else "One or more core network checks failed.", "keepalive": keepalive, "fortigate": fortigate}
+    return {"ok": False, "message": "Unsupported live check."}
+
+
 def _load_allowed_ping_targets() -> set[str]:
     try:
         from .config import load_config
@@ -4567,7 +4658,7 @@ def serve_interactive_dashboard(
 
         def do_POST(self) -> None:  # noqa: N802
             request_path = urlparse(self.path).path
-            if request_path not in {"/api/auth/session", "/api/nmap/scan", "/api/nmap/override", "/api/device/ping", "/api/speedtest/run"}:
+            if request_path not in {"/api/auth/session", "/api/nmap/scan", "/api/nmap/override", "/api/device/ping", "/api/speedtest/run", "/api/live/check"}:
                 self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "message": "Not found"}, no_store=True)
                 return
             if request_path == "/api/auth/session":
@@ -4623,6 +4714,17 @@ def serve_interactive_dashboard(
                     return
                 result = run_dashboard_speedtest()
                 self._send_json(HTTPStatus.OK if result.get("ok") else HTTPStatus.INTERNAL_SERVER_ERROR, result, no_store=True)
+                return
+            if request_path == "/api/live/check":
+                payload = self._read_json_payload()
+                if payload is None:
+                    return
+                supplied = str(payload.pop("token", "")).strip()
+                if not self._actions_authorized(supplied):
+                    self._send_json(HTTPStatus.UNAUTHORIZED, {"ok": False, "message": "Dashboard action token required"}, no_store=True)
+                    return
+                result = run_dashboard_live_check(str(payload.get("check") or ""))
+                self._send_json(HTTPStatus.OK if result.get("ok") else HTTPStatus.BAD_REQUEST, result, no_store=True)
                 return
             if request_path == "/api/nmap/override":
                 payload = self._read_json_payload()

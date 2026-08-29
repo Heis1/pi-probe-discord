@@ -36,6 +36,8 @@ DEFAULT_ROUTER_SNMP_LOG_PATH = "/var/log/snmptrapd.log"
 DEFAULT_LOG_FILE = DEFAULT_DATA_DIR / "pihole-update-discord.log"
 DEFAULT_KEEPALIVE_STATE_JSON = DEFAULT_DATA_DIR / "keepalive" / "latest.json"
 DEFAULT_BOT_CONFIG_FILE = DEFAULT_CONFIG_DIR / "pi-probe-discord-bot.env"
+DEFAULT_FORTIGATE_SECRET_FILE = DEFAULT_CONFIG_DIR / "fortigate.env"
+DEFAULT_FORTIGATE_STATE_JSON = DEFAULT_DATA_DIR / "fortigate" / "latest.json"
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -124,6 +126,28 @@ def load_router_webui_secrets(config: AppConfig) -> dict[str, str]:
     }
 
 
+def load_fortigate_secrets(config: AppConfig) -> dict[str, str]:
+    if not config.fortigate_enabled:
+        return {}
+    environment_token = os.environ.get("FORTIGATE_API_TOKEN", "").strip()
+    if environment_token:
+        return {"api_token": environment_token}
+    secret_path = Path(config.fortigate_secret_file)
+    validate_router_webui_secret_file(secret_path)
+    token = ""
+    for raw_line in secret_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        if key.strip().upper() == "PI_PROBE_FORTIGATE_API_TOKEN":
+            token = value.strip().strip('"').strip("'")
+            break
+    if not token:
+        raise RuntimeError(f"FortiGate secret file must define PI_PROBE_FORTIGATE_API_TOKEN: {secret_path}")
+    return {"api_token": token}
+
+
 def validate_webhook_url(webhook_url: str) -> str:
     parsed = urlparse(webhook_url)
     if parsed.scheme != "https":
@@ -152,6 +176,15 @@ def load_config(base_dir: Path | None = None, require_webhook: bool = True) -> A
 
     return AppConfig(
         webhook_url=webhook_url or "",
+        discord_reporting_enabled=_env_bool("PI_PROBE_DISCORD_REPORTING_ENABLED", True),
+        discord_report_modes=[
+            item.strip().lower()
+            for item in os.environ.get(
+                "PI_PROBE_DISCORD_REPORT_MODES",
+                "full,speedtest-only,update-only,firewall",
+            ).split(",")
+            if item.strip()
+        ],
         config_file=str(config_file),
         log_file=os.environ.get("LOG_FILE", str(DEFAULT_LOG_FILE)),
         chart_file=os.environ.get("CHART_FILE", str(DEFAULT_CHART_PATH)),
@@ -200,7 +233,7 @@ def load_config(base_dir: Path | None = None, require_webhook: bool = True) -> A
         history_retention_days=int(os.environ.get("HISTORY_RETENTION_DAYS", "365")),
         request_timeout=int(os.environ.get("REQUEST_TIMEOUT", "30")),
         max_text_field_length=int(os.environ.get("MAX_TEXT_FIELD_LENGTH", "1200")),
-        speedtest_schedule_minutes=int(os.environ.get("SPEEDTEST_SCHEDULE_MINUTES", str(DEFAULT_SPEEDTEST_MINUTES))),
+        speedtest_schedule_minutes=max(30, int(os.environ.get("SPEEDTEST_SCHEDULE_MINUTES", str(DEFAULT_SPEEDTEST_MINUTES)))),
         full_report_schedule=os.environ.get("FULL_REPORT_SCHEDULE", DEFAULT_FULL_REPORT_SCHEDULE),
         firewall_enabled=_env_bool("PI_PROBE_FIREWALL_ENABLED", True),
         firewall_window_hours=max(1, int(os.environ.get("PI_PROBE_FIREWALL_WINDOW_HOURS", "24"))),
@@ -267,4 +300,12 @@ def load_config(base_dir: Path | None = None, require_webhook: bool = True) -> A
         discord_report_channel_id=max(0, int(os.environ.get("PI_PROBE_DISCORD_REPORT_CHANNEL_ID", "0"))),
         discord_command_guild_id=max(0, int(os.environ.get("PI_PROBE_DISCORD_COMMAND_GUILD_ID", "0"))),
         discord_allowed_user_ids=_env_int_list("PI_PROBE_DISCORD_ALLOWED_USER_IDS"),
+        fortigate_enabled=_env_bool("PI_PROBE_FORTIGATE_ENABLED", False),
+        fortigate_url=(os.environ.get("FORTIGATE_BASE_URL") or os.environ.get("PI_PROBE_FORTIGATE_URL", "")).strip().rstrip("/"),
+        fortigate_vdom=os.environ.get("PI_PROBE_FORTIGATE_VDOM", "root").strip() or "root",
+        fortigate_secret_file=os.environ.get("PI_PROBE_FORTIGATE_SECRET_FILE", str(DEFAULT_FORTIGATE_SECRET_FILE)),
+        fortigate_ca_file=os.environ.get("PI_PROBE_FORTIGATE_CA_FILE", "").strip(),
+        fortigate_state_json=os.environ.get("PI_PROBE_FORTIGATE_STATE_JSON", str(DEFAULT_FORTIGATE_STATE_JSON)),
+        fortigate_timeout_seconds=max(1, int(os.environ.get("PI_PROBE_FORTIGATE_TIMEOUT_SECONDS", "8"))),
+        fortigate_tls_verify=_env_bool("FORTIGATE_TLS_VERIFY", _env_bool("PI_PROBE_FORTIGATE_TLS_VERIFY", True)),
     )

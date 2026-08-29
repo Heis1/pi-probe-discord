@@ -26,8 +26,10 @@ from pi_probe_discord.dashboard import (
     ping_dashboard_device,
     run_dashboard_nmap_scan,
     serve_interactive_dashboard,
+    _rows_from_run_records,
 )
 from pi_probe_discord.models import AppConfig, RouterSnapshot, SpeedResult
+from pi_probe_discord.dashboard import DashboardThresholds
 
 
 def make_config(base_dir: Path) -> AppConfig:
@@ -122,6 +124,17 @@ def make_config(base_dir: Path) -> AppConfig:
 
 
 class DashboardTests(unittest.TestCase):
+    def test_dashboard_ignores_update_only_records(self) -> None:
+        now = datetime(2026, 8, 27, 22, 0, 0)
+        rows = _rows_from_run_records(
+            [
+                {"recorded_at": now.isoformat(), "speed_ok": False, "speed_summary": "Speed test not run for this mode."},
+                {"recorded_at": (now - timedelta(minutes=1)).isoformat(), "speed_ok": True, "speed_summary": "ok", "download_mbps": 350, "upload_mbps": 45, "ping_ms": 2},
+            ],
+            {"download": [], "upload": [], "ping": []}, now, DashboardThresholds(50, 250, 20, True, 320, 250),
+        )
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].download, 350.0)
     def test_network_diagnosis_marks_recently_recovered_when_suspect_is_back(self) -> None:
         now = datetime(2026, 7, 3, 15, 0, 0)
         config = make_config(Path(tempfile.mkdtemp()))
