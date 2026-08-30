@@ -1,0 +1,12 @@
+/var/log/fortiwifi.log {
+    daily
+    maxsize 25M
+    rotate 14
+    compress
+    missingok
+    notifempty
+    create 0640 root adm
+    postrotate
+        systemctl kill -s HUP rsyslog.service >/dev/null 2>&1 || true
+    endscript
+}

@@ -11,6 +11,7 @@ from pathlib import Path
 
 UFW_STATUS_COMMAND = ["sudo", "ufw", "status", "verbose"]
 JOURNALCTL_COMMAND = ["journalctl", "-k", "--since", "-24 hours", "--no-pager"]
+MAX_FIREWALL_LOG_READ_BYTES = 12 * 1024 * 1024
 
 LOG_ENTRY_RE = re.compile(r"\[UFW\s+(?P<action>[A-Z]+)\]\s+(?P<data>.*)$")
 KV_RE = re.compile(r"\b([A-Z]+)=([^\s]+)")
@@ -62,6 +63,7 @@ class FirewallSnapshot:
     auth_failures: int = 0
     auth_successes: int = 0
     ssh_sessions: int = 0
+    ssh_session_details: list[dict[str, str]] = field(default_factory=list)
 
 
 @dataclass
@@ -191,16 +193,52 @@ def _is_private_or_lan(ip: str) -> bool:
         return False
 
 
+def _ssh_session_detail(entry: UfwLogEntry) -> dict[str, str]:
+    forti = {item.group("key"): item.group("value").strip('"') for item in FORTI_KV_RE.finditer(entry.raw)}
+    return {
+        "timestamp": entry.timestamp.isoformat() if entry.timestamp is not None else "Unknown time",
+        "source": entry.fields.get("SRC", "Unknown source"),
+        "destination": entry.fields.get("DST", "FortiGate"),
+        "user": forti.get("user") or forti.get("username") or forti.get("userfrom") or "Not recorded",
+        "interface": entry.fields.get("IN", "Unknown interface"),
+        "action": forti.get("action") or entry.action,
+    }
+
+
+def _read_recent_log_lines(path: Path) -> list[str]:
+    """Read a bounded tail so high-volume FortiGate logs cannot stall reports."""
+    size = path.stat().st_size
+    with path.open("rb") as handle:
+        if size > MAX_FIREWALL_LOG_READ_BYTES:
+            handle.seek(-MAX_FIREWALL_LOG_READ_BYTES, 2)
+            # Drop the partial first line after seeking into the file.
+            handle.readline()
+        raw = handle.read()
+    return raw.decode("utf-8", errors="replace").splitlines()
+
+
 def _read_log_lines(paths: list[str], window_hours: int) -> tuple[list[str], str, str | None]:
+    lines: list[str] = []
+    sources: list[str] = []
+    errors: list[str] = []
+    have_ufw_log = False
     for path in paths:
         p = Path(path)
         try:
             if p.exists() and p.is_file():
-                return p.read_text(encoding="utf-8", errors="replace").splitlines(), path, None
+                # kern.log and syslog normally duplicate /var/log/ufw.log.
+                if have_ufw_log and p.name in {"kern.log", "syslog"}:
+                    continue
+                lines.extend(_read_recent_log_lines(p))
+                sources.append(path)
+                have_ufw_log = have_ufw_log or p.name == "ufw.log"
         except PermissionError:
-            return [], path, f"Permission denied: {path}"
+            errors.append(f"Permission denied: {path}")
         except OSError as exc:
-            return [], path, str(exc)
+            errors.append(f"{path}: {exc}")
+
+    if sources:
+        return lines, ", ".join(sources), "; ".join(errors) or None
 
     journal_cmd = ["journalctl", "-k", "--since", f"-{window_hours} hours", "--no-pager"]
     result = run_fixed_command(journal_cmd)
@@ -239,6 +277,7 @@ def summarize_entries(
     ssh_attempts = 0
     dns_attempts = 0
     auth_failures = auth_successes = ssh_sessions = 0
+    ssh_session_details: list[dict[str, str]] = []
     multicast_hits = 0
 
     for entry in recent:
@@ -250,8 +289,13 @@ def summarize_entries(
             auth_failures += 1
         elif entry.action == "AUTH_SUCCESS":
             auth_successes += 1
-        elif entry.action == "SSH_SESSION":
+        is_ssh_activity = entry.action == "SSH_SESSION" or (
+            entry.action == "AUTH_SUCCESS" and "ssh" in entry.raw.lower()
+        )
+        if is_ssh_activity:
             ssh_sessions += 1
+            if len(ssh_session_details) < 20:
+                ssh_session_details.append(_ssh_session_detail(entry))
 
         src = entry.fields.get("SRC")
         dst = entry.fields.get("DST")
@@ -323,6 +367,7 @@ def summarize_entries(
         auth_failures=auth_failures,
         auth_successes=auth_successes,
         ssh_sessions=ssh_sessions,
+        ssh_session_details=ssh_session_details,
     )
 
 

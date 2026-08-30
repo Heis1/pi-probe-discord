@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 
 from pi_probe_discord.firewall import (
     UfwStatus,
     parse_ufw_log_line,
     parse_ufw_status_verbose,
     summarize_entries,
+    _read_log_lines,
 )
 
 
@@ -29,6 +31,35 @@ def test_parses_fortiwifi_denied_traffic_syslog() -> None:
     assert entry.action == "BLOCK"
     assert entry.fields["SRC"] == "203.0.113.9"
     assert entry.fields["DPT"] == "22"
+
+
+def test_tracks_accepted_ssh_activity_details() -> None:
+    now = datetime.now().astimezone()
+    entry = parse_ufw_log_line(
+        'date=2026-08-30 time=12:00:00 type="event" ui="ssh(203.0.113.9)" srcip=203.0.113.9 dstip=10.10.10.1 user="admin" srcintf="wan1" action="accept"',
+        now=now,
+    )
+    assert entry is not None
+    snapshot = summarize_entries(
+        [entry], 24, 5, 10, False, "fortiwifi", True, UfwStatus(active=True, status_line="Status: active")
+    )
+    assert snapshot.ssh_sessions == 1
+    assert snapshot.ssh_session_details[0]["source"] == "203.0.113.9"
+    assert snapshot.ssh_session_details[0]["user"] == "admin"
+
+
+def test_tracks_successful_ssh_login_as_ssh_activity() -> None:
+    now = datetime.now().astimezone()
+    entry = parse_ufw_log_line(
+        'type="event" logdesc="Admin login successful" user="admin" ui="ssh(192.168.1.190)" method="ssh" srcip=192.168.1.190 dstip=10.10.10.1 action="login" status="success"',
+        now=now,
+    )
+    assert entry is not None
+    snapshot = summarize_entries(
+        [entry], 24, 5, 10, False, "fortiwifi", True, UfwStatus(active=True, status_line="Status: active")
+    )
+    assert snapshot.auth_successes == 1
+    assert snapshot.ssh_sessions == 1
 
 
 def test_parse_ipv4_udp_block() -> None:
@@ -102,6 +133,23 @@ def test_empty_log_file() -> None:
         status=UfwStatus(active=True, status_line="Status: active"),
     )
     assert snapshot.total_entries == 0
+
+
+def test_combines_fortigate_and_ufw_logs_without_duplicate_kernel_log(tmp_path: Path) -> None:
+    fortigate = tmp_path / "fortiwifi.log"
+    ufw = tmp_path / "ufw.log"
+    kernel = tmp_path / "kern.log"
+    fortigate.write_text('type="traffic" srcip=203.0.113.9 action="deny"\n', encoding="utf-8")
+    ufw.write_text("[UFW BLOCK] SRC=198.51.100.2\n", encoding="utf-8")
+    kernel.write_text("duplicate kernel line\n", encoding="utf-8")
+
+    lines, source, error = _read_log_lines([str(fortigate), str(ufw), str(kernel)], 24)
+
+    assert len(lines) == 2
+    assert str(fortigate) in source
+    assert str(ufw) in source
+    assert str(kernel) not in source
+    assert error is None
 
 
 def test_inactive_ufw_status() -> None:

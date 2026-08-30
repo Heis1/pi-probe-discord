@@ -212,6 +212,25 @@ class PiProbeDiscordBot(discord.Client):
         self.logger.info("Authorized /firewall request by %s", username)
         await interaction.response.defer(thinking=False)
         try:
+            report_result = subprocess.run(
+                FIREWALL_REPORT_COMMAND,
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=25,
+            )
+            report = report_result.stdout.strip() or "No firewall report output."
+        except subprocess.CalledProcessError as exc:
+            self.logger.error("Failed to render firewall report for %s: returncode=%s stderr=%s", username, exc.returncode, exc.stderr.strip())
+            await interaction.followup.send("Firewall report is unavailable right now.", ephemeral=True)
+            return
+        except subprocess.TimeoutExpired:
+            self.logger.error("Timed out rendering firewall report for %s", username)
+            await interaction.followup.send("Firewall report timed out.", ephemeral=True)
+            return
+
+        chart = None
+        try:
             completed = subprocess.run(
                 FIREWALL_CHART_COMMAND,
                 check=True,
@@ -224,11 +243,7 @@ class PiProbeDiscordBot(discord.Client):
                 raise RuntimeError("No firewall chart output path.")
             if not Path(chart_path).exists():
                 raise RuntimeError(f"Firewall chart not found at {chart_path}")
-            await interaction.followup.send(
-                content="Current firewall snapshot.",
-                file=discord.File(chart_path, filename=Path(chart_path).name),
-            )
-            return
+            chart = discord.File(chart_path, filename=Path(chart_path).name)
         except subprocess.CalledProcessError as exc:
             self.logger.error(
                 "Failed to render firewall chart for %s: returncode=%s stderr=%s",
@@ -240,24 +255,10 @@ class PiProbeDiscordBot(discord.Client):
             self.logger.error("Timed out rendering firewall chart for %s", username)
         except RuntimeError as exc:
             self.logger.error("Firewall chart unavailable for %s: %s", username, exc)
-
-        try:
-            completed = subprocess.run(
-                FIREWALL_REPORT_COMMAND,
-                check=True,
-                capture_output=True,
-                text=True,
-                timeout=25,
-            )
-            report = completed.stdout.strip() or "No firewall report output."
-        except subprocess.CalledProcessError as exc:
-            self.logger.error("Failed to render firewall report for %s: returncode=%s stderr=%s", username, exc.returncode, exc.stderr.strip())
-            await interaction.followup.send("Firewall report is unavailable right now.", ephemeral=True)
-            return
-        except subprocess.TimeoutExpired:
-            self.logger.error("Timed out rendering firewall report for %s", username)
-            await interaction.followup.send("Firewall report timed out.", ephemeral=True)
-            return
+        await interaction.followup.send(
+            content=f"```text\n{report[:1900]}\n```",
+            file=chart,
+        )
 
         if len(report) > 1900:
             report = report[:1900] + "\n..."

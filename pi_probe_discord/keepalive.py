@@ -7,28 +7,71 @@ from pathlib import Path
 from typing import Any
 
 
-def _devices(raw: str) -> list[dict[str, str]]:
+def _disabled_hosts_path(config: Any) -> Path:
+    """Store dashboard-controlled exclusions beside the writable state file."""
+    return Path(config.keepalive_state_json).parent / "disabled-hosts.json"
+
+
+def _disabled_hosts(config: Any) -> set[str]:
+    try:
+        payload = json.loads(_disabled_hosts_path(config).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return set()
+    if not isinstance(payload, list):
+        return set()
+    return {str(host).strip() for host in payload if str(host).strip()}
+
+
+def _devices(raw: str, disabled_hosts: set[str] | None = None) -> list[dict[str, Any]]:
     try:
         items = json.loads(raw)
     except json.JSONDecodeError as exc:
         raise RuntimeError("PI_PROBE_KEEPALIVE_DEVICES_JSON must be a JSON array.") from exc
     if not isinstance(items, list):
         raise RuntimeError("PI_PROBE_KEEPALIVE_DEVICES_JSON must be a JSON array.")
-    devices: list[dict[str, str]] = []
+    disabled_hosts = disabled_hosts or set()
+    devices: list[dict[str, Any]] = []
     for item in items:
         if not isinstance(item, dict):
             continue
         name = str(item.get("name") or "").strip()
         host = str(item.get("host") or "").strip()
         if name and host:
-            devices.append({"name": name, "host": host, "role": str(item.get("role") or "router").strip()})
+            configured_enabled = item.get("pingEnabled", True) is not False
+            devices.append({
+                "name": name,
+                "host": host,
+                "role": str(item.get("role") or "router").strip(),
+                "pingEnabled": configured_enabled and host not in disabled_hosts,
+            })
     return devices
+
+
+def set_device_ping_enabled(config: Any, host: str, enabled: bool) -> None:
+    """Persist a per-device toggle without modifying the protected env file."""
+    host = host.strip()
+    configured_hosts = {device["host"] for device in _devices(config.keepalive_devices_json)}
+    if not host or host not in configured_hosts:
+        raise RuntimeError("Keep-alive device is not configured.")
+    path = _disabled_hosts_path(config)
+    disabled_hosts = _disabled_hosts(config)
+    if enabled:
+        disabled_hosts.discard(host)
+    else:
+        disabled_hosts.add(host)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps(sorted(disabled_hosts), indent=2) + "\n", encoding="utf-8")
+    temporary.replace(path)
 
 
 def run_keepalive(config: Any, now: datetime | None = None) -> dict[str, Any]:
     measured_at = now or datetime.now().astimezone()
     results: list[dict[str, Any]] = []
-    for device in _devices(config.keepalive_devices_json):
+    for device in _devices(config.keepalive_devices_json, _disabled_hosts(config)):
+        if not device["pingEnabled"]:
+            results.append({**device, "up": None, "latencyMs": None, "error": "Ping checks disabled"})
+            continue
         try:
             completed = subprocess.run(
                 ["ping", "-n", "-c", "1", "-W", str(config.keepalive_timeout_seconds), device["host"]],

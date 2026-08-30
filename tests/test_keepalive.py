@@ -7,7 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from pi_probe_discord.keepalive import load_keepalive_state, run_keepalive
+from pi_probe_discord.keepalive import load_keepalive_state, run_keepalive, set_device_ping_enabled
 
 
 class KeepaliveTests(unittest.TestCase):
@@ -30,6 +30,22 @@ class KeepaliveTests(unittest.TestCase):
     def test_load_keepalive_state_returns_empty_before_first_check(self) -> None:
         config = SimpleNamespace(keepalive_enabled=True, keepalive_state_json="/does/not/exist")
         self.assertEqual(load_keepalive_state(config)["devices"], [])
+
+    def test_disabled_device_is_retained_but_not_pinged(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            state_path = Path(tmp) / "latest.json"
+            config = SimpleNamespace(
+                keepalive_enabled=True,
+                keepalive_devices_json='[{"name":"Test Router","host":"192.168.1.1"}]',
+                keepalive_state_json=str(state_path),
+                keepalive_timeout_seconds=1,
+            )
+            set_device_ping_enabled(config, "192.168.1.1", False)
+            with patch("pi_probe_discord.keepalive.subprocess.run") as command:
+                state = run_keepalive(config)
+            command.assert_not_called()
+            self.assertFalse(state["devices"][0]["pingEnabled"])
+            self.assertIsNone(state["devices"][0]["up"])
 
 
 if __name__ == "__main__":

@@ -34,6 +34,8 @@ override_dh_auto_install:
 	install -m 0644 pi-probe-discord-bot.env.example debian/pi-probe-discord/usr/share/pi-probe-discord/pi-probe-discord-bot.env.example
 	install -m 0644 router-webui.env.example debian/pi-probe-discord/usr/share/pi-probe-discord/router-webui.env.example
 	install -m 0644 fortigate.env.example debian/pi-probe-discord/usr/share/pi-probe-discord/fortigate.env.example
+	install -d debian/pi-probe-discord/etc/logrotate.d
+	install -m 0644 debian/logrotate/fortiwifi debian/pi-probe-discord/etc/logrotate.d/fortiwifi
 	install -d debian/pi-probe-discord/lib/systemd/system
 	install -m 0644 debian/systemd/pi-probe-discord-speedtest.service debian/pi-probe-discord/lib/systemd/system/pi-probe-discord-speedtest.service
 	install -m 0644 debian/systemd/pi-probe-discord-speedtest.timer debian/pi-probe-discord/lib/systemd/system/pi-probe-discord-speedtest.timer

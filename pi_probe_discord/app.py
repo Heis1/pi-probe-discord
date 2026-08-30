@@ -515,21 +515,23 @@ def render_dashboard_html(output_path: str | None = None) -> str:
 
 def run_dashboard_server() -> int:
     config = load_config(require_webhook=False)
-    now = datetime.now().astimezone()
-    history = load_history_from_db(config, now)
-    run_rows = load_probe_runs_from_db(config, now, days=30)
-    export_pihole_hourly_csv(config, now, days=30)
-    export_nmap_inventory_json(config, now)
-    ok, message = generate_interactive_dashboard(
-        history,
-        now,
-        config.interactive_dashboard_file,
-        config=config,
-        run_rows=run_rows,
-    )
-    if not ok:
-        raise RuntimeError(message)
-    print(message)
+    dashboard_path = Path(config.interactive_dashboard_file)
+    if not dashboard_path.exists():
+        now = datetime.now().astimezone()
+        history = load_history_from_db(config, now)
+        run_rows = load_probe_runs_from_db(config, now, days=30)
+        export_pihole_hourly_csv(config, now, days=30)
+        export_nmap_inventory_json(config, now)
+        ok, message = generate_interactive_dashboard(
+            history,
+            now,
+            config.interactive_dashboard_file,
+            config=config,
+            run_rows=run_rows,
+        )
+        if not ok:
+            raise RuntimeError(message)
+        print(message)
     return serve_interactive_dashboard(
         config.interactive_dashboard_file,
         config.interactive_dashboard_host,

@@ -340,6 +340,10 @@ main() {
     systemctl daemon-reload
     restart_if_enabled "pi-probe-discord-speedtest.timer"
     restart_if_enabled "pi-probe-discord-full.timer"
+    restart_if_enabled "pi-probe-discord-nmap.timer"
+    restart_if_enabled "pi-probe-discord-keepalive.timer"
+    restart_if_enabled "pi-probe-discord-fortigate.timer"
+    restart_if_enabled_or_active "pi-probe-discord-dashboard.service"
     restart_if_enabled_or_active "pi-probe-discord-bot.service"
     restart_if_enabled_or_active "pi-probe-discord-snmp-listener.service"
 
@@ -356,6 +360,8 @@ main() {
     echo "Service health:"
     unit_status_summary "pi-probe-discord-speedtest.timer"
     unit_status_summary "pi-probe-discord-full.timer"
+    unit_status_summary "pi-probe-discord-fortigate.timer"
+    unit_status_summary "pi-probe-discord-dashboard.service"
     unit_status_summary "pi-probe-discord-bot.service"
     unit_status_summary "pi-probe-discord-snmp-listener.service"
     systemctl list-timers --all | grep 'pi-probe-discord' || true

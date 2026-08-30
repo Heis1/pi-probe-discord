@@ -472,7 +472,12 @@ def build_network_diagnosis(
         confidence_label = "Medium confidence"
 
     live_keepalive = (keepalive or {}).get("devices", []) if isinstance(keepalive, dict) else []
-    core_normalised = bool(live_keepalive) and inventory_fresh and all(bool(device.get("up")) for device in live_keepalive if isinstance(device, dict))
+    monitored_keepalive = [
+        device
+        for device in live_keepalive
+        if isinstance(device, dict) and device.get("pingEnabled") is not False
+    ]
+    core_normalised = bool(monitored_keepalive) and inventory_fresh and all(bool(device.get("up")) for device in monitored_keepalive)
     if core_normalised:
         status = "healthy"
         status_label = "Normal"
@@ -1161,6 +1166,7 @@ def _build_firewall_dashboard_payload(
         "authFailures": snapshot.auth_failures,
         "authSuccesses": snapshot.auth_successes,
         "sshSessions": snapshot.ssh_sessions,
+        "sshSessionDetails": snapshot.ssh_session_details,
         "dnsAttempts": snapshot.dns_attempts,
         "policy": f"{snapshot.status.default_incoming} in / {snapshot.status.default_outgoing} out",
         "logging": snapshot.status.logging,
@@ -1727,8 +1733,10 @@ body.theme-clean select, body.theme-clean input { background: rgba(255,255,255,.
 .keepalive-card { border:1px solid var(--border); border-left:4px solid #94a3b8; border-radius:14px; padding:13px; background:var(--panel-2); }
 .keepalive-card.up { border-left-color:var(--accent-2); }
 .keepalive-card.down { border-left-color:var(--danger); }
+.keepalive-card.disabled { border-left-color:#94a3b8; opacity:.78; }
 .keepalive-status { margin-top:8px; font-size:12px; font-weight:900; text-transform:uppercase; letter-spacing:.07em; }
 .keepalive-meta { margin-top:5px; color:var(--muted); font-size:12px; }
+.keepalive-toggle { margin-top:11px; }
 .security-grid { display:grid; grid-template-columns:1.3fr repeat(3,minmax(120px,.55fr)); gap:12px; }
 .security-hero { border:1px solid var(--border); border-left:4px solid var(--accent-2); border-radius:16px; padding:15px; background:var(--panel-2); }
 .security-hero.attention { border-left-color:var(--danger); }
@@ -1736,6 +1744,8 @@ body.theme-clean select, body.theme-clean input { background: rgba(255,255,255,.
 .security-title { margin-top:6px; font-size:21px; font-weight:900; letter-spacing:-.025em; }
 .security-copy { margin-top:6px; color:var(--muted); font-size:13px; line-height:1.4; }
 .security-stat { border:1px solid var(--border); border-radius:16px; padding:14px; background:var(--panel-2); }
+.security-stat.clickable { cursor:pointer; text-align:left; width:100%; color:inherit; font:inherit; }
+.security-stat.clickable:hover { border-color:rgba(56,189,248,.65); background:rgba(14,116,144,.16); }
 .security-stat b { display:block; margin-top:8px; font-size:23px; }
 .security-stat span { color:var(--muted); font-size:11px; font-weight:800; letter-spacing:.07em; text-transform:uppercase; }
 .security-actions { margin-top:14px; display:grid; gap:8px; }
@@ -2684,7 +2694,7 @@ function initActionTokenControl() {
     renderDeviceMap();
   });
 }
-function formatFreshness(value) {
+function formatFreshness(value, showExactTime = false) {
   if (!value) return 'Refresh unknown';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return 'Refresh unknown';
@@ -2701,6 +2711,9 @@ function formatFreshness(value) {
     relative = minutes ? `${hours}h ${minutes}m ago` : `${hours}h ago`;
   } else if (diffMinutes > 0) {
     relative = `${diffMinutes}m ago`;
+  }
+  if (showExactTime) {
+    return `${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })} · ${relative}`;
   }
   return `${relative} · ${date.toLocaleString()}`;
 }
@@ -2727,10 +2740,10 @@ function freshnessClass(value) {
   if (diffMinutes <= 180) return 'aging';
   return 'stale';
 }
-function setFreshness(elementId, value, prefix = 'Updated') {
+function setFreshness(elementId, value, prefix = 'Updated', showExactTime = false) {
   const node = document.getElementById(elementId);
   if (!node) return;
-  node.textContent = `${prefix} ${formatFreshness(value)}`;
+  node.textContent = `${prefix} ${formatFreshness(value, showExactTime)}`;
 }
 function setRefreshStatus(kind, message) {
   const node = document.getElementById('refreshStatus');
@@ -2755,7 +2768,7 @@ function renderFreshness() {
   setFreshness('diagnosisFreshness', refreshed.diagnosis, 'Data');
   setFreshness('keepaliveFreshness', refreshed.keepalive, 'Checked');
   setFreshness('fortigateFreshness', refreshed.fortigate, 'Checked');
-  setFreshness('securityFreshness', refreshed.dashboard || meta.generated_at, 'Reviewed');
+  setFreshness('securityFreshness', refreshed.firewall || refreshed.dashboard || meta.generated_at, 'Reviewed', true);
   setFreshness('eventsFreshness', refreshed.events, 'Data');
   setFreshness('inventoryFreshness', refreshed.inventory, 'Scan');
   setFreshness('heatmapFreshness', refreshed.speed, 'Data');
@@ -2897,17 +2910,23 @@ function renderKeepalive() {
   empty.style.display = 'none';
   devices.forEach(device => {
     const card = document.createElement('div');
-    card.className = `keepalive-card ${device.up ? 'up' : 'down'}`;
+    const pingEnabled = device.pingEnabled !== false;
+    card.className = `keepalive-card ${!pingEnabled ? 'disabled' : (device.up ? 'up' : 'down')}`;
     const title = document.createElement('div');
     title.className = 'device-name';
     title.textContent = device.name || device.host || 'Router';
     const status = document.createElement('div');
     status.className = 'keepalive-status';
-    status.textContent = device.up ? 'Reachable' : 'Unreachable';
+    status.textContent = !pingEnabled ? 'Ping disabled' : (device.up ? 'Reachable' : 'Unreachable');
     const meta = document.createElement('div');
     meta.className = 'keepalive-meta';
     meta.textContent = `${device.host || 'host unavailable'}${device.latencyMs !== null && device.latencyMs !== undefined ? ` · ${Number(device.latencyMs).toFixed(2)} ms` : ''}${device.error ? ` · ${device.error}` : ''}`;
-    card.append(title, status, meta);
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'mini-button keepalive-toggle';
+    toggle.textContent = pingEnabled ? 'Disable ping' : 'Enable ping';
+    toggle.addEventListener('click', () => toggleKeepalivePing(device, toggle));
+    card.append(title, status, meta, toggle);
     cards.appendChild(card);
   });
 }
@@ -2951,9 +2970,19 @@ function renderFirewallSignal() {
   hero.className = `security-hero${attention ? ' attention' : ''}`;
   hero.innerHTML = `<div class="security-kicker">${fortiSyslog ? 'FortiWiFi syslog active' : 'Current security state'}</div><div class="security-title">${attention ? 'Review external activity' : (fortiSyslog ? `${firewall.totalEntries || 0} FortiWiFi events received` : 'No external threat signal')}</div><div class="security-copy">${attention ? 'External sources or administration-port attempts were blocked. Review the sources below.' : (fortiSyslog ? `${firewall.blocked || 0} denied events in the current window; ordinary LAN chatter is shown below for visibility.` : 'Blocked entries are local network chatter. The firewall is containing it; no action is required.')}</div>`;
   grid.appendChild(hero);
-  [[fortiSyslog ? (firewall.totalEntries || 0) : externalBlocked, fortiSyslog ? 'FortiWiFi events' : 'External blocked'], [firewall.authFailures || 0, 'Failed admin logins'], [firewall.sshSessions || 0, 'Live SSH sessions'], [firewall.blocked || 0, 'Total blocked']].forEach(([value, label]) => {
-    const stat = document.createElement('div');
+  [[fortiSyslog ? (firewall.totalEntries || 0) : externalBlocked, fortiSyslog ? 'FortiWiFi events' : 'External blocked'], [firewall.authFailures || 0, 'Failed admin logins'], [firewall.sshSessions || 0, 'Recent SSH activity'], [firewall.blocked || 0, 'Total blocked']].forEach(([value, label]) => {
+    const stat = document.createElement(label === 'Recent SSH activity' ? 'button' : 'div');
     stat.className = 'security-stat';
+    if (label === 'Recent SSH activity') {
+      stat.classList.add('clickable');
+      stat.type = 'button';
+      stat.title = 'Show recent SSH activity details';
+      stat.addEventListener('click', () => {
+        const details = firewall.sshSessionDetails || [];
+        const rows = details.map(item => `${item.timestamp} · ${item.source} → ${item.destination} · ${item.user} · ${item.interface} · ${item.action}`);
+        window.alert(rows.length ? `Recent SSH activity (up to 20 events)${String.fromCharCode(10)}${String.fromCharCode(10)}${rows.join(String.fromCharCode(10))}` : 'No SSH activity records are available in the current dashboard snapshot.');
+      });
+    }
     stat.innerHTML = `<span>${label}</span><b>${value}</b>`;
     grid.appendChild(stat);
   });
@@ -3694,6 +3723,32 @@ async function triggerLiveCheck(check) {
     button.disabled = false;
   }
 }
+async function toggleKeepalivePing(device, button) {
+  const status = document.getElementById('keepaliveCheckStatus');
+  if (!await ensureActionToken()) { status.textContent = 'Dashboard action token required.'; return; }
+  const enabled = device.pingEnabled === false;
+  button.disabled = true;
+  try {
+    const response = await fetchWithActionAuth('/api/keepalive/device', {
+      method: 'POST',
+      body: JSON.stringify({ host: device.host, enabled }),
+    });
+    const result = await response.json();
+    status.textContent = result.message || 'Keep-alive setting updated.';
+    if (!response.ok || !result.ok) return;
+    if (result.keepalive) {
+      keepalive = result.keepalive;
+      if (meta.refreshed) meta.refreshed.keepalive = keepalive.checkedAt || new Date().toISOString();
+      renderKeepalive();
+      renderFreshness();
+      await fetchDashboardData('keepalive-setting');
+    }
+  } catch (error) {
+    status.textContent = `Could not update ping setting: ${error instanceof Error ? error.message : 'request error'}`;
+  } finally {
+    button.disabled = false;
+  }
+}
 function heatmapColor(value, maxValue) {
   if (value === null || value === undefined) return 'rgba(148,163,184,.20)';
   if (value >= thresholds.heatmapGoodMbps) return '#15803d';
@@ -4071,7 +4126,6 @@ function render() {
 }
 function scheduleNextRefresh() {
   if (refreshTimer) clearTimeout(refreshTimer);
-  if (document.hidden) return;
   refreshTimer = window.setTimeout(() => {
     void fetchDashboardData('poll');
   }, refreshIntervalSeconds() * 1000);
@@ -4132,12 +4186,7 @@ initFilters();
 initActionTokenControl();
 applyTheme(getThemeChoice());
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) {
-    if (refreshTimer) clearTimeout(refreshTimer);
-    if (refreshAbortController) refreshAbortController.abort();
-    return;
-  }
-  void fetchDashboardData('visible');
+  if (!document.hidden) void fetchDashboardData('visible');
 });
 scheduleNextRefresh();
 </script>
@@ -4369,20 +4418,104 @@ def run_dashboard_nmap_scan(output_path: str) -> dict[str, Any]:
 
 
 def load_dashboard_data_payload(output_path: str) -> dict[str, Any]:
-    from .config import load_config
-    from .storage import load_history_from_db, load_probe_runs_from_db
+    """Return the dashboard snapshot already rendered into the HTML file.
 
+    Rebuilding the complete dashboard for every browser poll also re-runs the
+    firewall log collection.  On a busy Pi that can take longer than the
+    polling interval, so browsers abort old requests and can display stale
+    data.  The scheduled services already regenerate the dashboard whenever
+    its underlying history changes; this endpoint must therefore be a fast,
+    read-only snapshot fetch.
+    """
+    from .config import load_config
+    from .firewall import FirewallConfig, collect_firewall_snapshot
+    from .fortigate import load_fortigate_state
+    from .keepalive import load_keepalive_state
+
+    html = Path(output_path).read_text(encoding="utf-8")
+    marker = '<script id="dashboard-payload" type="application/json">'
+    start = html.find(marker)
+    if start < 0:
+        # Compatibility for a pre-rendered or hand-written legacy page.
+        # Normal packaged dashboards always take the fast snapshot path.
+        from .storage import load_history_from_db, load_probe_runs_from_db
+
+        config = load_config(require_webhook=False)
+        now = datetime.now().astimezone()
+        return build_interactive_dashboard_payload(
+            load_history_from_db(config, now),
+            now,
+            output_path=output_path,
+            config=config,
+            run_rows=load_probe_runs_from_db(config, now, days=30),
+        )
+    start += len(marker)
+    end = html.find("</script>", start)
+    if end < 0:
+        raise RuntimeError("Dashboard payload in the rendered HTML is incomplete")
+    try:
+        payload = json.loads(html[start:end])
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"Dashboard payload is invalid: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise RuntimeError("Dashboard payload is not a JSON object")
+
+    # Live checks update their compact state files directly.  Merge those
+    # fields so Check now is visible on the next fast API response without
+    # rebuilding charts, history, inventory, and firewall data.
     config = load_config(require_webhook=False)
-    now = datetime.now().astimezone()
-    history = load_history_from_db(config, now)
-    run_rows = load_probe_runs_from_db(config, now, days=30)
-    return build_interactive_dashboard_payload(
-        history,
-        now,
-        output_path=output_path,
-        config=config,
-        run_rows=run_rows,
-    )
+    payload["refresh"] = {
+        "seconds": config.dashboard_refresh_seconds,
+        "minimumSeconds": 15,
+    }
+    payload["keepalive"] = load_keepalive_state(config)
+    payload["fortigate"] = load_fortigate_state(config)
+    # Core Network Health follows the current keep-alive state.  Recalculate
+    # it here so a per-device ping toggle takes effect without waiting for a
+    # full dashboard rebuild.
+    try:
+        nmap_rows, nmap_meta = _load_nmap_inventory_rows(config)
+        payload["diagnosis"] = build_network_diagnosis(
+            _load_router_events(config),
+            nmap_rows,
+            nmap_meta,
+            now=datetime.now().astimezone(),
+            config=config,
+            keepalive=payload["keepalive"],
+        )
+    except Exception:
+        pass
+    # Firewall input is bounded by the log-rotation policy and recent-tail
+    # reader, so it is safe to refresh this security signal for each browser
+    # poll without rebuilding historical charts or inventory.
+    if config.firewall_enabled:
+        try:
+            nmap_rows, _ = _load_nmap_inventory_rows(config)
+            snapshot = collect_firewall_snapshot(
+                FirewallConfig(
+                    enabled=config.firewall_enabled,
+                    window_hours=config.firewall_window_hours,
+                    top_n=config.firewall_top_n,
+                    noisy_source_threshold=config.firewall_noisy_source_threshold,
+                    include_allow=config.firewall_include_allow,
+                    log_paths=config.firewall_log_paths,
+                )
+            )
+            payload["firewall"] = _build_firewall_dashboard_payload(snapshot, nmap_rows)
+            meta = payload.get("meta")
+            if isinstance(meta, dict) and isinstance(meta.get("refreshed"), dict):
+                meta["refreshed"]["firewall"] = datetime.now().astimezone().isoformat()
+        except Exception:
+            # Keep the last rendered firewall payload available if a transient
+            # system-log read fails.
+            pass
+    meta = payload.get("meta")
+    if isinstance(meta, dict):
+        refreshed = meta.get("refreshed")
+        if isinstance(refreshed, dict):
+            refreshed["keepalive"] = str(payload["keepalive"].get("checkedAt") or "")
+            refreshed["fortigate"] = str(payload["fortigate"].get("checkedAt") or "")
+    return payload
 
 
 def apply_dashboard_nmap_override(output_path: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -4489,10 +4622,35 @@ def run_dashboard_live_check(check: str) -> dict[str, Any]:
     if check == "core":
         keepalive = run_keepalive(config)
         fortigate = collect_fortigate_snapshot(config) if config.fortigate_enabled else {"enabled": False}
-        healthy = all(bool(device.get("up")) for device in keepalive.get("devices", []) if isinstance(device, dict))
+        monitored_devices = [
+            device
+            for device in keepalive.get("devices", [])
+            if isinstance(device, dict) and device.get("pingEnabled") is not False
+        ]
+        healthy = bool(monitored_devices) and all(bool(device.get("up")) for device in monitored_devices)
         healthy = healthy and (not config.fortigate_enabled or bool(fortigate.get("available")))
         return {"ok": healthy, "message": "Core network check completed." if healthy else "One or more core network checks failed.", "keepalive": keepalive, "fortigate": fortigate}
     return {"ok": False, "message": "Unsupported live check."}
+
+
+def set_dashboard_keepalive_device(payload: dict[str, Any]) -> dict[str, Any]:
+    from .config import load_config
+    from .keepalive import run_keepalive, set_device_ping_enabled
+
+    config = load_config(require_webhook=False)
+    host = str(payload.get("host") or "").strip()
+    enabled = payload.get("enabled") is True
+    try:
+        set_device_ping_enabled(config, host, enabled)
+        state = run_keepalive(config)
+    except RuntimeError as exc:
+        return {"ok": False, "message": str(exc)}
+    label = next((str(item.get("name") or host) for item in state.get("devices", []) if item.get("host") == host), host)
+    return {
+        "ok": True,
+        "message": f"Ping checks {'enabled' if enabled else 'disabled'} for {label}.",
+        "keepalive": state,
+    }
 
 
 def _load_allowed_ping_targets() -> set[str]:
@@ -4707,7 +4865,7 @@ def serve_interactive_dashboard(
 
         def do_POST(self) -> None:  # noqa: N802
             request_path = urlparse(self.path).path
-            if request_path not in {"/api/auth/session", "/api/nmap/scan", "/api/nmap/override", "/api/device/ping", "/api/speedtest/run", "/api/live/check"}:
+            if request_path not in {"/api/auth/session", "/api/nmap/scan", "/api/nmap/override", "/api/device/ping", "/api/speedtest/run", "/api/live/check", "/api/keepalive/device"}:
                 self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "message": "Not found"}, no_store=True)
                 return
             if request_path == "/api/auth/session":
@@ -4773,6 +4931,17 @@ def serve_interactive_dashboard(
                     self._send_json(HTTPStatus.UNAUTHORIZED, {"ok": False, "message": "Dashboard action token required"}, no_store=True)
                     return
                 result = run_dashboard_live_check(str(payload.get("check") or ""))
+                self._send_json(HTTPStatus.OK if result.get("ok") else HTTPStatus.BAD_REQUEST, result, no_store=True)
+                return
+            if request_path == "/api/keepalive/device":
+                payload = self._read_json_payload()
+                if payload is None:
+                    return
+                supplied = str(payload.pop("token", "")).strip()
+                if not self._actions_authorized(supplied):
+                    self._send_json(HTTPStatus.UNAUTHORIZED, {"ok": False, "message": "Dashboard action token required"}, no_store=True)
+                    return
+                result = set_dashboard_keepalive_device(payload)
                 self._send_json(HTTPStatus.OK if result.get("ok") else HTTPStatus.BAD_REQUEST, result, no_store=True)
                 return
             if request_path == "/api/nmap/override":

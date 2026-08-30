@@ -177,15 +177,21 @@ def build_embed(
         policy_value = f"{firewall_snapshot.status.default_incoming} in / {firewall_snapshot.status.default_outgoing} out"
         top_sources = ", ".join(f"{src} ({count})" for src, count in firewall_snapshot.top_sources[:3]) or "None"
         top_ports = ", ".join(f"{port} ({count})" for port, count in firewall_snapshot.top_ports[:3]) or "None"
+        ssh_activity = firewall_snapshot.ssh_session_details[:3]
+        ssh_detail = "\n".join(
+            f"{item['source']} → {item['destination']} · {item['user']} · {item['timestamp']}"
+            for item in ssh_activity
+        ) or "No accepted SSH activity recorded in this snapshot."
         note = firewall_snapshot.notes[0] if firewall_snapshot.notes else "Blocked traffic is not automatically bad. It often means the firewall is doing its job."
         fields.extend(
             [
-                {"name": "Firewall Snapshot / Status", "value": status_value[:1024], "inline": True},
-                {"name": "Firewall Snapshot / Policy", "value": policy_value[:1024], "inline": True},
-                {"name": "Firewall Snapshot / Last 24h blocks", "value": str(firewall_snapshot.blocked_entries), "inline": True},
-                {"name": "Firewall Snapshot / Top sources", "value": top_sources[:1024], "inline": False},
-                {"name": "Firewall Snapshot / Top ports", "value": top_ports[:1024], "inline": False},
-                {"name": "Firewall Snapshot / Notes", "value": note[:1024], "inline": False},
+                {"name": "Firewall / Status", "value": f"{status_value} · {policy_value}"[:1024], "inline": False},
+                {"name": "Firewall / Last 24h", "value": f"{firewall_snapshot.total_entries} events · {firewall_snapshot.blocked_entries} denied · {firewall_snapshot.allowed_entries} allowed"[:1024], "inline": True},
+                {"name": "Firewall / Admin access", "value": f"{firewall_snapshot.auth_failures} failed logins · {firewall_snapshot.auth_successes} successful logins · {firewall_snapshot.ssh_sessions} accepted SSH events"[:1024], "inline": True},
+                {"name": "Firewall / Top sources", "value": top_sources[:1024], "inline": False},
+                {"name": "Firewall / Top ports", "value": top_ports[:1024], "inline": False},
+                {"name": "Firewall / Recent SSH activity", "value": ssh_detail[:1024], "inline": False},
+                {"name": "Firewall / Input", "value": f"{firewall_snapshot.log_source}\n{note}"[:1024], "inline": False},
             ]
         )
 
