@@ -2,11 +2,11 @@
 
 `pi-probe-discord` is a Pi-hosted home-network monitor. It runs reliable internet checks, watches core network devices, stores local history in SQLite, and posts concise results to Discord.
 
-## This deployment
+## Deployment privacy
 
-This repository is tailored for the deployed home network rather than being a generic monitoring template. It monitors the Pi-hosted services, Pi-hole and internet performance, a FortiWiFi 30E at `10.10.10.1`, and a FortiAP-U431F at `10.10.10.105`. The interactive dashboard combines live keep-alive checks, FortiWiFi API health, and inventory across both `192.168.1.0/24` and `10.10.10.0/24`.
+This repository is a reusable home-network monitor. Keep deployment-specific device names, addresses, subnets, CA names, and topology out of public documentation. The examples below use documentation-reserved addresses only.
 
-HTTPS is backed by the local **Pi Probe Local CA**. Its private key remains root-only on the Pi; clients trust its CA certificate instead. Your deployment settings live in `/etc/pi-probe-discord/pihole-update-discord.env`, while secrets such as the FortiWiFi API token remain in separate protected files.
+HTTPS can use a local CA. Keep its private key root-only on the Pi; clients should trust only the CA certificate. Deployment settings live in `/etc/pi-probe-discord/pihole-update-discord.env`, while secrets such as API tokens remain in separate protected files.
 
 ### Preserve local customisation
 
@@ -269,8 +269,8 @@ Example topology configuration:
 ```bash
 PI_PROBE_TOPOLOGY_ENABLED="true"
 PI_PROBE_TOPOLOGY_NODES_JSON='[
-  {"id":"router","name":"Main Router","host":"192.168.1.1","management_ip":"192.168.1.1","community":"public","role":"router"},
-  {"id":"access-point","name":"Access Point","host":"192.168.1.2","management_ip":"192.168.1.2","community":"public","role":"access_point"}
+  {"id":"router","name":"Router","host":"192.0.2.1","management_ip":"192.0.2.1","community":"replace-me","role":"router"},
+  {"id":"access-point","name":"Access point","host":"192.0.2.2","management_ip":"192.0.2.2","community":"replace-me","role":"access_point"}
 ]'
 PI_PROBE_TOPOLOGY_CACHE_JSON="/var/lib/pi-probe-discord/topology/latest.json"
 PI_PROBE_TOPOLOGY_REFRESH_MINUTES="30"
@@ -293,7 +293,7 @@ Main config:
 
 ```bash
 PI_PROBE_ROUTER_WEBUI_ENABLED="true"
-PI_PROBE_ROUTER_WEBUI_URL="http://192.168.1.1"
+PI_PROBE_ROUTER_WEBUI_URL="http://192.0.2.1"
 PI_PROBE_ROUTER_WEBUI_SECRET_FILE="/etc/pi-probe-discord/router-webui.env"
 PI_PROBE_ROUTER_WEBUI_CA_FILE="/etc/pi-probe-discord/router-webui-ca.pem"
 ```
@@ -322,7 +322,7 @@ To avoid trusting arbitrary certificates on the LAN, export or copy the router's
 
 When `PI_PROBE_ROUTER_WEBUI_CA_FILE` points to that file, Pi Probe pins the router connection to that exact certificate before logging in.
 
-## FortiWiFi 30E reporting
+## FortiWiFi/FortiGate reporting
 
 Pi Probe can poll a FortiWiFi/FortiGate through its read-only FortiOS Monitor API and place gateway identity, CPU, memory, and active-session reporting on the dashboard. It sends only `GET` requests; the API token stays in a root-only file and is never put in dashboard JSON.
 
@@ -330,14 +330,14 @@ Set the gateway, access-point, and FortiAP reachability checks in `/etc/pi-probe
 
 ```bash
 PI_PROBE_KEEPALIVE_ENABLED="true"
-PI_PROBE_KEEPALIVE_DEVICES_JSON='[{"name":"Upstairs Router","host":"192.168.1.1","role":"router"},{"name":"FortiWiFi 30E","host":"10.10.10.1","role":"firewall"},{"name":"AX20 Downstairs","host":"10.10.10.2","role":"access_point"},{"name":"FortiAP-U431F","host":"10.10.10.105","role":"access_point"}]'
+PI_PROBE_KEEPALIVE_DEVICES_JSON='[{"name":"Router","host":"192.0.2.1","role":"router"},{"name":"Firewall","host":"198.51.100.1","role":"firewall"},{"name":"Access point","host":"198.51.100.2","role":"access_point"}]'
 PI_PROBE_FORTIGATE_ENABLED="true"
-FORTIGATE_BASE_URL="https://10.10.10.1"
+FORTIGATE_BASE_URL="https://198.51.100.1"
 PI_PROBE_FORTIGATE_VDOM="root"
 PI_PROBE_FORTIGATE_CA_FILE="/etc/pi-probe-discord/fortigate-ca.pem"
 ```
 
-Replace `10.10.10.1` with the FortiWiFi management address if it differs. Create a least-privilege REST API administrator on the FortiWiFi, restrict its trusted hosts to the Pi's IP, then install its token without adding it to the main configuration:
+Replace `198.51.100.1` with the FortiWiFi management address. Create a least-privilege REST API administrator on the FortiWiFi, restrict its trusted hosts to the Pi's IP, then install its token without adding it to the main configuration:
 
 ```bash
 sudo install -o root -g root -m 600 /usr/share/pi-probe-discord/fortigate.env.example /etc/pi-probe-discord/fortigate.env
@@ -350,7 +350,7 @@ sudo pi-probe-discord fortigate
 To include devices behind the FortiWiFi in the inventory and dashboard, add its routed subnet to the Nmap targets. Targets are space-separated:
 
 ```bash
-PI_PROBE_NMAP_TARGETS="192.168.1.0/24 10.10.10.0/24"
+PI_PROBE_NMAP_TARGETS="192.0.2.0/24 198.51.100.0/24"
 ```
 
 For a Pi upstream of the FortiWiFi, configure its host route and the narrow FortiGate `wan -> internal` policy outside this application. The program never changes Linux routes or FortiGate firewall rules. A one-shot `pi-probe-discord fortigate` result identifies the precise failing stage (`route`, `tcp`, `tls`, `authentication`, `http`, `api`, or `parsing`) without logging the API token.
@@ -364,19 +364,19 @@ Pi Probe can also receive FortiWiFi syslog locally and include denied traffic in
 ```ini
 PI_PROBE_FORTIGATE_SYSLOG_ENABLED="true"
 PI_PROBE_FORTIGATE_SYSLOG_PORT="5514"
-PI_PROBE_FORTIGATE_SYSLOG_ALLOWED_SOURCES="10.10.10.1"
+PI_PROBE_FORTIGATE_SYSLOG_ALLOWED_SOURCES="198.51.100.1"
 PI_PROBE_FORTIGATE_SYSLOG_LOG_FILE="/var/lib/pi-probe-discord/fortigate-syslog/fortigate.log"
 PI_PROBE_FIREWALL_LOG_PATHS="/var/lib/pi-probe-discord/fortigate-syslog/fortigate.log,/var/log/ufw.log,/var/log/kern.log,/var/log/syslog"
 ```
 
-Start `pi-probe-discord-fortigate-syslog.service`. In FortiWiFi **Log & Report → Log Settings**, enable **Send logs to syslog**, set the Pi to `192.168.1.51`, port `5514`, and use UDP. Start with traffic and event logs; denied traffic is the most useful signal and allowed traffic can be intentionally noisy.
+Start `pi-probe-discord-fortigate-syslog.service`. In FortiWiFi **Log & Report → Log Settings**, enable **Send logs to syslog**, set the Pi's address and port `5514`, and use UDP. Start with traffic and event logs; denied traffic is the most useful signal and allowed traffic can be intentionally noisy.
 
 ## Firewall examples
 
 LAN-only example:
 
 ```bash
-sudo ufw allow from 192.168.1.0/24 to any port 8088 proto tcp comment 'pi-probe dashboard'
+sudo ufw allow from 192.0.2.0/24 to any port 8088 proto tcp comment 'pi-probe dashboard'
 ```
 
 Tailscale example:
@@ -498,7 +498,7 @@ sudo pi-probe-discord router
 TP-Link side:
 
 - enable SNMP trap sending, not just SNMP polling
-- set the trap destination host to the Pi's LAN address, for example `192.168.1.50`
+- set the trap destination host to the Pi's LAN address
 - set the trap destination UDP port to `162`
 - trigger a test trap or a real link event, then rerun `sudo pi-probe-discord router`
 

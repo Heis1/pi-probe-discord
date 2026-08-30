@@ -162,8 +162,8 @@ Example configuration:
 ```bash
 PI_PROBE_TOPOLOGY_ENABLED="true"
 PI_PROBE_TOPOLOGY_NODES_JSON='[
-  {"id":"router","name":"Main Router","host":"192.168.1.1","management_ip":"192.168.1.1","community":"public","role":"router"},
-  {"id":"access-point","name":"Access Point","host":"192.168.1.2","management_ip":"192.168.1.2","community":"public","role":"access_point"}
+  {"id":"router","name":"Router","host":"192.0.2.1","management_ip":"192.0.2.1","community":"replace-me","role":"router"},
+  {"id":"access-point","name":"Access point","host":"192.0.2.2","management_ip":"192.0.2.2","community":"replace-me","role":"access_point"}
 ]'
 PI_PROBE_TOPOLOGY_CACHE_JSON="/var/lib/pi-probe-discord/topology/latest.json"
 PI_PROBE_TOPOLOGY_REFRESH_MINUTES="30"
@@ -181,7 +181,7 @@ Main env:
 
 ```bash
 PI_PROBE_ROUTER_WEBUI_ENABLED="true"
-PI_PROBE_ROUTER_WEBUI_URL="http://192.168.1.1"
+PI_PROBE_ROUTER_WEBUI_URL="http://192.0.2.1"
 PI_PROBE_ROUTER_WEBUI_SECRET_FILE="/etc/pi-probe-discord/router-webui.env"
 PI_PROBE_ROUTER_WEBUI_CA_FILE="/etc/pi-probe-discord/router-webui-ca.pem"
 ```

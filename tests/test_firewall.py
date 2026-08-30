@@ -24,7 +24,7 @@ def test_parse_ipv4_tcp_block() -> None:
 
 def test_parses_fortiwifi_denied_traffic_syslog() -> None:
     entry = parse_ufw_log_line(
-        'date=2026-08-29 time=16:00:00 type="traffic" subtype="forward" srcip=203.0.113.9 srcintf="wan1" dstip=10.10.10.1 dstport=22 proto=6 action="deny"',
+        'date=2026-08-29 time=16:00:00 type="traffic" subtype="forward" srcip=203.0.113.9 srcintf="wan1" dstip=198.51.100.1 dstport=22 proto=6 action="deny"',
         now=datetime(2026, 8, 29, 16, 0, 0),
     )
     assert entry is not None
@@ -36,7 +36,7 @@ def test_parses_fortiwifi_denied_traffic_syslog() -> None:
 def test_tracks_accepted_ssh_activity_details() -> None:
     now = datetime.now().astimezone()
     entry = parse_ufw_log_line(
-        'date=2026-08-30 time=12:00:00 type="event" ui="ssh(203.0.113.9)" srcip=203.0.113.9 dstip=10.10.10.1 user="admin" srcintf="wan1" action="accept"',
+        'date=2026-08-30 time=12:00:00 type="event" ui="ssh(203.0.113.9)" srcip=203.0.113.9 dstip=198.51.100.1 user="admin" srcintf="wan1" action="accept"',
         now=now,
     )
     assert entry is not None
@@ -51,7 +51,7 @@ def test_tracks_accepted_ssh_activity_details() -> None:
 def test_tracks_successful_ssh_login_as_ssh_activity() -> None:
     now = datetime.now().astimezone()
     entry = parse_ufw_log_line(
-        'type="event" logdesc="Admin login successful" user="admin" ui="ssh(192.168.1.190)" method="ssh" srcip=192.168.1.190 dstip=10.10.10.1 action="login" status="success"',
+        'type="event" logdesc="Admin login successful" user="admin" ui="ssh(203.0.113.9)" method="ssh" srcip=203.0.113.9 dstip=198.51.100.1 action="login" status="success"',
         now=now,
     )
     assert entry is not None

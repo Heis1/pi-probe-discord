@@ -20,7 +20,7 @@ class FortigateTests(unittest.TestCase):
             secret_file.write_text('PI_PROBE_FORTIGATE_API_TOKEN="secret-token"\n', encoding="utf-8")
             config = SimpleNamespace(
                 fortigate_enabled=True,
-                fortigate_url="https://10.10.10.1",
+                fortigate_url="https://198.51.100.1",
                 fortigate_vdom="root",
                 fortigate_secret_file=str(secret_file),
                 fortigate_ca_file="",
@@ -40,7 +40,7 @@ class FortigateTests(unittest.TestCase):
                 for response in responses
             ]
             fake_stat = SimpleNamespace(st_uid=0, st_mode=stat.S_IFREG | 0o600)
-            with patch("pathlib.Path.stat", return_value=fake_stat), patch("pi_probe_discord.fortigate._route_diagnostic", return_value=(True, "10.10.10.1 via 192.168.1.103")), patch("pi_probe_discord.fortigate._tcp_diagnostic", return_value=(True, "TCP connected")), patch("pi_probe_discord.fortigate.requests.Session", return_value=session):
+            with patch("pathlib.Path.stat", return_value=fake_stat), patch("pi_probe_discord.fortigate._route_diagnostic", return_value=(True, "198.51.100.1 via 192.0.2.10")), patch("pi_probe_discord.fortigate._tcp_diagnostic", return_value=(True, "TCP connected")), patch("pi_probe_discord.fortigate.requests.Session", return_value=session):
                 snapshot = collect_fortigate_snapshot(config)
             self.assertTrue(snapshot["available"])
             self.assertEqual(snapshot["system"]["hostname"], "fortiwifi")
@@ -52,7 +52,7 @@ class FortigateTests(unittest.TestCase):
 
     def test_reports_route_failure_without_trying_api(self) -> None:
         config = SimpleNamespace(
-            fortigate_enabled=True, fortigate_url="https://10.10.10.1", fortigate_state_json="/tmp/fortigate-test-state.json",
+            fortigate_enabled=True, fortigate_url="https://198.51.100.1", fortigate_state_json="/tmp/fortigate-test-state.json",
             fortigate_timeout_seconds=3, fortigate_ca_file="", fortigate_tls_verify=True,
         )
         with patch("pi_probe_discord.fortigate._route_diagnostic", return_value=(False, "No route to host")), patch("pi_probe_discord.fortigate.requests.Session") as session:
