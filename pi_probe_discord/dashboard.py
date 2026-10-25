@@ -1745,7 +1745,7 @@ body.theme-clean select, body.theme-clean input { background: rgba(255,255,255,.
 .wan-stat { padding:14px; border:1px solid var(--border); border-radius:14px; background:var(--panel-2); }
 .wan-stat .label { color:var(--muted); font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:.08em; }
 .wan-stat .value { margin-top:6px; font-size:24px; font-weight:900; letter-spacing:-.04em; }
-.wan-chart { width:100%; height:260px; display:block; border:1px solid var(--border); border-radius:14px; background:var(--panel-2); }
+.wan-chart { width:100%; height:clamp(260px,42vh,560px); display:block; border:1px solid var(--border); border-radius:14px; background:var(--panel-2); }
 .wan-controls { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
 .wan-period.active { background:rgba(56,189,248,.24); border-color:var(--accent); }
 .security-grid { display:grid; grid-template-columns:1.3fr repeat(3,minmax(120px,.55fr)); gap:12px; }
@@ -2264,7 +2264,7 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
       <div class="wan-stat"><div class="label">Average</div><div class="value" id="wanAverage">Unavailable</div></div>
     </div>
     <div class="wan-controls"><button class="mini-button wan-period active" data-wan-period="5m">5 min</button><button class="mini-button wan-period" data-wan-period="1h">1 hour</button><button class="mini-button wan-period" data-wan-period="24h">24 hours</button><button class="mini-button wan-period" data-wan-period="7d">7 days</button><span class="helper-text" id="wanStatus">Loading…</span></div>
-    <svg id="wanChart" class="wan-chart" viewBox="0 0 1000 260" role="img" aria-label="WAN download and upload bandwidth graph"></svg>
+    <svg id="wanChart" class="wan-chart" viewBox="0 0 1000 260" preserveAspectRatio="none" role="img" aria-label="WAN download and upload bandwidth graph"></svg>
   </section>
 
   <section class="panel keepalive-section">
