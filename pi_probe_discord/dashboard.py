@@ -2974,14 +2974,12 @@ function renderFortigate() {
   });
   const secondary = fortigate.secondary || {};
   const secondaryMetrics = secondary.metrics || {};
-  const secondaryLabel = secondaryMetrics.description || 'FortiWiFi-30E';
-  const secondaryValue = secondary.available
-    ? `${secondaryLabel} · CPU ${secondaryMetrics.cpuPercent === null || secondaryMetrics.cpuPercent === undefined ? 'Unavailable' : `${Number(secondaryMetrics.cpuPercent).toFixed(1)}%`} · Memory ${secondaryMetrics.memoryPercent === null || secondaryMetrics.memoryPercent === undefined ? 'Unavailable' : `${Number(secondaryMetrics.memoryPercent).toFixed(1)}%`}`
-    : 'Unavailable';
+  const secondaryLabel = String(secondaryMetrics.description || 'FortiWiFi-30E').replace(/^"|"$/g, '');
+  const secondaryValue = secondary.available ? secondaryLabel : 'Unavailable';
   const secondaryCard = document.createElement('div'); secondaryCard.className = `keepalive-card ${secondary.available ? 'up' : 'down'}`;
   const secondaryTitle = document.createElement('div'); secondaryTitle.className = 'device-name'; secondaryTitle.textContent = 'Secondary wireless';
   const secondaryStatus = document.createElement('div'); secondaryStatus.className = 'keepalive-status'; secondaryStatus.textContent = secondaryValue;
-  const secondaryMeta = document.createElement('div'); secondaryMeta.className = 'keepalive-meta'; secondaryMeta.textContent = secondary.available ? (secondaryMetrics.fortiOS || 'FortiOS') : (secondary.error || 'FortiWiFi SNMP not configured');
+  const secondaryMeta = document.createElement('div'); secondaryMeta.className = 'keepalive-meta'; secondaryMeta.textContent = secondary.available ? `${secondaryMetrics.fortiOS || 'FortiOS'} · CPU ${secondaryMetrics.cpuPercent === null || secondaryMetrics.cpuPercent === undefined ? 'Unavailable' : `${Number(secondaryMetrics.cpuPercent).toFixed(1)}%`} · Memory ${secondaryMetrics.memoryPercent === null || secondaryMetrics.memoryPercent === undefined ? 'Unavailable' : `${Number(secondaryMetrics.memoryPercent).toFixed(1)}%`}` : (secondary.error || 'FortiWiFi SNMP not configured');
   secondaryCard.append(secondaryTitle, secondaryStatus, secondaryMeta); cards.appendChild(secondaryCard);
   const security = fortigate.security || {};
   const counts = security.counts || {};
@@ -4517,13 +4515,25 @@ def load_dashboard_data_payload(output_path: str) -> dict[str, Any]:
 
         config = load_config(require_webhook=False)
         now = datetime.now().astimezone()
-        return build_interactive_dashboard_payload(
-            load_history_from_db(config, now),
-            now,
-            output_path=output_path,
-            config=config,
-            run_rows=load_probe_runs_from_db(config, now, days=30),
-        )
+        try:
+            return build_interactive_dashboard_payload(
+                load_history_from_db(config, now),
+                now,
+                output_path=output_path,
+                config=config,
+                run_rows=load_probe_runs_from_db(config, now, days=30),
+            )
+        except RuntimeError:
+            # A legacy hand-written page may predate stored speed tests. Keep
+            # its read-only API useful for inventory rather than failing it.
+            nmap_rows, nmap_meta = _load_nmap_inventory_rows(config)
+            return {
+                "data": [], "events": [], "pihole": [], "firewall": {},
+                "keepalive": load_keepalive_state(config), "fortigate": load_fortigate_state(config),
+                "devices": [{"name": row.name, "hostname": row.hostname, "ip": row.ip} for row in nmap_rows],
+                "inventory": {"deviceCount": nmap_meta.get("deviceCount", len(nmap_rows)), "scannedAt": nmap_meta.get("scannedAt", "")},
+                "meta": {"refreshed": {}}, "stats": {}, "score": {}, "diagnosis": {}, "thresholds": {},
+            }
     start += len(marker)
     end = html.find("</script>", start)
     if end < 0:
@@ -4916,8 +4926,18 @@ def serve_interactive_dashboard(
                 try:
                     payload = load_dashboard_data_payload(str(file_path))
                 except RuntimeError as exc:
-                    self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "message": str(exc)}, no_store=True)
-                    return
+                    # The rendered snapshot remains safe and useful if a
+                    # transient live-state merge (for example a locked or
+                    # newly-created database) fails.
+                    try:
+                        html = file_path.read_text(encoding="utf-8")
+                        marker = '<script id="dashboard-payload" type="application/json">'
+                        start = html.find(marker) + len(marker)
+                        end = html.find("</script>", start)
+                        payload = json.loads(html[start:end]) if start >= len(marker) and end > start else {}
+                    except (OSError, ValueError, json.JSONDecodeError):
+                        self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "message": str(exc)}, no_store=True)
+                        return
                 self._send_json(HTTPStatus.OK, payload, no_store=True)
                 return
             if request_path == "/api/wan-bandwidth":
