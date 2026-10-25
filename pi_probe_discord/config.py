@@ -39,6 +39,7 @@ DEFAULT_BOT_CONFIG_FILE = DEFAULT_CONFIG_DIR / "pi-probe-discord-bot.env"
 DEFAULT_FORTIGATE_SECRET_FILE = DEFAULT_CONFIG_DIR / "fortigate.env"
 DEFAULT_FORTIGATE_STATE_JSON = DEFAULT_DATA_DIR / "fortigate" / "latest.json"
 DEFAULT_FORTIGATE_SYSLOG_FILE = DEFAULT_DATA_DIR / "fortigate-syslog" / "fortigate.log"
+DEFAULT_WAN_BANDWIDTH_STATE_JSON = DEFAULT_DATA_DIR / "wan-bandwidth" / "latest.json"
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -314,4 +315,10 @@ def load_config(base_dir: Path | None = None, require_webhook: bool = True) -> A
         fortigate_syslog_port=max(1, int(os.environ.get("PI_PROBE_FORTIGATE_SYSLOG_PORT", "5514"))),
         fortigate_syslog_log_file=os.environ.get("PI_PROBE_FORTIGATE_SYSLOG_LOG_FILE", str(DEFAULT_FORTIGATE_SYSLOG_FILE)).strip() or str(DEFAULT_FORTIGATE_SYSLOG_FILE),
         fortigate_syslog_allowed_sources=[item.strip() for item in os.environ.get("PI_PROBE_FORTIGATE_SYSLOG_ALLOWED_SOURCES", "").split(",") if item.strip()],
+        wan_bandwidth_enabled=_env_bool("PI_PROBE_WAN_BANDWIDTH_ENABLED", False),
+        wan_bandwidth_interface=os.environ.get("PI_PROBE_WAN_BANDWIDTH_INTERFACE", "wan1").strip() or "wan1",
+        wan_bandwidth_state_json=os.environ.get("PI_PROBE_WAN_BANDWIDTH_STATE_JSON", str(DEFAULT_WAN_BANDWIDTH_STATE_JSON)),
+        wan_bandwidth_interval_seconds=max(5, int(os.environ.get("PI_PROBE_WAN_BANDWIDTH_INTERVAL_SECONDS", "5"))),
+        wan_bandwidth_raw_retention_hours=max(1, int(os.environ.get("PI_PROBE_WAN_BANDWIDTH_RAW_RETENTION_HOURS", "24"))),
+        wan_bandwidth_aggregate_retention_days=max(1, int(os.environ.get("PI_PROBE_WAN_BANDWIDTH_AGGREGATE_RETENTION_DAYS", "7"))),
     )

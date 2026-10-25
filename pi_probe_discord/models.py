@@ -105,6 +105,12 @@ class AppConfig:
     fortigate_syslog_port: int = 5514
     fortigate_syslog_log_file: str = "/var/lib/pi-probe-discord/fortigate-syslog/fortigate.log"
     fortigate_syslog_allowed_sources: list[str] = field(default_factory=list)
+    wan_bandwidth_enabled: bool = False
+    wan_bandwidth_interface: str = "wan1"
+    wan_bandwidth_state_json: str = "/var/lib/pi-probe-discord/wan-bandwidth/latest.json"
+    wan_bandwidth_interval_seconds: int = 5
+    wan_bandwidth_raw_retention_hours: int = 24
+    wan_bandwidth_aggregate_retention_days: int = 7
     discord_reporting_enabled: bool = True
     discord_report_modes: list[str] = field(default_factory=lambda: ["full", "speedtest-only", "update-only", "firewall"])
 

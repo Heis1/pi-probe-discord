@@ -60,6 +60,59 @@ def init_database(config: AppConfig) -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_router_snmp_events_recorded_at ON router_snmp_events(recorded_at)"
         )
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS wan_bandwidth_samples (
+                recorded_at TEXT PRIMARY KEY, interface_index INTEGER NOT NULL,
+                download_mbps REAL NOT NULL, upload_mbps REAL NOT NULL
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS wan_bandwidth_minute (
+                bucket_at TEXT PRIMARY KEY, interface_index INTEGER NOT NULL,
+                avg_download_mbps REAL NOT NULL, avg_upload_mbps REAL NOT NULL,
+                peak_download_mbps REAL NOT NULL, peak_upload_mbps REAL NOT NULL,
+                sample_count INTEGER NOT NULL
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_wan_samples_recorded_at ON wan_bandwidth_samples(recorded_at)")
+
+
+def save_wan_bandwidth_sample(config: AppConfig, recorded_at: datetime, interface_index: int, download_mbps: float, upload_mbps: float) -> None:
+    """Persist a measured rate and compact old raw samples into minute buckets."""
+    init_database(config)
+    stamp = recorded_at.isoformat()
+    raw_cutoff = (recorded_at - timedelta(hours=config.wan_bandwidth_raw_retention_hours)).isoformat()
+    aggregate_cutoff = (recorded_at - timedelta(days=config.wan_bandwidth_aggregate_retention_days)).isoformat()
+    bucket = recorded_at.replace(second=0, microsecond=0).isoformat()
+    with sqlite3.connect(config.db_path) as conn:
+        conn.execute("INSERT OR REPLACE INTO wan_bandwidth_samples VALUES (?, ?, ?, ?)", (stamp, interface_index, download_mbps, upload_mbps))
+        conn.execute("""
+            INSERT INTO wan_bandwidth_minute (bucket_at, interface_index, avg_download_mbps, avg_upload_mbps, peak_download_mbps, peak_upload_mbps, sample_count)
+            VALUES (?, ?, ?, ?, ?, ?, 1)
+            ON CONFLICT(bucket_at) DO UPDATE SET
+              interface_index=excluded.interface_index,
+              avg_download_mbps=((wan_bandwidth_minute.avg_download_mbps * wan_bandwidth_minute.sample_count) + excluded.avg_download_mbps) / (wan_bandwidth_minute.sample_count + 1),
+              avg_upload_mbps=((wan_bandwidth_minute.avg_upload_mbps * wan_bandwidth_minute.sample_count) + excluded.avg_upload_mbps) / (wan_bandwidth_minute.sample_count + 1),
+              peak_download_mbps=MAX(wan_bandwidth_minute.peak_download_mbps, excluded.peak_download_mbps),
+              peak_upload_mbps=MAX(wan_bandwidth_minute.peak_upload_mbps, excluded.peak_upload_mbps),
+              sample_count=wan_bandwidth_minute.sample_count + 1
+        """, (bucket, interface_index, download_mbps, upload_mbps, download_mbps, upload_mbps))
+        conn.execute("DELETE FROM wan_bandwidth_samples WHERE recorded_at < ?", (raw_cutoff,))
+        conn.execute("DELETE FROM wan_bandwidth_minute WHERE bucket_at < ?", (aggregate_cutoff,))
+
+
+def load_wan_bandwidth_history(config: AppConfig, period_seconds: int, now: datetime) -> list[dict[str, Any]]:
+    init_database(config)
+    cutoff = now - timedelta(seconds=max(60, period_seconds))
+    raw_cutoff = now - timedelta(hours=config.wan_bandwidth_raw_retention_hours)
+    points: list[dict[str, Any]] = []
+    with sqlite3.connect(config.db_path) as conn:
+        if cutoff < raw_cutoff:
+            rows = conn.execute("SELECT bucket_at, avg_download_mbps, avg_upload_mbps FROM wan_bandwidth_minute WHERE bucket_at >= ? AND bucket_at < ? ORDER BY bucket_at", (cutoff.isoformat(), raw_cutoff.isoformat())).fetchall()
+            points.extend({"at": row[0], "downloadMbps": row[1], "uploadMbps": row[2], "aggregate": True} for row in rows)
+        rows = conn.execute("SELECT recorded_at, download_mbps, upload_mbps FROM wan_bandwidth_samples WHERE recorded_at >= ? ORDER BY recorded_at", (max(cutoff, raw_cutoff).isoformat(),)).fetchall()
+        points.extend({"at": row[0], "downloadMbps": row[1], "uploadMbps": row[2], "aggregate": False} for row in rows)
+    return points
 
 
 def save_run_record(config: AppConfig, record: RunRecord) -> None:

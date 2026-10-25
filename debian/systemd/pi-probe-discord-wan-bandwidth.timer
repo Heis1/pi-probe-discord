@@ -1,0 +1,11 @@
+[Unit]
+Description=Sample Pi Probe WAN bandwidth every five seconds
+
+[Timer]
+OnBootSec=20s
+OnUnitActiveSec=5s
+AccuracySec=1s
+Unit=pi-probe-discord-wan-bandwidth.service
+
+[Install]
+WantedBy=timers.target

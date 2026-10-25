@@ -50,6 +50,8 @@ override_dh_auto_install:
 	install -m 0644 debian/systemd/pi-probe-discord-keepalive.timer debian/pi-probe-discord/lib/systemd/system/pi-probe-discord-keepalive.timer
 	install -m 0644 debian/systemd/pi-probe-discord-fortigate.service debian/pi-probe-discord/lib/systemd/system/pi-probe-discord-fortigate.service
 	install -m 0644 debian/systemd/pi-probe-discord-fortigate.timer debian/pi-probe-discord/lib/systemd/system/pi-probe-discord-fortigate.timer
+	install -m 0644 debian/systemd/pi-probe-discord-wan-bandwidth.service debian/pi-probe-discord/lib/systemd/system/pi-probe-discord-wan-bandwidth.service
+	install -m 0644 debian/systemd/pi-probe-discord-wan-bandwidth.timer debian/pi-probe-discord/lib/systemd/system/pi-probe-discord-wan-bandwidth.timer
 	install -m 0644 debian/systemd/pi-probe-discord-fortigate-syslog.service debian/pi-probe-discord/lib/systemd/system/pi-probe-discord-fortigate-syslog.service
 	install -m 0644 debian/systemd/pi-probe-discord-smtp-log.service debian/pi-probe-discord/lib/systemd/system/pi-probe-discord-smtp-log.service
 

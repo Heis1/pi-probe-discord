@@ -1,3 +1,10 @@
+pi-probe-discord (1.2.4-1) unstable; urgency=medium
+
+  * Add live FortiGate wan1 SNMPv3 bandwidth monitoring and compact history.
+  * Replace the dashboard keep-alive panel with a live WAN bandwidth graph.
+
+ -- Codex Builder <noreply@example.invalid>  Sun, 25 Oct 2026 23:45:00 +1030
+
 pi-probe-discord (1.2.3-1) unstable; urgency=medium
 
   * Show the separately collected secondary FortiWiFi SNMPv3 health state.

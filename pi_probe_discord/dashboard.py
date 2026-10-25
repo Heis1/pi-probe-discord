@@ -18,12 +18,14 @@ import sqlite3
 import ssl
 import subprocess
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from .baselines import average, history_points_for_window
 from .firewall import FirewallConfig, FirewallSnapshot, collect_firewall_snapshot
 from .keepalive import load_keepalive_state
 from .fortigate import load_fortigate_state
+from .wan_bandwidth import load_wan_bandwidth_state
+from .storage import load_wan_bandwidth_history
 from .models import AppConfig, RouterSnapshot, SpeedResult
 
 try:
@@ -1417,6 +1419,7 @@ def _build_dashboard_payload(
     diagnosis_updated_at = _latest_timestamp([latest_event_at, inventory_scanned_at, latest_pihole_at, latest_speed_at]) or generated_at
     keepalive = load_keepalive_state(config) if config is not None else {"enabled": False, "checkedAt": "", "devices": []}
     fortigate = load_fortigate_state(config) if config is not None else {"enabled": False, "checkedAt": "", "available": False, "system": {}, "metrics": {}}
+    wan_bandwidth = load_wan_bandwidth_state(config) if config is not None else {"enabled": False, "available": False, "status": "Not configured"}
 
     metadata = {
         "service": SERVICE_NAME,
@@ -1471,6 +1474,7 @@ def _build_dashboard_payload(
         "firewall": firewall_data,
         "keepalive": keepalive,
         "fortigate": fortigate,
+        "wanBandwidth": wan_bandwidth,
         "inventory": {
             "scannedAt": nmap_meta.get("scannedAt", ""),
             "network": nmap_meta.get("network", ""),
@@ -1737,6 +1741,13 @@ body.theme-clean select, body.theme-clean input { background: rgba(255,255,255,.
 .keepalive-status { margin-top:8px; font-size:12px; font-weight:900; text-transform:uppercase; letter-spacing:.07em; }
 .keepalive-meta { margin-top:5px; color:var(--muted); font-size:12px; }
 .keepalive-toggle { margin-top:11px; }
+.wan-grid { display:grid; grid-template-columns:repeat(4,minmax(130px,1fr)); gap:12px; margin:12px 0; }
+.wan-stat { padding:14px; border:1px solid var(--border); border-radius:14px; background:var(--panel-2); }
+.wan-stat .label { color:var(--muted); font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:.08em; }
+.wan-stat .value { margin-top:6px; font-size:24px; font-weight:900; letter-spacing:-.04em; }
+.wan-chart { width:100%; height:260px; display:block; border:1px solid var(--border); border-radius:14px; background:var(--panel-2); }
+.wan-controls { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+.wan-period.active { background:rgba(56,189,248,.24); border-color:var(--accent); }
 .security-grid { display:grid; grid-template-columns:1.3fr repeat(3,minmax(120px,.55fr)); gap:12px; }
 .security-hero { border:1px solid var(--border); border-left:4px solid var(--accent-2); border-radius:16px; padding:15px; background:var(--panel-2); }
 .security-hero.attention { border-left-color:var(--danger); }
@@ -2124,6 +2135,7 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
   .panel-head, .device-zone-head { flex-direction: column; }
   .panel-stamp { align-self: flex-start; }
   .keepalive-grid { grid-template-columns: 1fr; }
+  .wan-grid { grid-template-columns:repeat(2,minmax(120px,1fr)); }
   .action-inline input { min-width: 0; }
   .security-action { align-items: flex-start; flex-direction: column; }
   .security-action span { text-align: left; }
@@ -2244,10 +2256,15 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
   </section>
 
   <section class="panel keepalive-section">
-    <div class="panel-head"><div><h2>Router Keep-Alive</h2><p>Independent ICMP checks run every minute, so router reachability is not inferred from the slower inventory scan.</p></div><div class="panel-stamp" id="keepaliveFreshness"></div></div>
-    <div class="action-row"><button id="keepaliveCheckButton" class="action-button" type="button">Check now</button><div id="keepaliveCheckStatus" class="helper-text"></div></div>
-    <div id="keepaliveCards" class="keepalive-grid"></div>
-    <div id="keepaliveEmpty" class="empty" style="display:none">Router keep-alive monitoring is not configured.</div>
+    <div class="panel-head"><div><h2>Live WAN Bandwidth</h2><p>Read-only SNMPv3 counters from <code>wan1</code>. Download is inbound; upload is outbound.</p></div><div class="panel-stamp" id="wanFreshness"></div></div>
+    <div class="wan-grid">
+      <div class="wan-stat"><div class="label">Download now</div><div class="value" id="wanDownload">Unavailable</div></div>
+      <div class="wan-stat"><div class="label">Upload now</div><div class="value" id="wanUpload">Unavailable</div></div>
+      <div class="wan-stat"><div class="label">Peak</div><div class="value" id="wanPeak">Unavailable</div></div>
+      <div class="wan-stat"><div class="label">Average</div><div class="value" id="wanAverage">Unavailable</div></div>
+    </div>
+    <div class="wan-controls"><button class="mini-button wan-period active" data-wan-period="5m">5 min</button><button class="mini-button wan-period" data-wan-period="1h">1 hour</button><button class="mini-button wan-period" data-wan-period="24h">24 hours</button><button class="mini-button wan-period" data-wan-period="7d">7 days</button><span class="helper-text" id="wanStatus">Loading…</span></div>
+    <svg id="wanChart" class="wan-chart" viewBox="0 0 1000 260" role="img" aria-label="WAN download and upload bandwidth graph"></svg>
   </section>
 
   <section class="panel keepalive-section">
@@ -2340,6 +2357,9 @@ let deviceRows = [];
 let firewall = {};
 let keepalive = {};
 let fortigate = {};
+let wanBandwidth = {};
+let wanPayload = { points: [], current: {}, stats: {} };
+let wanPeriod = '5m';
 let inventory = {};
 let topology = {};
 let stats = {};
@@ -2368,6 +2388,7 @@ function hydratePayload(nextPayload) {
   firewall = payload.firewall || {};
   keepalive = payload.keepalive || {};
   fortigate = payload.fortigate || {};
+  wanBandwidth = payload.wanBandwidth || {};
   inventory = payload.inventory || {};
   topology = payload.topology || {};
   stats = payload.stats || {};
@@ -2971,6 +2992,37 @@ function renderFortigate() {
     const meta = document.createElement('div'); meta.className = 'keepalive-meta'; meta.textContent = security.available ? `Last ${security.windowHours || 24}h; event records, not incidents.` : (security.error || 'FortiGate syslog not configured');
     card.append(title, status, meta); cards.appendChild(card);
   });
+}
+function formatRate(value) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value)) || Number(value) < 0) return 'Unavailable';
+  const mbps = Number(value);
+  if (mbps >= 1000) return `${(mbps / 1000).toFixed(2)} Gbps`;
+  if (mbps >= 1) return `${mbps.toFixed(mbps >= 100 ? 0 : 1)} Mbps`;
+  return `${(mbps * 1000).toFixed(0)} Kbps`;
+}
+function renderWanBandwidth() {
+  const current = wanPayload.current && Object.keys(wanPayload.current).length ? wanPayload.current : wanBandwidth;
+  const stats = wanPayload.stats || {};
+  setText('wanDownload', formatRate(current.downloadMbps));
+  setText('wanUpload', formatRate(current.uploadMbps));
+  setText('wanPeak', `${formatRate(stats.peakDownloadMbps)} ↓ · ${formatRate(stats.peakUploadMbps)} ↑`);
+  setText('wanAverage', `${formatRate(stats.averageDownloadMbps)} ↓ · ${formatRate(stats.averageUploadMbps)} ↑`);
+  setText('wanFreshness', current.lastSuccessAt ? `Last reading ${formatFreshness(current.lastSuccessAt, true)}` : 'No successful reading');
+  setText('wanStatus', current.available ? `Live · ${current.interface || 'wan1'} · ifIndex ${current.interfaceIndex ?? 'Unavailable'}` : (current.status || 'Unavailable'));
+  const svg = document.getElementById('wanChart'); clearNode(svg);
+  const points = Array.isArray(wanPayload.points) ? wanPayload.points : [];
+  if (!points.length) { const text = document.createElementNS('http://www.w3.org/2000/svg', 'text'); text.setAttribute('x', '500'); text.setAttribute('y', '130'); text.setAttribute('text-anchor', 'middle'); text.setAttribute('fill', '#94a3b8'); text.textContent = 'Awaiting compatible counter samples'; svg.appendChild(text); return; }
+  const values = points.flatMap(point => [Number(point.downloadMbps), Number(point.uploadMbps)]).filter(Number.isFinite);
+  const maxValue = Math.max(...values, 0.001);
+  const times = points.map(point => new Date(point.at).getTime()).filter(Number.isFinite); const minTime = Math.min(...times); const maxTime = Math.max(...times, minTime + 1);
+  const pathFor = (key) => points.map((point, index) => { const x = 42 + ((new Date(point.at).getTime() - minTime) / (maxTime - minTime)) * 930; const y = 225 - (Number(point[key]) / maxValue) * 185; return `${index ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`; }).join(' ');
+  [['downloadMbps', '#38bdf8', 'Download'], ['uploadMbps', '#a78bfa', 'Upload']].forEach(([key, color, label]) => { const path = document.createElementNS('http://www.w3.org/2000/svg', 'path'); path.setAttribute('d', pathFor(key)); path.setAttribute('fill', 'none'); path.setAttribute('stroke', color); path.setAttribute('stroke-width', '3'); const title = document.createElementNS('http://www.w3.org/2000/svg', 'title'); title.textContent = `${label}: hover any point for values`; path.appendChild(title); svg.appendChild(path); });
+  points.forEach(point => { const x = 42 + ((new Date(point.at).getTime() - minTime) / (maxTime - minTime)) * 930; [['downloadMbps', '#38bdf8'], ['uploadMbps', '#a78bfa']].forEach(([key, color]) => { const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle'); circle.setAttribute('cx', x.toFixed(1)); circle.setAttribute('cy', (225 - (Number(point[key]) / maxValue) * 185).toFixed(1)); circle.setAttribute('r', '3'); circle.setAttribute('fill', color); const title = document.createElementNS('http://www.w3.org/2000/svg', 'title'); title.textContent = `${new Date(point.at).toLocaleString()}\nDownload ${formatRate(point.downloadMbps)}\nUpload ${formatRate(point.uploadMbps)}`; circle.appendChild(title); svg.appendChild(circle); }); });
+}
+async function fetchWanBandwidth(period = wanPeriod) {
+  wanPeriod = period;
+  try { const response = await fetch(`/api/wan-bandwidth?period=${encodeURIComponent(period)}`, { cache: 'no-store' }); if (!response.ok) throw new Error(`HTTP ${response.status}`); wanPayload = await response.json(); renderWanBandwidth(); }
+  catch (error) { wanPayload = { points: [], current: { available: false, status: `WAN data unavailable: ${error instanceof Error ? error.message : 'request error'}` }, stats: {} }; renderWanBandwidth(); }
 }
 function renderFirewallSignal() {
   const shell = document.getElementById('securityShell');
@@ -4134,7 +4186,7 @@ function render() {
   renderHeatmap(data);
   renderLatencyTrend(data);
   renderDnsCorrelation(data);
-  renderKeepalive();
+  renderWanBandwidth();
   renderFortigate();
   renderFirewallSignal();
   renderDiagnosis();
@@ -4169,6 +4221,7 @@ async function fetchDashboardData(reason = 'poll') {
     document.getElementById('threshold').value = stats.thresholdMbps;
     initFilters();
     render();
+    void fetchWanBandwidth(wanPeriod);
     scheduleNextRefresh();
     return true;
   } catch (error) {
@@ -4183,6 +4236,7 @@ async function fetchDashboardData(reason = 'poll') {
   }
 }
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (getThemeChoice() === 'auto') applyTheme('auto'); });
+document.querySelectorAll('[data-wan-period]').forEach(button => button.addEventListener('click', () => { document.querySelectorAll('[data-wan-period]').forEach(item => item.classList.toggle('active', item === button)); void fetchWanBandwidth(button.dataset.wanPeriod || '5m'); }));
 window.addEventListener('resize', () => render());
 document.getElementById('theme').value = getThemeChoice();
 document.getElementById('theme').addEventListener('change', event => applyTheme(event.target.value));
@@ -4196,7 +4250,6 @@ document.getElementById('eventHistoryButton').addEventListener('click', () => { 
 document.getElementById('nmapScanButton').addEventListener('click', triggerNmapScan);
 document.getElementById('speedtestButton').addEventListener('click', triggerSpeedtest);
 document.getElementById('coreCheckButton').addEventListener('click', () => triggerLiveCheck('core'));
-document.getElementById('keepaliveCheckButton').addEventListener('click', () => triggerLiveCheck('keepalive'));
 document.getElementById('fortigateCheckButton').addEventListener('click', () => triggerLiveCheck('fortigate'));
 document.getElementById('diagEvidenceToggle').addEventListener('click', () => { diagView = 'evidence'; renderDiagnosis(); });
 document.getElementById('diagActionsToggle').addEventListener('click', () => { diagView = 'actions'; renderDiagnosis(); });
@@ -4209,6 +4262,8 @@ document.addEventListener('visibilitychange', () => {
   if (!document.hidden) void fetchDashboardData('visible');
 });
 scheduleNextRefresh();
+void fetchWanBandwidth('5m');
+window.setInterval(() => { void fetchWanBandwidth(wanPeriod); }, 5000);
 </script>
 </body>
 </html>
@@ -4863,6 +4918,21 @@ def serve_interactive_dashboard(
                 except RuntimeError as exc:
                     self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "message": str(exc)}, no_store=True)
                     return
+                self._send_json(HTTPStatus.OK, payload, no_store=True)
+                return
+            if request_path == "/api/wan-bandwidth":
+                period_map = {"5m": 300, "1h": 3600, "24h": 86400, "7d": 604800}
+                period = parse_qs(urlparse(self.path).query).get("period", ["5m"])[0]
+                seconds = period_map.get(period, 300)
+                current = load_wan_bandwidth_state(config)
+                points = load_wan_bandwidth_history(config, seconds, datetime.now().astimezone())
+                valid = [point for point in points if isinstance(point.get("downloadMbps"), (int, float)) and isinstance(point.get("uploadMbps"), (int, float))]
+                payload = {"period": period, "current": current, "points": points, "stats": {
+                    "peakDownloadMbps": max((point["downloadMbps"] for point in valid), default=None),
+                    "peakUploadMbps": max((point["uploadMbps"] for point in valid), default=None),
+                    "averageDownloadMbps": (sum(point["downloadMbps"] for point in valid) / len(valid)) if valid else None,
+                    "averageUploadMbps": (sum(point["uploadMbps"] for point in valid) / len(valid)) if valid else None,
+                }}
                 self._send_json(HTTPStatus.OK, payload, no_store=True)
                 return
             if request_path in {"/", ""}:

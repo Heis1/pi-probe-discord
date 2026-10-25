@@ -46,6 +46,8 @@ from .router_snmp import (
 from .speedtest_runner import run_speedtest_measurement
 from .keepalive import run_keepalive
 from .fortigate import collect_fortigate_snapshot
+from .wan_bandwidth import collect_wan_bandwidth
+from .wan_bandwidth import collect_wan_bandwidth
 from .smtp_log_receiver import run_smtp_log_receiver
 from .fortigate_syslog import run_fortigate_syslog_receiver
 from .bot_reporter import post_bot_report
@@ -335,6 +337,12 @@ def run_keepalive_check() -> str:
 def run_fortigate_check() -> str:
     config = load_config(require_webhook=False)
     return json.dumps(collect_fortigate_snapshot(config), indent=2)
+
+
+def run_wan_bandwidth_check() -> str:
+    config = load_config(require_webhook=False)
+    init_database(config)
+    return json.dumps(collect_wan_bandwidth(config), indent=2)
 
 
 def run_smtp_log_listener() -> int:

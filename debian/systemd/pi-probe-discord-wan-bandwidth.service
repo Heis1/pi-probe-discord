@@ -1,0 +1,16 @@
+[Unit]
+Description=Sample FortiGate wan1 bandwidth for Pi Probe
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/pi-probe-discord
+ExecStart=/usr/bin/pi-probe-discord wan-bandwidth
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/pi-probe-discord
+ReadOnlyPaths=/etc/pi-probe-discord/pihole-update-discord.env /etc/pi-probe-discord/fortigate.env
+
