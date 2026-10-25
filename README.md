@@ -322,9 +322,11 @@ To avoid trusting arbitrary certificates on the LAN, export or copy the router's
 
 When `PI_PROBE_ROUTER_WEBUI_CA_FILE` points to that file, Pi Probe pins the router connection to that exact certificate before logging in.
 
-## FortiWiFi/FortiGate reporting
+## FortiGate reporting
 
-Pi Probe can poll a FortiWiFi/FortiGate through its read-only FortiOS Monitor API and place gateway identity, CPU, memory, and active-session reporting on the dashboard. It sends only `GET` requests; the API token stays in a root-only file and is never put in dashboard JSON.
+Pi Probe can poll the primary FortiGate through its read-only FortiOS Monitor API and place gateway identity, CPU, memory, and active-session reporting on the dashboard. It sends only `GET` requests; the API token stays in a root-only file and is never put in dashboard JSON. The collector deliberately does not assume model-specific interface, wireless, or FortiAP API endpoints; unavailable telemetry is shown as unavailable.
+
+When HTTPS management is intentionally unavailable to the Pi, enable the optional read-only SNMPv3 authPriv collector instead. It uses a three-second timeout with no retry and supports a separate secondary FortiGate/FortiWiFi profile. Its credentials remain in `fortigate.env`; neither dashboard JSON nor logs contain them.
 
 Set the gateway, access-point, and FortiAP reachability checks in `/etc/pi-probe-discord/pihole-update-discord.env`:
 
@@ -337,7 +339,7 @@ PI_PROBE_FORTIGATE_VDOM="root"
 PI_PROBE_FORTIGATE_CA_FILE="/etc/pi-probe-discord/fortigate-ca.pem"
 ```
 
-Replace `198.51.100.1` with the FortiWiFi management address. Create a least-privilege REST API administrator on the FortiWiFi, restrict its trusted hosts to the Pi's IP, then install its token without adding it to the main configuration:
+Replace `198.51.100.1` with the FortiGate 60F management address. Create a least-privilege REST API administrator on the FortiGate, restrict its trusted hosts to the Pi's IP, then install its token without adding it to the main configuration:
 
 ```bash
 sudo install -o root -g root -m 600 /usr/share/pi-probe-discord/fortigate.env.example /etc/pi-probe-discord/fortigate.env
@@ -347,19 +349,19 @@ sudo systemctl enable --now pi-probe-discord-fortigate.timer pi-probe-discord-ke
 sudo pi-probe-discord fortigate
 ```
 
-To include devices behind the FortiWiFi in the inventory and dashboard, add its routed subnet to the Nmap targets. Targets are space-separated:
+To include devices behind the FortiGate in the inventory and dashboard, add its routed subnet to the Nmap targets. Targets are space-separated:
 
 ```bash
 PI_PROBE_NMAP_TARGETS="192.0.2.0/24 198.51.100.0/24"
 ```
 
-For a Pi upstream of the FortiWiFi, configure its host route and the narrow FortiGate `wan -> internal` policy outside this application. The program never changes Linux routes or FortiGate firewall rules. A one-shot `pi-probe-discord fortigate` result identifies the precise failing stage (`route`, `tcp`, `tls`, `authentication`, `http`, `api`, or `parsing`) without logging the API token.
+For a Pi outside the FortiGate management network, configure its host route and narrow FortiGate policy outside this application. The program never changes Linux routes or FortiGate firewall rules. A one-shot `pi-probe-discord fortigate` result identifies the precise failing stage (`route`, `tcp`, `tls`, `authentication`, `http`, `api`, or `parsing`) without logging the API token.
 
 The collector uses FortiOS monitor endpoints for system status and one-minute CPU, memory, and session values. Fortinet documents the monitor resource endpoint and API-token workflow in its [FortiOS monitoring reference](https://docs.fortinet.com/document/fortigate/7.4.6/fortinet-carrier-grade-nat-field-reference-architecture-guide/725722/rest-api-for-monitoring).
 
-### FortiWiFi syslog visibility
+### FortiGate syslog visibility
 
-Pi Probe can also receive FortiWiFi syslog locally and include denied traffic in the existing Security Signal dashboard panel. Enable the UDP receiver and add its log to the firewall sources:
+Pi Probe can also receive FortiGate syslog locally. The dashboard separately counts IPS prevention, blocked DNS-over-HTTPS (enforced DNS policy), application-control blocks, and firewall denies. It does not treat ordinary segmentation denies as confirmed compromises. Enable the UDP receiver and add its log to the firewall sources:
 
 ```ini
 PI_PROBE_FORTIGATE_SYSLOG_ENABLED="true"
@@ -369,7 +371,7 @@ PI_PROBE_FORTIGATE_SYSLOG_LOG_FILE="/var/lib/pi-probe-discord/fortigate-syslog/f
 PI_PROBE_FIREWALL_LOG_PATHS="/var/lib/pi-probe-discord/fortigate-syslog/fortigate.log,/var/log/ufw.log,/var/log/kern.log,/var/log/syslog"
 ```
 
-Start `pi-probe-discord-fortigate-syslog.service`. In FortiWiFi **Log & Report → Log Settings**, enable **Send logs to syslog**, set the Pi's address and port `5514`, and use UDP. Start with traffic and event logs; denied traffic is the most useful signal and allowed traffic can be intentionally noisy.
+Start `pi-probe-discord-fortigate-syslog.service`. In FortiGate **Log & Report → Log Settings**, enable **Send logs to syslog**, set the Pi's address and port `5514`, and use UDP. Start with traffic, UTM, and event logs; denied traffic is useful context and allowed traffic can be intentionally noisy.
 
 ## Firewall examples
 

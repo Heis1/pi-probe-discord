@@ -2251,10 +2251,10 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
   </section>
 
   <section class="panel keepalive-section">
-    <div class="panel-head"><div><h2>FortiWiFi Health</h2><p>Read-only FortiOS API reporting from the FortiWiFi gateway.</p></div><div class="panel-stamp" id="fortigateFreshness"></div></div>
+    <div class="panel-head"><div><h2>FortiGate Health</h2><p>Read-only FortiOS API reporting from the primary firewall.</p></div><div class="panel-stamp" id="fortigateFreshness"></div></div>
     <div class="action-row"><button id="fortigateCheckButton" class="action-button" type="button">Check now</button><div id="fortigateCheckStatus" class="helper-text"></div></div>
     <div id="fortigateCards" class="keepalive-grid"></div>
-    <div id="fortigateEmpty" class="empty" style="display:none">FortiWiFi reporting is not configured.</div>
+    <div id="fortigateEmpty" class="empty" style="display:none">FortiGate reporting is not configured.</div>
   </section>
 
   <section class="panel firewall-section">
@@ -2939,7 +2939,7 @@ function renderFortigate() {
   const system = fortigate.system || {};
   const metrics = fortigate.metrics || {};
   const values = [
-    ['Gateway', system.hostname || system.model_name || system.model || 'FortiWiFi'],
+    ['Gateway', system.hostname || system.model_name || system.model || 'FortiGate'],
     ['CPU', metrics.cpuPercent === null || metrics.cpuPercent === undefined ? 'Unavailable' : `${Number(metrics.cpuPercent).toFixed(1)}%`],
     ['Memory', metrics.memoryPercent === null || metrics.memoryPercent === undefined ? 'Unavailable' : `${Number(metrics.memoryPercent).toFixed(1)}%`],
     ['Sessions', metrics.sessions === null || metrics.sessions === undefined ? 'Unavailable' : Number(metrics.sessions).toLocaleString()],
@@ -2949,6 +2949,15 @@ function renderFortigate() {
     const title = document.createElement('div'); title.className = 'device-name'; title.textContent = label;
     const status = document.createElement('div'); status.className = 'keepalive-status'; status.textContent = value;
     const meta = document.createElement('div'); meta.className = 'keepalive-meta'; meta.textContent = fortigate.available ? `${system.version || 'FortiOS'}${system.serial ? ` · ${system.serial}` : ''}` : (fortigate.error || 'FortiGate API unavailable');
+    card.append(title, status, meta); cards.appendChild(card);
+  });
+  const security = fortigate.security || {};
+  const counts = security.counts || {};
+  [['IPS prevented', counts.ips_prevention], ['DoH blocked', counts.dns_bypass_block], ['App-control blocked', counts.application_control_block], ['Firewall denies', counts.firewall_deny]].forEach(([label, value]) => {
+    const card = document.createElement('div'); card.className = 'keepalive-card up';
+    const title = document.createElement('div'); title.className = 'device-name'; title.textContent = label;
+    const status = document.createElement('div'); status.className = 'keepalive-status'; status.textContent = security.available ? Number(value || 0).toLocaleString() : 'Unavailable';
+    const meta = document.createElement('div'); meta.className = 'keepalive-meta'; meta.textContent = security.available ? `Last ${security.windowHours || 24}h; event records, not incidents.` : (security.error || 'FortiGate syslog not configured');
     card.append(title, status, meta); cards.appendChild(card);
   });
 }
@@ -2968,9 +2977,9 @@ function renderFirewallSignal() {
   grid.className = 'security-grid';
   const hero = document.createElement('div');
   hero.className = `security-hero${attention ? ' attention' : ''}`;
-  hero.innerHTML = `<div class="security-kicker">${fortiSyslog ? 'FortiWiFi syslog active' : 'Current security state'}</div><div class="security-title">${attention ? 'Review external activity' : (fortiSyslog ? `${firewall.totalEntries || 0} FortiWiFi events received` : 'No external threat signal')}</div><div class="security-copy">${attention ? 'External sources or administration-port attempts were blocked. Review the sources below.' : (fortiSyslog ? `${firewall.blocked || 0} denied events in the current window; ordinary LAN chatter is shown below for visibility.` : 'Blocked entries are local network chatter. The firewall is containing it; no action is required.')}</div>`;
+  hero.innerHTML = `<div class="security-kicker">${fortiSyslog ? 'FortiGate syslog active' : 'Current security state'}</div><div class="security-title">${attention ? 'Review external activity' : (fortiSyslog ? `${firewall.totalEntries || 0} FortiGate events received` : 'No external threat signal')}</div><div class="security-copy">${attention ? 'External sources or administration-port attempts were blocked. Review the sources below.' : (fortiSyslog ? `${firewall.blocked || 0} denied events in the current window; ordinary LAN chatter is shown below for visibility.` : 'Blocked entries are local network chatter. The firewall is containing it; no action is required.')}</div>`;
   grid.appendChild(hero);
-  [[fortiSyslog ? (firewall.totalEntries || 0) : externalBlocked, fortiSyslog ? 'FortiWiFi events' : 'External blocked'], [firewall.authFailures || 0, 'Failed admin logins'], [firewall.sshSessions || 0, 'Recent SSH activity'], [firewall.blocked || 0, 'Total blocked']].forEach(([value, label]) => {
+  [[fortiSyslog ? (firewall.totalEntries || 0) : externalBlocked, fortiSyslog ? 'FortiGate events' : 'External blocked'], [firewall.authFailures || 0, 'Failed admin logins'], [firewall.sshSessions || 0, 'Recent SSH activity'], [firewall.blocked || 0, 'Total blocked']].forEach(([value, label]) => {
     const stat = document.createElement(label === 'Recent SSH activity' ? 'button' : 'div');
     stat.className = 'security-stat';
     if (label === 'Recent SSH activity') {
@@ -3007,7 +3016,7 @@ function renderFirewallSignal() {
   details.className = 'security-details';
   details.open = fortiSyslog;
   const summary = document.createElement('summary');
-  summary.textContent = `${fortiSyslog ? 'FortiWiFi local traffic details' : 'Local traffic details'} (${(firewall.sources || []).filter(source => source.scope !== 'External').length} source(s))`;
+  summary.textContent = `${fortiSyslog ? 'FortiGate local traffic details' : 'Local traffic details'} (${(firewall.sources || []).filter(source => source.scope !== 'External').length} source(s))`;
   const copy = document.createElement('div');
   copy.textContent = (firewall.sources || []).filter(source => source.scope !== 'External').map(source => `${source.device?.name || source.ip}: ${source.count} blocked`).join(' · ') || 'No local source detail is available.';
   details.append(summary, copy);
@@ -4616,7 +4625,7 @@ def run_dashboard_live_check(check: str) -> dict[str, Any]:
         state = collect_fortigate_snapshot(config)
         return {
             "ok": bool(state.get("available")),
-            "message": "FortiWiFi check completed." if state.get("available") else str(state.get("error") or "FortiWiFi check failed."),
+            "message": "FortiGate check completed." if state.get("available") else str(state.get("error") or "FortiGate check failed."),
             "fortigate": state,
         }
     if check == "core":

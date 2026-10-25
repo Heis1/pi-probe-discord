@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import json
+import re
 import socket
 import ssl
 import subprocess
 import warnings
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -13,6 +14,83 @@ from urllib.parse import urlparse
 import requests
 
 from .config import load_fortigate_secrets
+from .fortigate_snmp import collect_fortigate_30e_snmp_snapshot, collect_fortigate_snmp_snapshot
+
+
+# FortiOS syslog is intentionally parsed conservatively. These categories
+# describe what the firewall reported, rather than turning every deny (or a
+# FortiGuard vulnerability association) into an incident.
+_FORTI_FIELD_RE = re.compile(r'\b(?P<key>[A-Za-z_]+)=(?P<value>"[^"]*"|[^\s]+)')
+_MAX_SYSLOG_READ_BYTES = 4 * 1024 * 1024
+
+
+def _forti_fields(line: str) -> dict[str, str]:
+    return {match.group("key").lower(): match.group("value").strip('"') for match in _FORTI_FIELD_RE.finditer(line)}
+
+
+def classify_fortigate_event(line: str) -> str | None:
+    """Return one operational category for a FortiOS syslog record.
+
+    The precedence prevents one UTM session from being reported as several
+    independent incidents. In particular, blocked DoH is policy enforcement,
+    not a confirmed compromise.
+    """
+    fields = _forti_fields(line)
+    if not fields:
+        return None
+    combined = " ".join(fields.get(key, "") for key in ("type", "subtype", "eventtype", "app", "appcat", "msg", "action")).lower()
+    action = fields.get("action", "").lower()
+    if "dns.over.https" in combined or "dns over https" in combined or "dns-over-https" in combined:
+        return "dns_bypass_block" if action in {"block", "blocked", "deny", "denied"} else "dns_bypass_observed"
+    if "ips" in combined or fields.get("subtype", "").lower() == "ips":
+        return "ips_prevention" if action in {"block", "blocked", "deny", "denied", "reset"} else "ips_detection"
+    if "virus" in combined or "malware" in combined:
+        return "malware_prevention" if action in {"block", "blocked", "deny", "denied", "quarantine"} else "malware_detection"
+    if "app-ctrl" in combined or "application" in combined:
+        return "application_control_block" if action in {"block", "blocked", "deny", "denied"} else "application_control"
+    if "login" in combined and ("fail" in combined or fields.get("status", "").lower() in {"fail", "failed"}):
+        return "management_login_failure"
+    if fields.get("type", "").lower() == "traffic" and action in {"deny", "denied", "block", "blocked"}:
+        return "firewall_deny"
+    return None
+
+
+def summarise_fortigate_syslog(path_value: str, max_events: int = 20, window_hours: int = 24) -> dict[str, Any]:
+    """Summarise a bounded, recent tail of received FortiGate syslog records."""
+    path = Path(path_value)
+    if not path.is_file():
+        return {"available": False, "error": "FortiGate syslog is not available", "counts": {}, "recent": []}
+    try:
+        with path.open("rb") as handle:
+            size = path.stat().st_size
+            if size > _MAX_SYSLOG_READ_BYTES:
+                handle.seek(-_MAX_SYSLOG_READ_BYTES, 2)
+                handle.readline()
+            lines = handle.read().decode("utf-8", errors="replace").splitlines()
+    except OSError as exc:
+        return {"available": False, "error": f"Could not read FortiGate syslog: {exc}", "counts": {}, "recent": []}
+    now = datetime.now().astimezone()
+    since = now - timedelta(hours=max(1, window_hours))
+    counts: dict[str, int] = {}
+    recent: list[dict[str, str]] = []
+    for line in lines:
+        # The bundled receiver prefixes each accepted packet with ISO-8601.
+        # Ignore stale records rather than letting log retention inflate a
+        # current security count. Legacy unprefixed records remain visible
+        # until rotation, but are not treated as current telemetry.
+        try:
+            recorded_at = datetime.fromisoformat(line.split(maxsplit=1)[0])
+        except ValueError:
+            continue
+        if recorded_at.tzinfo is None or recorded_at < since:
+            continue
+        category = classify_fortigate_event(line)
+        if category is None:
+            continue
+        counts[category] = counts.get(category, 0) + 1
+        fields = _forti_fields(line)
+        recent.append({"category": category, "source": fields.get("srcip", ""), "destination": fields.get("dstip", ""), "policy": fields.get("policyid", ""), "action": fields.get("action", "")})
+    return {"available": True, "error": "", "windowHours": max(1, window_hours), "counts": counts, "recent": recent[-max_events:]}
 
 
 class FortigateProbeError(RuntimeError):
@@ -112,8 +190,19 @@ def _request_json(session: requests.Session, base_url: str, path: str, params: d
 
 def collect_fortigate_snapshot(config: Any, now: datetime | None = None) -> dict[str, Any]:
     measured_at = now or datetime.now().astimezone()
-    state: dict[str, Any] = {"enabled": bool(config.fortigate_enabled), "checkedAt": measured_at.isoformat(), "available": False, "error": "", "failureStage": "", "diagnostics": [], "system": {}, "metrics": {}}
+    snmp = collect_fortigate_snmp_snapshot(config)
+    secondary_snmp = collect_fortigate_30e_snmp_snapshot(config)
+    state: dict[str, Any] = {"enabled": bool(config.fortigate_enabled), "checkedAt": measured_at.isoformat(), "available": False, "error": "", "failureStage": "", "diagnostics": [], "system": {}, "metrics": {}, "security": summarise_fortigate_syslog(getattr(config, "fortigate_syslog_log_file", "")), "snmp": snmp, "secondary": secondary_snmp}
     if not config.fortigate_enabled:
+        return state
+    if snmp.get("available"):
+        metrics = snmp.get("metrics") if isinstance(snmp.get("metrics"), dict) else {}
+        state["available"] = True
+        state["system"] = {"hostname": str(metrics.get("description") or "FortiGate"), "version": str(metrics.get("fortiOS") or "")}
+        state["metrics"] = {key: metrics.get(key) for key in ("cpuPercent", "memoryPercent", "sessions")}
+        path = Path(config.fortigate_state_json)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(state, indent=2), encoding="utf-8")
         return state
     try:
         base_url, host, port = _base_url(config.fortigate_url)
@@ -153,6 +242,13 @@ def collect_fortigate_snapshot(config: Any, now: datetime | None = None) -> dict
     except (OSError, RuntimeError, ValueError) as exc:
         state["failureStage"] = "configuration"
         state["error"] = str(exc)[:300]
+    if snmp.get("available"):
+        metrics = snmp.get("metrics") if isinstance(snmp.get("metrics"), dict) else {}
+        state["available"] = True
+        state["error"] = ""
+        state["failureStage"] = ""
+        state["system"].update({"hostname": str(metrics.get("description") or "FortiGate"), "version": str(metrics.get("fortiOS") or "")})
+        state["metrics"].update({key: metrics.get(key) for key in ("cpuPercent", "memoryPercent", "sessions")})
     path = Path(config.fortigate_state_json)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(state, indent=2), encoding="utf-8")
@@ -161,9 +257,15 @@ def collect_fortigate_snapshot(config: Any, now: datetime | None = None) -> dict
 
 def load_fortigate_state(config: Any) -> dict[str, Any]:
     if not config.fortigate_enabled:
-        return {"enabled": False, "checkedAt": "", "available": False, "error": "", "failureStage": "", "diagnostics": [], "system": {}, "metrics": {}}
+        return {"enabled": False, "checkedAt": "", "available": False, "error": "", "failureStage": "", "diagnostics": [], "system": {}, "metrics": {}, "security": {"available": False, "counts": {}, "recent": []}}
     try:
         value = json.loads(Path(config.fortigate_state_json).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         value = {}
-    return value if isinstance(value, dict) else {}
+    if not isinstance(value, dict):
+        return {}
+    # Security logs advance independently of the one-minute API poll.  This
+    # bounded local read keeps the read-only dashboard current without adding
+    # FortiGate requests for every browser refresh.
+    value["security"] = summarise_fortigate_syslog(getattr(config, "fortigate_syslog_log_file", ""))
+    return value

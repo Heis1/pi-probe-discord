@@ -1,4 +1,4 @@
-/var/log/fortiwifi.log {
+/var/lib/pi-probe-discord/fortigate-syslog/fortigate.log {
     daily
     maxsize 25M
     rotate 14

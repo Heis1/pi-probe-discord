@@ -4,14 +4,36 @@ import json
 import stat
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from pi_probe_discord.fortigate import collect_fortigate_snapshot, load_fortigate_state
+from pi_probe_discord.fortigate import classify_fortigate_event, collect_fortigate_snapshot, load_fortigate_state, summarise_fortigate_syslog
 
 
 class FortigateTests(unittest.TestCase):
+    def test_classifies_doh_as_enforced_dns_policy_not_compromise(self) -> None:
+        line = 'type="utm" subtype="app-ctrl" app="DNS.Over.HTTPS" action="block" srcip=192.168.20.102 policyid=20'
+        self.assertEqual(classify_fortigate_event(line), "dns_bypass_block")
+
+    def test_syslog_summary_is_bounded_and_preserves_event_categories(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "fortigate.log"
+            path.write_text(
+                '\n'.join([
+                    f'{datetime.now().astimezone().isoformat()} source=192.168.10.1 type="utm" subtype="ips" action="blocked" srcip=192.168.20.102',
+                    f'{datetime.now().astimezone().isoformat()} source=192.168.10.1 type="traffic" action="deny" srcip=192.168.20.102 dstip=192.168.10.10 policyid=0',
+                    f'{datetime.now().astimezone().isoformat()} source=192.168.10.1 type="event" subtype="system" msg="Admin login failed" status="fail" srcip=192.168.10.20',
+                ]),
+                encoding="utf-8",
+            )
+            summary = summarise_fortigate_syslog(str(path))
+        self.assertTrue(summary["available"])
+        self.assertEqual(summary["counts"]["ips_prevention"], 1)
+        self.assertEqual(summary["counts"]["firewall_deny"], 1)
+        self.assertEqual(summary["counts"]["management_login_failure"], 1)
+
     def test_collects_monitor_metrics_and_persists_safe_snapshot(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)

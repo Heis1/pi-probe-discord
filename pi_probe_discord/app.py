@@ -347,7 +347,7 @@ def run_smtp_log_listener() -> int:
 def run_fortigate_syslog_listener() -> int:
     config = load_config(require_webhook=False)
     if not config.fortigate_syslog_enabled:
-        raise RuntimeError("Set PI_PROBE_FORTIGATE_SYSLOG_ENABLED=true before starting the FortiWiFi syslog receiver.")
+        raise RuntimeError("Set PI_PROBE_FORTIGATE_SYSLOG_ENABLED=true before starting the FortiGate syslog receiver.")
     return run_fortigate_syslog_receiver(config)
 
 
