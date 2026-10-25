@@ -1,3 +1,9 @@
+pi-probe-discord (1.2.8-1) unstable; urgency=medium
+
+  * Deliver firewall alerts through the configured Discord bot when no webhook exists.
+
+ -- Codex Builder <noreply@example.invalid>  Sun, 26 Oct 2026 07:55:00 +1030
+
 pi-probe-discord (1.2.7-1) unstable; urgency=medium
 
   * Keep live WAN cards populated from the latest successful sample.

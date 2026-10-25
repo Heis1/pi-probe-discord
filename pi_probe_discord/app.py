@@ -265,6 +265,18 @@ def run_mode(mode: str) -> int:
                         _write_last_firewall_alert_sent_at(state_file, run_at)
                     except requests.RequestException as exc:
                         raise RuntimeError(f"Discord firewall alert POST failed: {exc}") from exc
+                elif should_send and config.discord_bot_token:
+                    # Firewall alerts should retain the existing webhook path
+                    # when configured, but the authenticated bot channel is a
+                    # safe fallback for installations without a webhook.
+                    alert_payload = _build_firewall_alert_payload(hostname, run_at_local, firewall_snapshot, reasons)
+                    nmap_rows, _ = load_dashboard_nmap_inventory(config)
+                    firewall_chart_ok, _ = generate_firewall_chart(firewall_snapshot, config.firewall_chart_file, devices=nmap_rows)
+                    try:
+                        post_bot_report(config, alert_payload, config.firewall_chart_file if firewall_chart_ok else None)
+                        _write_last_firewall_alert_sent_at(state_file, run_at)
+                    except requests.RequestException as exc:
+                        raise RuntimeError(f"Discord firewall bot alert POST failed: {exc}") from exc
     if mode == "full" and (config.router_snmp_enabled or config.router_snmp_listener_enabled):
         ingested_events = 0
         ingest_note = "Router listener mode active; ingest is direct to database." if config.router_snmp_listener_enabled else ""
