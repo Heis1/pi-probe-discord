@@ -1,3 +1,9 @@
+pi-probe-discord (1.2.9-1) unstable; urgency=medium
+
+  * Add labelled X/Y axes to the WAN bandwidth chart.
+
+ -- Codex Builder <noreply@example.invalid>  Sun, 26 Oct 2026 09:45:00 +1030
+
 pi-probe-discord (1.2.8-1) unstable; urgency=medium
 
   * Deliver firewall alerts through the configured Discord bot when no webhook exists.

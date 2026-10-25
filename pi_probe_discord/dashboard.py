@@ -2256,7 +2256,7 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
   </section>
 
   <section class="panel keepalive-section">
-    <div class="panel-head"><div><h2>Live WAN Bandwidth</h2><p>Read-only SNMPv3 counters from <code>wan1</code>. Download is inbound; upload is outbound.</p></div><div class="panel-stamp" id="wanFreshness"></div></div>
+    <div class="panel-head"><div><h2>WAN Bandwidth</h2></div><div class="panel-stamp" id="wanFreshness"></div></div>
     <div class="wan-grid">
       <div class="wan-stat"><div class="label">Download now</div><div class="value" id="wanDownload">Unavailable</div></div>
       <div class="wan-stat"><div class="label">Upload now</div><div class="value" id="wanUpload">Unavailable</div></div>
@@ -3022,9 +3022,14 @@ function renderWanBandwidth() {
   const values = points.flatMap(point => [Number(point.downloadMbps), Number(point.uploadMbps)]).filter(Number.isFinite);
   const maxValue = Math.max(...values, 0.001);
   const times = points.map(point => new Date(point.at).getTime()).filter(Number.isFinite); const minTime = Math.min(...times); const maxTime = Math.max(...times, minTime + 1);
-  const pathFor = (key) => points.map((point, index) => { const x = 42 + ((new Date(point.at).getTime() - minTime) / (maxTime - minTime)) * 930; const y = 225 - (Number(point[key]) / maxValue) * 185; return `${index ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`; }).join(' ');
+  const left = 70, right = 970, top = 24, bottom = 220;
+  const pathFor = (key) => points.map((point, index) => { const x = left + ((new Date(point.at).getTime() - minTime) / (maxTime - minTime)) * (right - left); const y = bottom - (Number(point[key]) / maxValue) * (bottom - top); return `${index ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`; }).join(' ');
+  const svgText = (text, x, y, anchor = 'start') => { const node = document.createElementNS('http://www.w3.org/2000/svg', 'text'); node.setAttribute('x', x); node.setAttribute('y', y); node.setAttribute('fill', '#94a3b8'); node.setAttribute('font-size', '11'); node.setAttribute('text-anchor', anchor); node.textContent = text; svg.appendChild(node); };
+  for (let tick = 0; tick <= 4; tick += 1) { const value = maxValue * tick / 4; const y = bottom - (bottom - top) * tick / 4; const grid = document.createElementNS('http://www.w3.org/2000/svg', 'line'); grid.setAttribute('x1', left); grid.setAttribute('x2', right); grid.setAttribute('y1', y); grid.setAttribute('y2', y); grid.setAttribute('stroke', '#263247'); grid.setAttribute('stroke-width', '1'); svg.appendChild(grid); svgText(formatRate(value), left - 10, y + 4, 'end'); }
+  for (let tick = 0; tick <= 4; tick += 1) { const time = new Date(minTime + (maxTime - minTime) * tick / 4); const x = left + (right - left) * tick / 4; svgText(time.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}), x, 244, 'middle'); }
+  svgText('Mbps', left, 14); svgText('Time', 520, 258, 'middle');
   [['downloadMbps', '#38bdf8', 'Download'], ['uploadMbps', '#a78bfa', 'Upload']].forEach(([key, color, label]) => { const path = document.createElementNS('http://www.w3.org/2000/svg', 'path'); path.setAttribute('d', pathFor(key)); path.setAttribute('fill', 'none'); path.setAttribute('stroke', color); path.setAttribute('stroke-width', '3'); const title = document.createElementNS('http://www.w3.org/2000/svg', 'title'); title.textContent = `${label}: hover any point for values`; path.appendChild(title); svg.appendChild(path); });
-  points.forEach(point => { const x = 42 + ((new Date(point.at).getTime() - minTime) / (maxTime - minTime)) * 930; [['downloadMbps', '#38bdf8'], ['uploadMbps', '#a78bfa']].forEach(([key, color]) => { const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle'); circle.setAttribute('cx', x.toFixed(1)); circle.setAttribute('cy', (225 - (Number(point[key]) / maxValue) * 185).toFixed(1)); circle.setAttribute('r', '3'); circle.setAttribute('fill', color); const title = document.createElementNS('http://www.w3.org/2000/svg', 'title'); title.textContent = `${new Date(point.at).toLocaleString()}\nDownload ${formatRate(point.downloadMbps)}\nUpload ${formatRate(point.uploadMbps)}`; circle.appendChild(title); svg.appendChild(circle); }); });
+  points.forEach(point => { const x = left + ((new Date(point.at).getTime() - minTime) / (maxTime - minTime)) * (right - left); [['downloadMbps', '#38bdf8'], ['uploadMbps', '#a78bfa']].forEach(([key, color]) => { const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle'); circle.setAttribute('cx', x.toFixed(1)); circle.setAttribute('cy', (bottom - (Number(point[key]) / maxValue) * (bottom - top)).toFixed(1)); circle.setAttribute('r', '3'); circle.setAttribute('fill', color); const title = document.createElementNS('http://www.w3.org/2000/svg', 'title'); title.textContent = `${new Date(point.at).toLocaleString()}\nDownload ${formatRate(point.downloadMbps)}\nUpload ${formatRate(point.uploadMbps)}`; circle.appendChild(title); svg.appendChild(circle); }); });
 }
 async function fetchWanBandwidth(period = wanPeriod) {
   wanPeriod = period;
