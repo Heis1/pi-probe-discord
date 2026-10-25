@@ -2251,7 +2251,7 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
   </section>
 
   <section class="panel keepalive-section">
-    <div class="panel-head"><div><h2>FortiGate Health</h2><p>Read-only FortiOS API reporting from the primary firewall.</p></div><div class="panel-stamp" id="fortigateFreshness"></div></div>
+    <div class="panel-head"><div><h2>Fortinet Health</h2><p>Read-only SNMPv3 health reporting for the primary FortiGate and secondary FortiWiFi.</p></div><div class="panel-stamp" id="fortigateFreshness"></div></div>
     <div class="action-row"><button id="fortigateCheckButton" class="action-button" type="button">Check now</button><div id="fortigateCheckStatus" class="helper-text"></div></div>
     <div id="fortigateCards" class="keepalive-grid"></div>
     <div id="fortigateEmpty" class="empty" style="display:none">FortiGate reporting is not configured.</div>
@@ -2951,6 +2951,17 @@ function renderFortigate() {
     const meta = document.createElement('div'); meta.className = 'keepalive-meta'; meta.textContent = fortigate.available ? `${system.version || 'FortiOS'}${system.serial ? ` · ${system.serial}` : ''}` : (fortigate.error || 'FortiGate API unavailable');
     card.append(title, status, meta); cards.appendChild(card);
   });
+  const secondary = fortigate.secondary || {};
+  const secondaryMetrics = secondary.metrics || {};
+  const secondaryLabel = secondaryMetrics.description || 'FortiWiFi-30E';
+  const secondaryValue = secondary.available
+    ? `${secondaryLabel} · CPU ${secondaryMetrics.cpuPercent === null || secondaryMetrics.cpuPercent === undefined ? 'Unavailable' : `${Number(secondaryMetrics.cpuPercent).toFixed(1)}%`} · Memory ${secondaryMetrics.memoryPercent === null || secondaryMetrics.memoryPercent === undefined ? 'Unavailable' : `${Number(secondaryMetrics.memoryPercent).toFixed(1)}%`}`
+    : 'Unavailable';
+  const secondaryCard = document.createElement('div'); secondaryCard.className = `keepalive-card ${secondary.available ? 'up' : 'down'}`;
+  const secondaryTitle = document.createElement('div'); secondaryTitle.className = 'device-name'; secondaryTitle.textContent = 'Secondary wireless';
+  const secondaryStatus = document.createElement('div'); secondaryStatus.className = 'keepalive-status'; secondaryStatus.textContent = secondaryValue;
+  const secondaryMeta = document.createElement('div'); secondaryMeta.className = 'keepalive-meta'; secondaryMeta.textContent = secondary.available ? (secondaryMetrics.fortiOS || 'FortiOS') : (secondary.error || 'FortiWiFi SNMP not configured');
+  secondaryCard.append(secondaryTitle, secondaryStatus, secondaryMeta); cards.appendChild(secondaryCard);
   const security = fortigate.security || {};
   const counts = security.counts || {};
   [['IPS prevented', counts.ips_prevention], ['DoH blocked', counts.dns_bypass_block], ['App-control blocked', counts.application_control_block], ['Firewall denies', counts.firewall_deny]].forEach(([label, value]) => {
