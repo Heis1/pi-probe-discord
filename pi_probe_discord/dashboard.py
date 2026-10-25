@@ -2268,10 +2268,16 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
   </section>
 
   <section class="panel keepalive-section">
-    <div class="panel-head"><div><h2>Fortinet Health</h2><p>Read-only SNMPv3 health reporting for the primary FortiGate and secondary FortiWiFi.</p></div><div class="panel-stamp" id="fortigateFreshness"></div></div>
+    <div class="panel-head"><div><h2>FortiGate 60F</h2><p>Primary firewall health via read-only SNMPv3.</p></div><div class="panel-stamp" id="fortigateFreshness"></div></div>
     <div class="action-row"><button id="fortigateCheckButton" class="action-button" type="button">Check now</button><div id="fortigateCheckStatus" class="helper-text"></div></div>
     <div id="fortigateCards" class="keepalive-grid"></div>
     <div id="fortigateEmpty" class="empty" style="display:none">FortiGate reporting is not configured.</div>
+  </section>
+
+  <section class="panel keepalive-section">
+    <div class="panel-head"><div><h2>FortiWiFi 30E</h2><p>Secondary wireless and management device health via read-only SNMPv3.</p></div><div class="panel-stamp" id="forti30eFreshness"></div></div>
+    <div id="forti30eCards" class="keepalive-grid"></div>
+    <div id="forti30eEmpty" class="empty" style="display:none">FortiWiFi 30E SNMP monitoring is not configured.</div>
   </section>
 
   <section class="panel firewall-section">
@@ -2972,15 +2978,6 @@ function renderFortigate() {
     const meta = document.createElement('div'); meta.className = 'keepalive-meta'; meta.textContent = fortigate.available ? `${system.version || 'FortiOS'}${system.serial ? ` · ${system.serial}` : ''}` : (fortigate.error || 'FortiGate API unavailable');
     card.append(title, status, meta); cards.appendChild(card);
   });
-  const secondary = fortigate.secondary || {};
-  const secondaryMetrics = secondary.metrics || {};
-  const secondaryLabel = String(secondaryMetrics.description || 'FortiWiFi-30E').replace(/^"|"$/g, '');
-  const secondaryValue = secondary.available ? secondaryLabel : 'Unavailable';
-  const secondaryCard = document.createElement('div'); secondaryCard.className = `keepalive-card ${secondary.available ? 'up' : 'down'}`;
-  const secondaryTitle = document.createElement('div'); secondaryTitle.className = 'device-name'; secondaryTitle.textContent = 'Secondary wireless';
-  const secondaryStatus = document.createElement('div'); secondaryStatus.className = 'keepalive-status'; secondaryStatus.textContent = secondaryValue;
-  const secondaryMeta = document.createElement('div'); secondaryMeta.className = 'keepalive-meta'; secondaryMeta.textContent = secondary.available ? `${secondaryMetrics.fortiOS || 'FortiOS'} · CPU ${secondaryMetrics.cpuPercent === null || secondaryMetrics.cpuPercent === undefined ? 'Unavailable' : `${Number(secondaryMetrics.cpuPercent).toFixed(1)}%`} · Memory ${secondaryMetrics.memoryPercent === null || secondaryMetrics.memoryPercent === undefined ? 'Unavailable' : `${Number(secondaryMetrics.memoryPercent).toFixed(1)}%`}` : (secondary.error || 'FortiWiFi SNMP not configured');
-  secondaryCard.append(secondaryTitle, secondaryStatus, secondaryMeta); cards.appendChild(secondaryCard);
   const security = fortigate.security || {};
   const counts = security.counts || {};
   [['IPS prevented', counts.ips_prevention], ['DoH blocked', counts.dns_bypass_block], ['App-control blocked', counts.application_control_block], ['Firewall denies', counts.firewall_deny]].forEach(([label, value]) => {
@@ -2991,6 +2988,16 @@ function renderFortigate() {
     card.append(title, status, meta); cards.appendChild(card);
   });
 }
+function renderFortiWiFi30E() {
+  const cards = document.getElementById('forti30eCards'); const empty = document.getElementById('forti30eEmpty');
+  clearNode(cards); const secondary = fortigate.secondary || {}; const metrics = secondary.metrics || {};
+  if (!secondary.enabled) { cards.style.display = 'none'; empty.style.display = 'block'; setText('forti30eFreshness', 'Not configured'); return; }
+  cards.style.display = 'grid'; empty.style.display = 'none';
+  const label = String(metrics.description || 'FortiWiFi-30E').replace(/^"|"$/g, '');
+  const values = [['Device', secondary.available ? label : 'Unavailable'], ['CPU', metrics.cpuPercent === null || metrics.cpuPercent === undefined ? 'Unavailable' : `${Number(metrics.cpuPercent).toFixed(1)}%`], ['Memory', metrics.memoryPercent === null || metrics.memoryPercent === undefined ? 'Unavailable' : `${Number(metrics.memoryPercent).toFixed(1)}%`], ['Sessions', metrics.sessions === null || metrics.sessions === undefined ? 'Unavailable' : Number(metrics.sessions).toLocaleString()]];
+  values.forEach(([titleText, value]) => { const card = document.createElement('div'); card.className = `keepalive-card ${secondary.available ? 'up' : 'down'}`; const title = document.createElement('div'); title.className = 'device-name'; title.textContent = titleText; const status = document.createElement('div'); status.className = 'keepalive-status'; status.textContent = value; const meta = document.createElement('div'); meta.className = 'keepalive-meta'; meta.textContent = secondary.available ? (metrics.fortiOS || 'FortiOS') : (secondary.error || 'SNMP unavailable'); card.append(title, status, meta); cards.appendChild(card); });
+  setText('forti30eFreshness', secondary.available ? `Live · ${metrics.fortiOS || 'FortiOS'}` : 'Unavailable');
+}
 function formatRate(value) {
   if (value === null || value === undefined || !Number.isFinite(Number(value)) || Number(value) < 0) return 'Unavailable';
   const mbps = Number(value);
@@ -2999,7 +3006,9 @@ function formatRate(value) {
   return `${(mbps * 1000).toFixed(0)} Kbps`;
 }
 function renderWanBandwidth() {
-  const current = wanPayload.current && Object.keys(wanPayload.current).length ? wanPayload.current : wanBandwidth;
+  const apiCurrent = wanPayload.current && Object.keys(wanPayload.current).length ? wanPayload.current : wanBandwidth;
+  const lastPoint = Array.isArray(wanPayload.points) && wanPayload.points.length ? wanPayload.points[wanPayload.points.length - 1] : {};
+  const current = Number.isFinite(Number(apiCurrent.downloadMbps)) && Number.isFinite(Number(apiCurrent.uploadMbps)) ? apiCurrent : { ...apiCurrent, ...lastPoint, status: apiCurrent.status || 'Last successful measurement' };
   const stats = wanPayload.stats || {};
   setText('wanDownload', formatRate(current.downloadMbps));
   setText('wanUpload', formatRate(current.uploadMbps));
@@ -4186,6 +4195,7 @@ function render() {
   renderDnsCorrelation(data);
   renderWanBandwidth();
   renderFortigate();
+  renderFortiWiFi30E();
   renderFirewallSignal();
   renderDiagnosis();
   renderTable(events);

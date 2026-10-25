@@ -1,3 +1,10 @@
+pi-probe-discord (1.2.7-1) unstable; urgency=medium
+
+  * Keep live WAN cards populated from the latest successful sample.
+  * Split FortiWiFi-30E health into its own dashboard panel.
+
+ -- Codex Builder <noreply@example.invalid>  Sun, 26 Oct 2026 00:15:00 +1030
+
 pi-probe-discord (1.2.6-1) unstable; urgency=medium
 
   * Improve Fortinet device card labels and SNMP display formatting.
