@@ -56,6 +56,9 @@ def _collect(config: Any, prefix: str, host_default: str) -> dict[str, Any]:
         if len(values) != len(_SYSTEM_OIDS):
             return {"enabled": True, "available": False, "error": "SNMP returned an unexpected result", "metrics": {}}
         parsed = dict(zip(_SYSTEM_OIDS, values))
+        for key, value in tuple(parsed.items()):
+            if isinstance(value, str):
+                parsed[key] = value.strip().strip('"')
         for key in ("cpuPercent", "memoryPercent", "sessions"):
             try:
                 parsed[key] = float(parsed[key])

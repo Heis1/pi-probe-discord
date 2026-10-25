@@ -1,3 +1,9 @@
+pi-probe-discord (1.2.6-1) unstable; urgency=medium
+
+  * Improve Fortinet device card labels and SNMP display formatting.
+
+ -- Codex Builder <noreply@example.invalid>  Sun, 26 Oct 2026 00:05:00 +1030
+
 pi-probe-discord (1.2.5-1) unstable; urgency=medium
 
   * Correct parsing of numeric IF-MIB counter output from Net-SNMP.
