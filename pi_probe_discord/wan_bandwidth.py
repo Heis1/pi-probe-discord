@@ -50,8 +50,10 @@ def _if_index(lines: list[str], interface: str) -> int | None:
 
 
 def _integer(value: str) -> int | None:
-    match = re.search(r"(-?\d+)", value)
-    return int(match.group(1)) if match else None
+    # Net-SNMP's numeric output contains the OID followed by its value; the
+    # final integer is the counter, not the first number in the OID.
+    values = re.findall(r"(-?\d+)", value)
+    return int(values[-1]) if values else None
 
 
 def _read_state(path: Path) -> dict[str, Any]:

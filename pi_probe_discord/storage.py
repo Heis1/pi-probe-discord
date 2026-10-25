@@ -152,6 +152,7 @@ def save_run_record(config: AppConfig, record: RunRecord) -> None:
 
 
 def load_history_from_db(config: AppConfig, now: datetime) -> dict[str, list[dict[str, Any]]]:
+    init_database(config)
     history = {"download": [], "upload": [], "ping": []}
     cutoff = (now - timedelta(days=config.history_retention_days)).isoformat()
 

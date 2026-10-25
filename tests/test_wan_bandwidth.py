@@ -29,6 +29,10 @@ class WanBandwidthTests(unittest.TestCase):
             self.assertAlmostEqual(second["downloadMbps"], 0.0016)
             self.assertAlmostEqual(second["uploadMbps"], 0.0008)
 
+    def test_parses_counter_after_numeric_oid(self):
+        from pi_probe_discord.wan_bandwidth import _integer
+        self.assertEqual(_integer('.1.3.6.1.2.1.31.1.1.1.6.1 71400007931'), 71400007931)
+
     def test_counter_reset_never_returns_negative_rate(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp); config = self._config(root); state = Path(config.wan_bandwidth_state_json); state.parent.mkdir(parents=True)
