@@ -1745,7 +1745,9 @@ body.theme-clean select, body.theme-clean input { background: rgba(255,255,255,.
 .wan-stat { padding:14px; border:1px solid var(--border); border-radius:14px; background:var(--panel-2); }
 .wan-stat .label { color:var(--muted); font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:.08em; }
 .wan-stat .value { margin-top:6px; font-size:24px; font-weight:900; letter-spacing:-.04em; }
+.wan-chart-wrap { position:relative; }
 .wan-chart { width:100%; height:clamp(260px,42vh,560px); display:block; border:1px solid var(--border); border-radius:14px; background:var(--panel-2); }
+.wan-tooltip { position:absolute; z-index:4; max-width:min(360px,calc(100% - 16px)); padding:9px 11px; border:1px solid var(--border); border-radius:9px; background:rgba(10,16,30,.96); color:#e2e8f0; font-size:12px; line-height:1.45; white-space:pre-line; box-shadow:0 8px 24px rgba(0,0,0,.28); pointer-events:none; }
 .wan-controls { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
 .wan-period.active { background:rgba(56,189,248,.24); border-color:var(--accent); }
 .security-grid { display:grid; grid-template-columns:1.3fr repeat(3,minmax(120px,.55fr)); gap:12px; }
@@ -2264,7 +2266,7 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
       <div class="wan-stat"><div class="label">Average</div><div class="value" id="wanAverage">Unavailable</div></div>
     </div>
     <div class="wan-controls"><button class="mini-button wan-period active" data-wan-period="5m">5 min</button><button class="mini-button wan-period" data-wan-period="1h">1 hour</button><button class="mini-button wan-period" data-wan-period="24h">24 hours</button><button class="mini-button wan-period" data-wan-period="7d">7 days</button><span class="helper-text" id="wanStatus">Loading…</span></div>
-    <svg id="wanChart" class="wan-chart" viewBox="0 0 1000 260" preserveAspectRatio="none" role="img" aria-label="WAN download and upload bandwidth graph"></svg>
+    <div class="wan-chart-wrap"><svg id="wanChart" class="wan-chart" viewBox="0 0 1000 260" preserveAspectRatio="none" role="img" aria-label="WAN download and upload bandwidth graph"></svg><div id="wanTooltip" class="wan-tooltip" hidden></div></div>
   </section>
 
   <section class="panel keepalive-section">
@@ -3017,6 +3019,7 @@ function renderWanBandwidth() {
   setText('wanFreshness', current.lastSuccessAt ? `Last reading ${formatFreshness(current.lastSuccessAt, true)}` : 'No successful reading');
   setText('wanStatus', current.available ? `Live · ${current.interface || 'wan1'} · ifIndex ${current.interfaceIndex ?? 'Unavailable'}` : (current.status || 'Unavailable'));
   const svg = document.getElementById('wanChart'); clearNode(svg);
+  const tooltip = document.getElementById('wanTooltip'); tooltip.hidden = true;
   const points = Array.isArray(wanPayload.points) ? wanPayload.points : [];
   if (!points.length) { const text = document.createElementNS('http://www.w3.org/2000/svg', 'text'); text.setAttribute('x', '500'); text.setAttribute('y', '130'); text.setAttribute('text-anchor', 'middle'); text.setAttribute('fill', '#94a3b8'); text.textContent = 'Awaiting compatible counter samples'; svg.appendChild(text); return; }
   const values = points.flatMap(point => [Number(point.downloadMbps), Number(point.uploadMbps)]).filter(Number.isFinite);
@@ -3026,10 +3029,13 @@ function renderWanBandwidth() {
   const pathFor = (key) => points.map((point, index) => { const x = left + ((new Date(point.at).getTime() - minTime) / (maxTime - minTime)) * (right - left); const y = bottom - (Number(point[key]) / maxValue) * (bottom - top); return `${index ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`; }).join(' ');
   const svgText = (text, x, y, anchor = 'start') => { const node = document.createElementNS('http://www.w3.org/2000/svg', 'text'); node.setAttribute('x', x); node.setAttribute('y', y); node.setAttribute('fill', '#94a3b8'); node.setAttribute('font-size', '11'); node.setAttribute('text-anchor', anchor); node.textContent = text; svg.appendChild(node); };
   for (let tick = 0; tick <= 4; tick += 1) { const value = maxValue * tick / 4; const y = bottom - (bottom - top) * tick / 4; const grid = document.createElementNS('http://www.w3.org/2000/svg', 'line'); grid.setAttribute('x1', left); grid.setAttribute('x2', right); grid.setAttribute('y1', y); grid.setAttribute('y2', y); grid.setAttribute('stroke', '#263247'); grid.setAttribute('stroke-width', '1'); svg.appendChild(grid); svgText(formatRate(value), left - 10, y + 4, 'end'); }
-  for (let tick = 0; tick <= 4; tick += 1) { const time = new Date(minTime + (maxTime - minTime) * tick / 4); const x = left + (right - left) * tick / 4; svgText(time.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}), x, 244, 'middle'); }
+  for (let tick = 0; tick <= 4; tick += 1) { const time = new Date(minTime + (maxTime - minTime) * tick / 4); const x = left + (right - left) * tick / 4; const label = wanPeriod === '7d' ? time.toLocaleDateString([], {month: 'short', day: 'numeric'}) : time.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}); svgText(label, x, 244, 'middle'); }
   svgText('Mbps', left, 14); svgText('Time', 520, 258, 'middle');
   [['downloadMbps', '#38bdf8', 'Download'], ['uploadMbps', '#a78bfa', 'Upload']].forEach(([key, color, label]) => { const path = document.createElementNS('http://www.w3.org/2000/svg', 'path'); path.setAttribute('d', pathFor(key)); path.setAttribute('fill', 'none'); path.setAttribute('stroke', color); path.setAttribute('stroke-width', '3'); const title = document.createElementNS('http://www.w3.org/2000/svg', 'title'); title.textContent = `${label}: hover any point for values`; path.appendChild(title); svg.appendChild(path); });
-  points.forEach(point => { const x = left + ((new Date(point.at).getTime() - minTime) / (maxTime - minTime)) * (right - left); const talkers = Array.isArray(point.talkers) && point.talkers.length ? `\nTop source: ${point.talkers.map(item => `${item.name ? `${item.name} ` : ''}${item.ip}`).join(', ')}` : ''; [['downloadMbps', '#38bdf8'], ['uploadMbps', '#a78bfa']].forEach(([key, color]) => { const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle'); circle.setAttribute('cx', x.toFixed(1)); circle.setAttribute('cy', (bottom - (Number(point[key]) / maxValue) * (bottom - top)).toFixed(1)); circle.setAttribute('r', '3'); circle.setAttribute('fill', color); const title = document.createElementNS('http://www.w3.org/2000/svg', 'title'); title.textContent = `${new Date(point.at).toLocaleString()}\nDownload ${formatRate(point.downloadMbps)}\nUpload ${formatRate(point.uploadMbps)}${talkers}`; circle.appendChild(title); svg.appendChild(circle); }); });
+  const chartPoints = points.map(point => ({ point, x: left + ((new Date(point.at).getTime() - minTime) / (maxTime - minTime)) * (right - left) }));
+  points.forEach(point => { const x = left + ((new Date(point.at).getTime() - minTime) / (maxTime - minTime)) * (right - left); [['downloadMbps', '#38bdf8'], ['uploadMbps', '#a78bfa']].forEach(([key, color]) => { const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle'); circle.setAttribute('cx', x.toFixed(1)); circle.setAttribute('cy', (bottom - (Number(point[key]) / maxValue) * (bottom - top)).toFixed(1)); circle.setAttribute('r', '3'); circle.setAttribute('fill', color); svg.appendChild(circle); }); });
+  svg.onpointermove = (event) => { const rect = svg.getBoundingClientRect(); const chartX = (event.clientX - rect.left) * 1000 / rect.width; const nearest = chartPoints.reduce((best, candidate) => Math.abs(candidate.x - chartX) < Math.abs(best.x - chartX) ? candidate : best); const point = nearest.point; const talkers = Array.isArray(point.talkers) && point.talkers.length ? `\\nTop source: ${point.talkers.map(item => `${item.name ? `${item.name} ` : ''}${item.ip}`).join(', ')}` : ''; tooltip.textContent = `${new Date(point.at).toLocaleString()}\\nDownload ${formatRate(point.downloadMbps)}\\nUpload ${formatRate(point.uploadMbps)}${talkers}`; const wrap = svg.parentElement.getBoundingClientRect(); tooltip.style.left = `${Math.max(8, Math.min(wrap.width - 180, event.clientX - wrap.left + 12))}px`; tooltip.style.top = `${Math.max(8, event.clientY - wrap.top + 12)}px`; tooltip.hidden = false; };
+  svg.onpointerleave = () => { tooltip.hidden = true; };
 }
 async function fetchWanBandwidth(period = wanPeriod) {
   wanPeriod = period;
@@ -4961,7 +4967,10 @@ def serve_interactive_dashboard(
                 seconds = period_map.get(period, 300)
                 current = load_wan_bandwidth_state(config)
                 points = load_wan_bandwidth_history(config, seconds, datetime.now().astimezone())
-                talkers = wan_talkers_for_samples(config.fortigate_syslog_log_file, [str(point.get("at") or "") for point in points])
+                # Syslog only represents recent completed sessions. Keep long
+                # history requests fast and reserve source attribution for the
+                # live five-minute view.
+                talkers = wan_talkers_for_samples(config.fortigate_syslog_log_file, [str(point.get("at") or "") for point in points]) if period == "5m" else {}
                 for point in points:
                     point["talkers"] = talkers.get(str(point.get("at") or ""), [])
                 valid = [point for point in points if isinstance(point.get("downloadMbps"), (int, float)) and isinstance(point.get("uploadMbps"), (int, float))]

@@ -1,3 +1,9 @@
+pi-probe-discord (1.2.13-1) unstable; urgency=medium
+
+  * Make WAN range controls responsive and add a visible chart tooltip.
+
+ -- Codex Builder <noreply@example.invalid>  Sun, 26 Oct 2026 11:08:00 +1030
+
 pi-probe-discord (1.2.12-1) unstable; urgency=medium
 
   * Avoid SQLite schema-lock races between WAN polling and dashboard requests.
