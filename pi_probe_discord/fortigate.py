@@ -6,7 +6,7 @@ import socket
 import ssl
 import subprocess
 import warnings
-from bisect import bisect_left
+from bisect import bisect_left, bisect_right
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -94,7 +94,7 @@ def summarise_fortigate_syslog(path_value: str, max_events: int = 20, window_hou
     return {"available": True, "error": "", "windowHours": max(1, window_hours), "counts": counts, "recent": recent[-max_events:]}
 
 
-def wan_talkers_for_samples(path_value: str, sample_times: list[str]) -> dict[str, list[dict[str, Any]]]:
+def wan_talkers_for_samples(path_value: str, sample_times: list[str], window_seconds: int = 15) -> dict[str, list[dict[str, Any]]]:
     """Attribute nearby completed WAN sessions to a sample without reading unbounded logs."""
     path = Path(path_value)
     if not path.is_file() or not sample_times:
@@ -109,8 +109,9 @@ def wan_talkers_for_samples(path_value: str, sample_times: list[str]) -> dict[st
         return {}
     parsed_samples.sort(key=lambda item: item[1])
     sample_datetimes = [value for _, value in parsed_samples]
-    start = sample_datetimes[0] - timedelta(seconds=15)
-    end = sample_datetimes[-1] + timedelta(seconds=15)
+    window = timedelta(seconds=max(1, window_seconds))
+    start = sample_datetimes[0] - window
+    end = sample_datetimes[-1] + window
     buckets: dict[str, dict[str, dict[str, Any]]] = {value: {} for value, _ in parsed_samples}
     try:
         with path.open("rb") as handle:
@@ -133,19 +134,17 @@ def wan_talkers_for_samples(path_value: str, sample_times: list[str]) -> dict[st
         source = fields.get("srcip", "")
         if not source:
             continue
-        # A binary search makes 24-hour/7-day chart attribution practical:
-        # syslog records are matched in O(log n), not against every sample.
-        position = bisect_left(sample_datetimes, recorded)
-        candidates = parsed_samples[max(0, position - 1):position + 1]
-        if not candidates:
-            continue
-        nearest = min(candidates, key=lambda item: abs((recorded - item[1]).total_seconds()))
-        if abs((recorded - nearest[1]).total_seconds()) > 15:
+        # Associate each log record with the nearby chart interval. Binary
+        # searches keep larger history views responsive.
+        first = bisect_left(sample_datetimes, recorded - window)
+        last = bisect_right(sample_datetimes, recorded + window)
+        if first == last:
             continue
         try: total = int(fields.get("sentbyte", "0")) + int(fields.get("rcvdbyte", "0"))
         except ValueError: total = 0
-        row = buckets[nearest[0]].setdefault(source, {"ip": source, "name": fields.get("srcname", ""), "bytes": 0})
-        row["bytes"] += max(0, total)
+        for sample, _ in parsed_samples[first:last]:
+            row = buckets[sample].setdefault(source, {"ip": source, "name": fields.get("srcname", ""), "bytes": 0})
+            row["bytes"] += max(0, total)
     return {sample: sorted(rows.values(), key=lambda row: row["bytes"], reverse=True)[:3] for sample, rows in buckets.items() if rows}
 
 

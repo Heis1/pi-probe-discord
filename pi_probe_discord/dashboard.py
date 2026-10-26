@@ -4967,7 +4967,8 @@ def serve_interactive_dashboard(
                 seconds = period_map.get(period, 300)
                 current = load_wan_bandwidth_state(config)
                 points = load_wan_bandwidth_history(config, seconds, datetime.now().astimezone())
-                talkers = wan_talkers_for_samples(config.fortigate_syslog_log_file, [str(point.get("at") or "") for point in points])
+                attribution_window = {"5m": 15, "1h": 60, "24h": 300, "7d": 900}.get(period, 15)
+                talkers = wan_talkers_for_samples(config.fortigate_syslog_log_file, [str(point.get("at") or "") for point in points], attribution_window)
                 for point in points:
                     point["talkers"] = talkers.get(str(point.get("at") or ""), [])
                 valid = [point for point in points if isinstance(point.get("downloadMbps"), (int, float)) and isinstance(point.get("uploadMbps"), (int, float))]
