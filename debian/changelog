@@ -1,3 +1,9 @@
+pi-probe-discord (1.2.11-1) unstable; urgency=medium
+
+  * Correlate WAN chart points with nearby FortiGate traffic-log sources.
+
+ -- Codex Builder <noreply@example.invalid>  Sun, 26 Oct 2026 10:55:00 +1030
+
 pi-probe-discord (1.2.10-1) unstable; urgency=medium
 
   * Scale the WAN chart to the available viewport.

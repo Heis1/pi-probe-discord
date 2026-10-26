@@ -23,7 +23,7 @@ from urllib.parse import parse_qs, urlparse
 from .baselines import average, history_points_for_window
 from .firewall import FirewallConfig, FirewallSnapshot, collect_firewall_snapshot
 from .keepalive import load_keepalive_state
-from .fortigate import load_fortigate_state
+from .fortigate import load_fortigate_state, wan_talkers_for_samples
 from .wan_bandwidth import load_wan_bandwidth_state
 from .storage import load_wan_bandwidth_history
 from .models import AppConfig, RouterSnapshot, SpeedResult
@@ -3029,7 +3029,7 @@ function renderWanBandwidth() {
   for (let tick = 0; tick <= 4; tick += 1) { const time = new Date(minTime + (maxTime - minTime) * tick / 4); const x = left + (right - left) * tick / 4; svgText(time.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}), x, 244, 'middle'); }
   svgText('Mbps', left, 14); svgText('Time', 520, 258, 'middle');
   [['downloadMbps', '#38bdf8', 'Download'], ['uploadMbps', '#a78bfa', 'Upload']].forEach(([key, color, label]) => { const path = document.createElementNS('http://www.w3.org/2000/svg', 'path'); path.setAttribute('d', pathFor(key)); path.setAttribute('fill', 'none'); path.setAttribute('stroke', color); path.setAttribute('stroke-width', '3'); const title = document.createElementNS('http://www.w3.org/2000/svg', 'title'); title.textContent = `${label}: hover any point for values`; path.appendChild(title); svg.appendChild(path); });
-  points.forEach(point => { const x = left + ((new Date(point.at).getTime() - minTime) / (maxTime - minTime)) * (right - left); [['downloadMbps', '#38bdf8'], ['uploadMbps', '#a78bfa']].forEach(([key, color]) => { const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle'); circle.setAttribute('cx', x.toFixed(1)); circle.setAttribute('cy', (bottom - (Number(point[key]) / maxValue) * (bottom - top)).toFixed(1)); circle.setAttribute('r', '3'); circle.setAttribute('fill', color); const title = document.createElementNS('http://www.w3.org/2000/svg', 'title'); title.textContent = `${new Date(point.at).toLocaleString()}\nDownload ${formatRate(point.downloadMbps)}\nUpload ${formatRate(point.uploadMbps)}`; circle.appendChild(title); svg.appendChild(circle); }); });
+  points.forEach(point => { const x = left + ((new Date(point.at).getTime() - minTime) / (maxTime - minTime)) * (right - left); const talkers = Array.isArray(point.talkers) && point.talkers.length ? `\nTop source: ${point.talkers.map(item => `${item.name ? `${item.name} ` : ''}${item.ip}`).join(', ')}` : ''; [['downloadMbps', '#38bdf8'], ['uploadMbps', '#a78bfa']].forEach(([key, color]) => { const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle'); circle.setAttribute('cx', x.toFixed(1)); circle.setAttribute('cy', (bottom - (Number(point[key]) / maxValue) * (bottom - top)).toFixed(1)); circle.setAttribute('r', '3'); circle.setAttribute('fill', color); const title = document.createElementNS('http://www.w3.org/2000/svg', 'title'); title.textContent = `${new Date(point.at).toLocaleString()}\nDownload ${formatRate(point.downloadMbps)}\nUpload ${formatRate(point.uploadMbps)}${talkers}`; circle.appendChild(title); svg.appendChild(circle); }); });
 }
 async function fetchWanBandwidth(period = wanPeriod) {
   wanPeriod = period;
@@ -4961,6 +4961,9 @@ def serve_interactive_dashboard(
                 seconds = period_map.get(period, 300)
                 current = load_wan_bandwidth_state(config)
                 points = load_wan_bandwidth_history(config, seconds, datetime.now().astimezone())
+                talkers = wan_talkers_for_samples(config.fortigate_syslog_log_file, [str(point.get("at") or "") for point in points])
+                for point in points:
+                    point["talkers"] = talkers.get(str(point.get("at") or ""), [])
                 valid = [point for point in points if isinstance(point.get("downloadMbps"), (int, float)) and isinstance(point.get("uploadMbps"), (int, float))]
                 payload = {"period": period, "current": current, "points": points, "stats": {
                     "peakDownloadMbps": max((point["downloadMbps"] for point in valid), default=None),

@@ -93,6 +93,53 @@ def summarise_fortigate_syslog(path_value: str, max_events: int = 20, window_hou
     return {"available": True, "error": "", "windowHours": max(1, window_hours), "counts": counts, "recent": recent[-max_events:]}
 
 
+def wan_talkers_for_samples(path_value: str, sample_times: list[str]) -> dict[str, list[dict[str, Any]]]:
+    """Attribute nearby completed WAN sessions to a sample without reading unbounded logs."""
+    path = Path(path_value)
+    if not path.is_file() or not sample_times:
+        return {}
+    parsed_samples: list[tuple[str, datetime]] = []
+    for value in sample_times:
+        try:
+            parsed_samples.append((value, datetime.fromisoformat(value)))
+        except ValueError:
+            continue
+    if not parsed_samples:
+        return {}
+    start = min(value for _, value in parsed_samples) - timedelta(seconds=15)
+    end = max(value for _, value in parsed_samples) + timedelta(seconds=15)
+    buckets: dict[str, dict[str, dict[str, Any]]] = {value: {} for value, _ in parsed_samples}
+    try:
+        with path.open("rb") as handle:
+            size = path.stat().st_size
+            if size > _MAX_SYSLOG_READ_BYTES:
+                handle.seek(-_MAX_SYSLOG_READ_BYTES, 2); handle.readline()
+            lines = handle.read().decode("utf-8", errors="replace").splitlines()
+    except OSError:
+        return {}
+    for line in lines:
+        try:
+            recorded = datetime.fromisoformat(line.split(maxsplit=1)[0])
+        except ValueError:
+            continue
+        if recorded < start or recorded > end:
+            continue
+        fields = _forti_fields(line)
+        if fields.get("type") != "traffic" or fields.get("subtype") != "forward" or fields.get("dstintf") != "wan1":
+            continue
+        source = fields.get("srcip", "")
+        if not source:
+            continue
+        nearest = min(parsed_samples, key=lambda item: abs((recorded - item[1]).total_seconds()))
+        if abs((recorded - nearest[1]).total_seconds()) > 15:
+            continue
+        try: total = int(fields.get("sentbyte", "0")) + int(fields.get("rcvdbyte", "0"))
+        except ValueError: total = 0
+        row = buckets[nearest[0]].setdefault(source, {"ip": source, "name": fields.get("srcname", ""), "bytes": 0})
+        row["bytes"] += max(0, total)
+    return {sample: sorted(rows.values(), key=lambda row: row["bytes"], reverse=True)[:3] for sample, rows in buckets.items() if rows}
+
+
 class FortigateProbeError(RuntimeError):
     def __init__(self, stage: str, message: str) -> None:
         super().__init__(message)
