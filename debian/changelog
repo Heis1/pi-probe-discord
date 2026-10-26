@@ -1,3 +1,9 @@
+pi-probe-discord (1.2.12-1) unstable; urgency=medium
+
+  * Avoid SQLite schema-lock races between WAN polling and dashboard requests.
+
+ -- Codex Builder <noreply@example.invalid>  Sun, 26 Oct 2026 10:58:00 +1030
+
 pi-probe-discord (1.2.11-1) unstable; urgency=medium
 
   * Correlate WAN chart points with nearby FortiGate traffic-log sources.

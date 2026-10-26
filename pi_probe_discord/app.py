@@ -535,6 +535,8 @@ def render_dashboard_html(output_path: str | None = None) -> str:
 
 def run_dashboard_server() -> int:
     config = load_config(require_webhook=False)
+    # Initialise the schema before accepting concurrent browser API requests.
+    init_database(config)
     dashboard_path = Path(config.interactive_dashboard_file)
     if not dashboard_path.exists():
         now = datetime.now().astimezone()

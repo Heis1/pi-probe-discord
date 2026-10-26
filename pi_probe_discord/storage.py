@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from .models import AppConfig, RunRecord
+
+
+_database_init_lock = threading.Lock()
+_initialized_databases: set[str] = set()
 
 
 def compact_text(value: str, limit: int) -> str:
@@ -18,9 +23,17 @@ def compact_text(value: str, limit: int) -> str:
 def init_database(config: AppConfig) -> None:
     db_path = Path(config.db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
+    database_key = str(db_path.resolve())
+    if database_key in _initialized_databases:
+        return
 
-    with sqlite3.connect(db_path) as conn:
-        conn.execute("PRAGMA auto_vacuum = INCREMENTAL")
+    # Schema setup obtains a write lock.  It must not run for every dashboard
+    # request while the WAN collector is writing a sample.
+    with _database_init_lock:
+        if database_key in _initialized_databases:
+            return
+        conn = sqlite3.connect(db_path, timeout=15)
+        conn.execute("PRAGMA busy_timeout = 15000")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS probe_runs (
@@ -75,6 +88,8 @@ def init_database(config: AppConfig) -> None:
             )
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_wan_samples_recorded_at ON wan_bandwidth_samples(recorded_at)")
+        _initialized_databases.add(database_key)
+        conn.close()
 
 
 def save_wan_bandwidth_sample(config: AppConfig, recorded_at: datetime, interface_index: int, download_mbps: float, upload_mbps: float) -> None:
