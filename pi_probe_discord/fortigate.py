@@ -6,6 +6,7 @@ import socket
 import ssl
 import subprocess
 import warnings
+from bisect import bisect_left
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -106,8 +107,10 @@ def wan_talkers_for_samples(path_value: str, sample_times: list[str]) -> dict[st
             continue
     if not parsed_samples:
         return {}
-    start = min(value for _, value in parsed_samples) - timedelta(seconds=15)
-    end = max(value for _, value in parsed_samples) + timedelta(seconds=15)
+    parsed_samples.sort(key=lambda item: item[1])
+    sample_datetimes = [value for _, value in parsed_samples]
+    start = sample_datetimes[0] - timedelta(seconds=15)
+    end = sample_datetimes[-1] + timedelta(seconds=15)
     buckets: dict[str, dict[str, dict[str, Any]]] = {value: {} for value, _ in parsed_samples}
     try:
         with path.open("rb") as handle:
@@ -130,7 +133,13 @@ def wan_talkers_for_samples(path_value: str, sample_times: list[str]) -> dict[st
         source = fields.get("srcip", "")
         if not source:
             continue
-        nearest = min(parsed_samples, key=lambda item: abs((recorded - item[1]).total_seconds()))
+        # A binary search makes 24-hour/7-day chart attribution practical:
+        # syslog records are matched in O(log n), not against every sample.
+        position = bisect_left(sample_datetimes, recorded)
+        candidates = parsed_samples[max(0, position - 1):position + 1]
+        if not candidates:
+            continue
+        nearest = min(candidates, key=lambda item: abs((recorded - item[1]).total_seconds()))
         if abs((recorded - nearest[1]).total_seconds()) > 15:
             continue
         try: total = int(fields.get("sentbyte", "0")) + int(fields.get("rcvdbyte", "0"))

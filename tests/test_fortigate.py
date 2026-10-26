@@ -9,7 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from pi_probe_discord.fortigate import classify_fortigate_event, collect_fortigate_snapshot, load_fortigate_state, summarise_fortigate_syslog
+from pi_probe_discord.fortigate import classify_fortigate_event, collect_fortigate_snapshot, load_fortigate_state, summarise_fortigate_syslog, wan_talkers_for_samples
 
 
 class FortigateTests(unittest.TestCase):
@@ -33,6 +33,17 @@ class FortigateTests(unittest.TestCase):
         self.assertEqual(summary["counts"]["ips_prevention"], 1)
         self.assertEqual(summary["counts"]["firewall_deny"], 1)
         self.assertEqual(summary["counts"]["management_login_failure"], 1)
+
+    def test_wan_talkers_match_nearest_chart_sample(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "fortigate.log"
+            path.write_text(
+                '2026-01-01T00:10:03+00:00 type="traffic" subtype="forward" dstintf="wan1" srcip=192.168.20.9 srcname="TV" sentbyte=100 rcvdbyte=900\n',
+                encoding="utf-8",
+            )
+            talkers = wan_talkers_for_samples(str(path), ["2026-01-01T00:00:00+00:00", "2026-01-01T00:10:00+00:00", "2026-01-01T00:20:00+00:00"])
+            self.assertEqual(talkers["2026-01-01T00:10:00+00:00"][0]["ip"], "192.168.20.9")
+            self.assertEqual(talkers["2026-01-01T00:10:00+00:00"][0]["bytes"], 1000)
 
     def test_collects_monitor_metrics_and_persists_safe_snapshot(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

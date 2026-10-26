@@ -1,3 +1,9 @@
+pi-probe-discord (1.2.14-1) unstable; urgency=medium
+
+  * Attribute WAN history points efficiently across all selectable ranges.
+
+ -- Codex Builder <noreply@example.invalid>  Sun, 26 Oct 2026 11:15:00 +1030
+
 pi-probe-discord (1.2.13-1) unstable; urgency=medium
 
   * Make WAN range controls responsive and add a visible chart tooltip.
