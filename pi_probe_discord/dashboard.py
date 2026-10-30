@@ -23,9 +23,9 @@ from urllib.parse import parse_qs, urlparse
 from .baselines import average, history_points_for_window
 from .firewall import FirewallConfig, FirewallSnapshot, collect_firewall_snapshot
 from .keepalive import load_keepalive_state
-from .fortigate import load_fortigate_state, wan_talkers_for_samples
+from .fortigate import load_fortigate_state, wan_talkers_for_samples, wan_talkers_from_events
 from .wan_bandwidth import load_wan_bandwidth_state
-from .storage import load_wan_bandwidth_history
+from .storage import load_wan_bandwidth_history, load_wan_talkers
 from .models import AppConfig, RouterSnapshot, SpeedResult
 
 try:
@@ -2267,6 +2267,7 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
     </div>
     <div class="wan-controls"><button class="mini-button wan-period active" data-wan-period="5m">5 min</button><button class="mini-button wan-period" data-wan-period="1h">1 hour</button><button class="mini-button wan-period" data-wan-period="24h">24 hours</button><button class="mini-button wan-period" data-wan-period="7d">7 days</button><span class="helper-text" id="wanStatus">Loading…</span></div>
     <div class="wan-chart-wrap"><svg id="wanChart" class="wan-chart" viewBox="0 0 1000 260" preserveAspectRatio="none" role="img" aria-label="WAN download and upload bandwidth graph"></svg><div id="wanTooltip" class="wan-tooltip" hidden></div></div>
+    <div id="wanTalkers" class="helper-text" aria-live="polite"></div>
   </section>
 
   <section class="panel keepalive-section">
@@ -3018,6 +3019,12 @@ function renderWanBandwidth() {
   setText('wanAverage', `${formatRate(stats.averageDownloadMbps)} ↓ · ${formatRate(stats.averageUploadMbps)} ↑`);
   setText('wanFreshness', current.lastSuccessAt ? `Last reading ${formatFreshness(current.lastSuccessAt, true)}` : 'No successful reading');
   setText('wanStatus', current.available ? `Live · ${current.interface || 'wan1'} · ifIndex ${current.interfaceIndex ?? 'Unavailable'}` : (current.status || 'Unavailable'));
+  const attributionPoint = Array.isArray(wanPayload.points) && wanPayload.points.length ? wanPayload.points[wanPayload.points.length - 1] : {};
+  const talkers = Array.isArray(attributionPoint.talkers) ? attributionPoint.talkers : [];
+  const talkerText = talkers.length
+    ? `Devices using bandwidth near the latest sample: ${talkers.map(item => `${item.name ? `${item.name} (${item.ip})` : item.ip} · ${formatBytes(item.bytes)}`).join(' · ')}`
+    : 'Device attribution is waiting for FortiGate traffic syslog data. Enable the FortiGate syslog receiver and forward traffic logs to this Pi.';
+  setText('wanTalkers', talkerText);
   const svg = document.getElementById('wanChart'); clearNode(svg);
   const tooltip = document.getElementById('wanTooltip'); tooltip.hidden = true;
   const points = Array.isArray(wanPayload.points) ? wanPayload.points : [];
@@ -3036,6 +3043,14 @@ function renderWanBandwidth() {
   points.forEach(point => { const x = left + ((new Date(point.at).getTime() - minTime) / (maxTime - minTime)) * (right - left); [['downloadMbps', '#38bdf8'], ['uploadMbps', '#a78bfa']].forEach(([key, color]) => { const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle'); circle.setAttribute('cx', x.toFixed(1)); circle.setAttribute('cy', (bottom - (Number(point[key]) / maxValue) * (bottom - top)).toFixed(1)); circle.setAttribute('r', '3'); circle.setAttribute('fill', color); svg.appendChild(circle); }); });
   svg.onpointermove = (event) => { const rect = svg.getBoundingClientRect(); const chartX = (event.clientX - rect.left) * 1000 / rect.width; const nearest = chartPoints.reduce((best, candidate) => Math.abs(candidate.x - chartX) < Math.abs(best.x - chartX) ? candidate : best); const point = nearest.point; const talkers = Array.isArray(point.talkers) && point.talkers.length ? `\\nTop source: ${point.talkers.map(item => `${item.name ? `${item.name} ` : ''}${item.ip}`).join(', ')}` : ''; tooltip.textContent = `${new Date(point.at).toLocaleString()}\\nDownload ${formatRate(point.downloadMbps)}\\nUpload ${formatRate(point.uploadMbps)}${talkers}`; const wrap = svg.parentElement.getBoundingClientRect(); tooltip.style.left = `${Math.max(8, Math.min(wrap.width - 180, event.clientX - wrap.left + 12))}px`; tooltip.style.top = `${Math.max(8, event.clientY - wrap.top + 12)}px`; tooltip.hidden = false; };
   svg.onpointerleave = () => { tooltip.hidden = true; };
+}
+function formatBytes(value) {
+  const bytes = Number(value);
+  if (!Number.isFinite(bytes) || bytes < 0) return 'unknown usage';
+  if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(2)} GB`;
+  if (bytes >= 1e6) return `${(bytes / 1e6).toFixed(1)} MB`;
+  if (bytes >= 1e3) return `${(bytes / 1e3).toFixed(0)} KB`;
+  return `${bytes.toFixed(0)} B`;
 }
 async function fetchWanBandwidth(period = wanPeriod) {
   wanPeriod = period;
@@ -4968,7 +4983,16 @@ def serve_interactive_dashboard(
                 current = load_wan_bandwidth_state(config)
                 points = load_wan_bandwidth_history(config, seconds, datetime.now().astimezone())
                 attribution_window = {"5m": 15, "1h": 60, "24h": 300, "7d": 900}.get(period, 15)
-                talkers = wan_talkers_for_samples(config.fortigate_syslog_log_file, [str(point.get("at") or "") for point in points], attribution_window)
+                sample_times = [str(point.get("at") or "") for point in points]
+                if points:
+                    event_window_start = datetime.fromisoformat(sample_times[0]) - timedelta(seconds=attribution_window)
+                    event_window_end = datetime.fromisoformat(sample_times[-1]) + timedelta(seconds=attribution_window)
+                    events = load_wan_talkers(config, event_window_start, event_window_end)
+                else:
+                    events = []
+                talkers = wan_talkers_from_events(events, sample_times, attribution_window)
+                if not talkers:
+                    talkers = wan_talkers_for_samples(config.fortigate_syslog_log_file, sample_times, attribution_window)
                 for point in points:
                     point["talkers"] = talkers.get(str(point.get("at") or ""), [])
                 valid = [point for point in points if isinstance(point.get("downloadMbps"), (int, float)) and isinstance(point.get("uploadMbps"), (int, float))]

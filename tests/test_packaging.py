@@ -23,6 +23,7 @@ class PackagingTests(unittest.TestCase):
     def test_speedtest_timer_runs_hourly_after_completion(self) -> None:
         timer_path = REPO_ROOT / "debian" / "systemd" / "pi-probe-discord-speedtest.timer"
         contents = timer_path.read_text(encoding="utf-8")
+        self.assertIn("OnBootSec=5min", contents)
         self.assertIn("OnActiveSec=1h", contents)
         self.assertIn("OnUnitInactiveSec=1h", contents)
         self.assertNotIn("RandomizedDelaySec=", contents)
@@ -44,6 +45,15 @@ class PackagingTests(unittest.TestCase):
         self.assertIn("restart_if_enabled pi-probe-discord-nmap.timer", contents)
         self.assertNotIn("enable_if_file_exists", contents)
 
+    def test_postinst_honours_speedtest_and_wan_sampling_intervals(self) -> None:
+        contents = (REPO_ROOT / "debian" / "postinst").read_text(encoding="utf-8")
+        self.assertIn("SPEEDTEST_SCHEDULE_MINUTES", contents)
+        self.assertIn("OnBootSec=5min", contents)
+        self.assertIn("OnUnitInactiveSec=${minutes}min", contents)
+        self.assertIn("PI_PROBE_WAN_BANDWIDTH_INTERVAL_SECONDS", contents)
+        self.assertIn("OnUnitActiveSec=${seconds}s", contents)
+        self.assertIn("PI_PROBE_FORTIGATE_SYSLOG_ENABLED", contents)
+
     def test_package_upgrade_does_not_enable_user_disabled_timers(self) -> None:
         postinst_path = REPO_ROOT / "debian" / "postinst"
         contents = postinst_path.read_text(encoding="utf-8")
@@ -56,6 +66,7 @@ class PackagingTests(unittest.TestCase):
         self.assertIn('PI_PROBE_DASHBOARD_REFRESH_SECONDS="60"', env_template)
         self.assertIn('PI_PROBE_INTERACTIVE_DASHBOARD_API_TOKEN=""', env_template)
         self.assertIn('PI_PROBE_NMAP_SCAN_MINUTES="360"', env_template)
+        self.assertIn('PI_PROBE_WAN_BANDWIDTH_ENABLED="false"', env_template)
 
     def test_installer_backs_up_existing_config_with_private_permissions(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

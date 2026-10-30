@@ -49,7 +49,7 @@ from .fortigate import collect_fortigate_snapshot
 from .wan_bandwidth import collect_wan_bandwidth
 from .wan_bandwidth import collect_wan_bandwidth
 from .smtp_log_receiver import run_smtp_log_receiver
-from .fortigate_syslog import run_fortigate_syslog_receiver
+from .fortigate_syslog import backfill_wan_talkers, run_fortigate_syslog_receiver
 from .bot_reporter import post_bot_report
 from .storage import build_report, init_database, load_history_from_db, load_probe_runs_from_db, save_run_record
 from .system_checks import collect_pihole_info, run_updates
@@ -369,6 +369,11 @@ def run_fortigate_syslog_listener() -> int:
     if not config.fortigate_syslog_enabled:
         raise RuntimeError("Set PI_PROBE_FORTIGATE_SYSLOG_ENABLED=true before starting the FortiGate syslog receiver.")
     return run_fortigate_syslog_receiver(config)
+
+
+def run_wan_talker_backfill() -> str:
+    config = load_config(require_webhook=False)
+    return f"Imported {backfill_wan_talkers(config)} retained WAN traffic events."
 
 
 def render_firewall_report(window_hours: int | None = None, as_json: bool = False) -> str:

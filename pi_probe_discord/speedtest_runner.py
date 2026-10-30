@@ -84,6 +84,16 @@ def _fallback_speedtest_cli() -> SpeedResult:
 def run_speedtest_measurement() -> SpeedResult:
     official_result = _official_speedtest_cli()
     if official_result is not None:
+        if official_result.ok:
+            return official_result
+        # A broken native binary must not suppress the supported CLI fallback.
+        # This matters on ARM systems where a package update can leave a
+        # runnable-looking binary that aborts at startup.
+        fallback = _fallback_speedtest_cli()
+        if fallback.ok:
+            fallback.warnings.insert(0, f"Ookla Speedtest failed: {'; '.join(official_result.warnings)}")
+            return fallback
+        official_result.warnings.extend(fallback.warnings)
         return official_result
 
     if speedtest is None:

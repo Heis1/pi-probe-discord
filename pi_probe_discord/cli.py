@@ -17,6 +17,7 @@ from .app import (
     run_keepalive_check,
     run_fortigate_check,
     run_wan_bandwidth_check,
+    run_wan_talker_backfill,
     run_smtp_log_listener,
     run_fortigate_syslog_listener,
     run_mode,
@@ -53,6 +54,7 @@ def parse_mode(argv: list[str]) -> tuple[str, int | None]:
         "keepalive",
         "fortigate",
         "wan-bandwidth",
+        "wan-talker-backfill",
         "smtp-log-listener",
         "fortigate-syslog-listener",
     }:
@@ -225,6 +227,13 @@ def main(argv: list[str] | None = None) -> int:
             print(str(exc), file=sys.stderr)
             return 1
         return 0
+    if mode == "wan-talker-backfill":
+        try:
+            print(run_wan_talker_backfill())
+            return 0
+        except RuntimeError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
     if mode == "network-diagnose":
         as_json = len(args) >= 3 and args[2] == "--json"
         if len(args) >= 3 and not as_json:

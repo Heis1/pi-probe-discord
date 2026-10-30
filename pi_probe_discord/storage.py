@@ -88,6 +88,13 @@ def init_database(config: AppConfig) -> None:
             )
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_wan_samples_recorded_at ON wan_bandwidth_samples(recorded_at)")
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS wan_bandwidth_talkers (
+                recorded_at TEXT NOT NULL, source_ip TEXT NOT NULL,
+                source_name TEXT NOT NULL, byte_count INTEGER NOT NULL
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_wan_talkers_recorded_at ON wan_bandwidth_talkers(recorded_at)")
         _initialized_databases.add(database_key)
         conn.close()
 
@@ -114,6 +121,31 @@ def save_wan_bandwidth_sample(config: AppConfig, recorded_at: datetime, interfac
         """, (bucket, interface_index, download_mbps, upload_mbps, download_mbps, upload_mbps))
         conn.execute("DELETE FROM wan_bandwidth_samples WHERE recorded_at < ?", (raw_cutoff,))
         conn.execute("DELETE FROM wan_bandwidth_minute WHERE bucket_at < ?", (aggregate_cutoff,))
+
+
+def save_wan_talker(config: AppConfig, recorded_at: datetime, source_ip: str, source_name: str, byte_count: int) -> None:
+    """Persist FortiGate traffic attribution independently of log rotation."""
+    if not source_ip:
+        return
+    init_database(config)
+    cutoff = (recorded_at - timedelta(days=config.wan_bandwidth_aggregate_retention_days)).isoformat()
+    with sqlite3.connect(config.db_path) as conn:
+        conn.execute(
+            "INSERT INTO wan_bandwidth_talkers VALUES (?, ?, ?, ?)",
+            (recorded_at.isoformat(), source_ip, source_name, max(0, int(byte_count))),
+        )
+        conn.execute("DELETE FROM wan_bandwidth_talkers WHERE recorded_at < ?", (cutoff,))
+
+
+def load_wan_talkers(config: AppConfig, start: datetime, end: datetime) -> list[dict[str, Any]]:
+    """Load retained traffic events for assigning to dashboard sample points."""
+    init_database(config)
+    with sqlite3.connect(config.db_path) as conn:
+        rows = conn.execute(
+            "SELECT recorded_at, source_ip, source_name, byte_count FROM wan_bandwidth_talkers WHERE recorded_at >= ? AND recorded_at <= ? ORDER BY recorded_at",
+            (start.isoformat(), end.isoformat()),
+        ).fetchall()
+    return [{"at": row[0], "ip": row[1], "name": row[2], "bytes": row[3]} for row in rows]
 
 
 def load_wan_bandwidth_history(config: AppConfig, period_seconds: int, now: datetime) -> list[dict[str, Any]]:

@@ -99,6 +99,30 @@ def wan_talkers_for_samples(path_value: str, sample_times: list[str], window_sec
     path = Path(path_value)
     if not path.is_file() or not sample_times:
         return {}
+    events: list[dict[str, Any]] = []
+    try:
+        with path.open("rb") as handle:
+            size = path.stat().st_size
+            if size > _MAX_SYSLOG_READ_BYTES:
+                handle.seek(-_MAX_SYSLOG_READ_BYTES, 2); handle.readline()
+            lines = handle.read().decode("utf-8", errors="replace").splitlines()
+    except OSError:
+        return {}
+    for line in lines:
+        try:
+            recorded = datetime.fromisoformat(line.split(maxsplit=1)[0])
+        except ValueError:
+            continue
+        fields = _forti_fields(line)
+        if fields.get("type") == "traffic" and fields.get("subtype") == "forward" and fields.get("dstintf") == "wan1" and fields.get("srcip"):
+            try: total = int(fields.get("sentbyte", "0")) + int(fields.get("rcvdbyte", "0"))
+            except ValueError: total = 0
+            events.append({"at": recorded.isoformat(), "ip": fields["srcip"], "name": fields.get("srcname", ""), "bytes": total})
+    return wan_talkers_from_events(events, sample_times, window_seconds)
+
+
+def wan_talkers_from_events(events: list[dict[str, Any]], sample_times: list[str], window_seconds: int = 15) -> dict[str, list[dict[str, Any]]]:
+    """Attribute retained traffic events to nearby bandwidth samples."""
     parsed_samples: list[tuple[str, datetime]] = []
     for value in sample_times:
         try:
@@ -113,25 +137,14 @@ def wan_talkers_for_samples(path_value: str, sample_times: list[str], window_sec
     start = sample_datetimes[0] - window
     end = sample_datetimes[-1] + window
     buckets: dict[str, dict[str, dict[str, Any]]] = {value: {} for value, _ in parsed_samples}
-    try:
-        with path.open("rb") as handle:
-            size = path.stat().st_size
-            if size > _MAX_SYSLOG_READ_BYTES:
-                handle.seek(-_MAX_SYSLOG_READ_BYTES, 2); handle.readline()
-            lines = handle.read().decode("utf-8", errors="replace").splitlines()
-    except OSError:
-        return {}
-    for line in lines:
+    for event in events:
         try:
-            recorded = datetime.fromisoformat(line.split(maxsplit=1)[0])
+            recorded = datetime.fromisoformat(str(event.get("at") or ""))
         except ValueError:
             continue
         if recorded < start or recorded > end:
             continue
-        fields = _forti_fields(line)
-        if fields.get("type") != "traffic" or fields.get("subtype") != "forward" or fields.get("dstintf") != "wan1":
-            continue
-        source = fields.get("srcip", "")
+        source = str(event.get("ip") or "")
         if not source:
             continue
         # Associate each log record with the nearby chart interval. Binary
@@ -140,10 +153,10 @@ def wan_talkers_for_samples(path_value: str, sample_times: list[str], window_sec
         last = bisect_right(sample_datetimes, recorded + window)
         if first == last:
             continue
-        try: total = int(fields.get("sentbyte", "0")) + int(fields.get("rcvdbyte", "0"))
+        try: total = int(event.get("bytes", 0))
         except ValueError: total = 0
         for sample, _ in parsed_samples[first:last]:
-            row = buckets[sample].setdefault(source, {"ip": source, "name": fields.get("srcname", ""), "bytes": 0})
+            row = buckets[sample].setdefault(source, {"ip": source, "name": str(event.get("name") or ""), "bytes": 0})
             row["bytes"] += max(0, total)
     return {sample: sorted(rows.values(), key=lambda row: row["bytes"], reverse=True)[:3] for sample, rows in buckets.items() if rows}
 
