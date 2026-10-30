@@ -6,7 +6,8 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
-from .storage import init_database, save_wan_talker
+from .fortigate import fortigate_dashboard_event
+from .storage import init_database, save_fortigate_event, save_wan_talker
 
 
 _FIELD_RE = re.compile(r'\b(?P<key>[A-Za-z_]+)=(?P<value>"[^"]*"|[^\s]+)')
@@ -77,6 +78,16 @@ def run_fortigate_syslog_receiver(config: object) -> int:
                 received_at = datetime.now().astimezone()
                 with log_file.open("a", encoding="utf-8") as output:
                     output.write(f"{received_at.isoformat()} source={address[0]} {message}\n")
+                dashboard_event = fortigate_dashboard_event(message)
+                if dashboard_event is not None:
+                    save_fortigate_event(
+                        config,
+                        received_at,
+                        dashboard_event["eventType"],
+                        dashboard_event["severity"],
+                        dashboard_event["source"],
+                        dashboard_event["summary"],
+                    )
                 talker = _traffic_talker(message)
                 if talker is not None:
                     save_wan_talker(config, received_at, *talker)

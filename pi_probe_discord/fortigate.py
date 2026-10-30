@@ -56,6 +56,53 @@ def classify_fortigate_event(line: str) -> str | None:
     return None
 
 
+def fortigate_dashboard_event(line: str) -> dict[str, str] | None:
+    """Convert a high-signal FortiGate syslog record into one dashboard event.
+
+    Allowed sessions are intentionally excluded: they belong in WAN attribution,
+    while this feed is reserved for enforcement and operational changes.
+    """
+    fields = _forti_fields(line)
+    category = classify_fortigate_event(line)
+    combined = " ".join(fields.get(key, "") for key in ("type", "subtype", "eventtype", "logdesc", "msg", "action", "status")).lower()
+    if category is None:
+        if "link" in combined and any(word in combined for word in ("down", "up", "change", "fail")):
+            category = "wan_link_change"
+        elif any(word in combined for word in ("reboot", "restart", "shutdown", "cold start", "warm start")):
+            category = "system_restart"
+        elif "vpn" in combined and any(word in combined for word in ("fail", "down", "error", "disconnect")):
+            category = "vpn_failure"
+        elif any(word in combined for word in ("configuration changed", "config changed", "configuration revision")):
+            category = "configuration_change"
+    if category is None:
+        return None
+    severity = "info"
+    if category in {"ips_prevention", "malware_prevention", "management_login_failure"}:
+        severity = "critical"
+    elif category not in {"configuration_change", "ips_detection", "malware_detection", "application_control", "dns_bypass_observed"}:
+        severity = "warning"
+    source = fields.get("srcip") or fields.get("user") or fields.get("devname") or "FortiGate 60F"
+    detail_fields = ("logdesc", "msg", "action", "status", "policyid", "srcip", "dstip", "app")
+    detail = "; ".join(f"{key}={fields[key]}" for key in detail_fields if fields.get(key))
+    labels = {
+        "dns_bypass_block": "Blocked DNS-over-HTTPS",
+        "dns_bypass_observed": "DNS-over-HTTPS observed",
+        "ips_prevention": "IPS prevented traffic",
+        "ips_detection": "IPS detection",
+        "malware_prevention": "Malware prevention",
+        "malware_detection": "Malware detection",
+        "application_control_block": "Application control blocked traffic",
+        "application_control": "Application control event",
+        "management_login_failure": "Failed FortiGate management login",
+        "firewall_deny": "Firewall denied traffic",
+        "wan_link_change": "WAN or interface link change",
+        "system_restart": "FortiGate system restart",
+        "vpn_failure": "VPN failure",
+        "configuration_change": "FortiGate configuration change",
+    }
+    return {"eventType": f"fortigate_{category}", "severity": severity, "source": source, "summary": f"{labels.get(category, category)}{': ' + detail if detail else ''}"}
+
+
 def summarise_fortigate_syslog(path_value: str, max_events: int = 20, window_hours: int = 24) -> dict[str, Any]:
     """Summarise a bounded, recent tail of received FortiGate syslog records."""
     path = Path(path_value)

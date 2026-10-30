@@ -9,13 +9,25 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from pi_probe_discord.fortigate import classify_fortigate_event, collect_fortigate_snapshot, load_fortigate_state, summarise_fortigate_syslog, wan_talkers_for_samples
+from pi_probe_discord.fortigate import classify_fortigate_event, collect_fortigate_snapshot, fortigate_dashboard_event, load_fortigate_state, summarise_fortigate_syslog, wan_talkers_for_samples
 
 
 class FortigateTests(unittest.TestCase):
     def test_classifies_doh_as_enforced_dns_policy_not_compromise(self) -> None:
         line = 'type="utm" subtype="app-ctrl" app="DNS.Over.HTTPS" action="block" srcip=192.168.20.102 policyid=20'
         self.assertEqual(classify_fortigate_event(line), "dns_bypass_block")
+
+    def test_dashboard_event_excludes_allowed_traffic_and_coalesces_security_context(self) -> None:
+        allowed = 'type="traffic" subtype="forward" action="accept" srcip=192.168.1.20 dstintf="wan1"'
+        denied = 'type="traffic" subtype="forward" action="deny" srcip=192.168.1.20 dstip=8.8.8.8 policyid=12'
+
+        self.assertIsNone(fortigate_dashboard_event(allowed))
+        event = fortigate_dashboard_event(denied)
+        self.assertIsNotNone(event)
+        assert event is not None
+        self.assertEqual(event["eventType"], "fortigate_firewall_deny")
+        self.assertEqual(event["severity"], "warning")
+        self.assertIn("policyid=12", event["summary"])
 
     def test_syslog_summary_is_bounded_and_preserves_event_categories(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

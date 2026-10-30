@@ -80,6 +80,20 @@ def init_database(config: AppConfig) -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_router_snmp_events_recorded_at ON router_snmp_events(recorded_at)"
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS fortigate_events (
+                bucket_at TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                severity TEXT NOT NULL,
+                source_ip TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                event_count INTEGER NOT NULL DEFAULT 1,
+                PRIMARY KEY (bucket_at, event_type, source_ip, summary)
+            )
+            """
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_fortigate_events_bucket_at ON fortigate_events(bucket_at)")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS wan_bandwidth_samples (
                 recorded_at TEXT PRIMARY KEY, interface_index INTEGER NOT NULL,
@@ -142,6 +156,36 @@ def save_wan_talker(config: AppConfig, recorded_at: datetime, source_ip: str, so
             (recorded_at.isoformat(), source_ip, source_name, max(0, int(byte_count))),
         )
         conn.execute("DELETE FROM wan_bandwidth_talkers WHERE recorded_at < ?", (cutoff,))
+
+
+def save_fortigate_event(config: AppConfig, recorded_at: datetime, event_type: str, severity: str, source_ip: str, summary: str) -> None:
+    """Store high-signal FortiGate events, coalesced into five-minute bursts."""
+    init_database(config)
+    bucket = recorded_at.replace(minute=(recorded_at.minute // 5) * 5, second=0, microsecond=0).isoformat()
+    cutoff = (recorded_at - timedelta(days=config.history_retention_days)).isoformat()
+    with _connect(config.db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO fortigate_events (bucket_at, event_type, severity, source_ip, summary, event_count)
+            VALUES (?, ?, ?, ?, ?, 1)
+            ON CONFLICT(bucket_at, event_type, source_ip, summary) DO UPDATE SET
+                event_count = fortigate_events.event_count + 1
+            """,
+            (bucket, compact_text(event_type, 80), compact_text(severity, 16), compact_text(source_ip, 80), compact_text(summary, 280)),
+        )
+        conn.execute("DELETE FROM fortigate_events WHERE bucket_at < ?", (cutoff,))
+
+
+def load_fortigate_events(config: AppConfig) -> list[dict[str, Any]]:
+    """Load retained, coalesced FortiGate events for the unified event feed."""
+    init_database(config)
+    cutoff = (datetime.now().astimezone() - timedelta(days=config.history_retention_days)).isoformat()
+    with _connect(config.db_path) as conn:
+        rows = conn.execute(
+            "SELECT bucket_at, event_type, severity, source_ip, summary, event_count FROM fortigate_events WHERE bucket_at >= ? ORDER BY bucket_at",
+            (cutoff,),
+        ).fetchall()
+    return [{"at": row[0], "eventType": row[1], "severity": row[2], "source": row[3], "summary": row[4], "count": row[5]} for row in rows]
 
 
 def load_wan_talkers(config: AppConfig, start: datetime, end: datetime, compact: bool = False) -> list[dict[str, Any]]:

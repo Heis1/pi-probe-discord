@@ -1,3 +1,10 @@
+pi-probe-discord (1.2.17-1) unstable; urgency=medium
+
+  * Add high-signal FortiGate syslog events to the dashboard event feed.
+  * Rotate the active FortiGate receiver log safely.
+
+ -- Codex Builder <noreply@example.invalid>  Fri, 30 Oct 2026 17:15:00 +1030
+
 pi-probe-discord (1.2.16-1) unstable; urgency=medium
 
   * Make WAN range changes fast by compacting chart history and loading

@@ -25,7 +25,7 @@ from .firewall import FirewallConfig, FirewallSnapshot, collect_firewall_snapsho
 from .keepalive import load_keepalive_state
 from .fortigate import load_fortigate_state, wan_talkers_for_samples, wan_talkers_from_events
 from .wan_bandwidth import load_wan_bandwidth_state
-from .storage import load_wan_bandwidth_history, load_wan_talkers
+from .storage import load_fortigate_events, load_wan_bandwidth_history, load_wan_talkers
 from .models import AppConfig, RouterSnapshot, SpeedResult
 
 try:
@@ -817,6 +817,7 @@ def _load_router_events(config: AppConfig | None) -> list[RouterEvent]:
         return []
     rows: list[RouterEvent] = []
     rows.extend(_load_router_events_from_db(config))
+    rows.extend(_load_fortigate_events_from_db(config))
     rows.extend(_load_router_events_from_files(config))
     return sorted(rows, key=lambda event: event.timestamp)
 
@@ -855,6 +856,28 @@ def _load_router_events_from_db(config: AppConfig) -> list[RouterEvent]:
                 message=str(summary or ""),
                 severity=_estimate_router_event_severity(event_type, str(summary or "")),
                 source=str(source_ip or "router-snmp"),
+            )
+        )
+    return rows
+
+
+def _load_fortigate_events_from_db(config: AppConfig) -> list[RouterEvent]:
+    rows: list[RouterEvent] = []
+    for item in load_fortigate_events(config):
+        timestamp = _coerce_datetime(item.get("at"))
+        if timestamp is None:
+            continue
+        count = int(item.get("count") or 1)
+        summary = str(item.get("summary") or "")
+        if count > 1:
+            summary = f"{summary} ({count} matching events in five minutes)"
+        rows.append(
+            RouterEvent(
+                timestamp=timestamp,
+                event_type=str(item.get("eventType") or "fortigate_event"),
+                message=summary,
+                severity=str(item.get("severity") or "info"),
+                source=str(item.get("source") or "FortiGate 60F"),
             )
         )
     return rows
