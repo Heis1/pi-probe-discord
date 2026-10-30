@@ -1419,7 +1419,7 @@ def _build_dashboard_payload(
     diagnosis_updated_at = _latest_timestamp([latest_event_at, inventory_scanned_at, latest_pihole_at, latest_speed_at]) or generated_at
     keepalive = load_keepalive_state(config) if config is not None else {"enabled": False, "checkedAt": "", "devices": []}
     fortigate = load_fortigate_state(config) if config is not None else {"enabled": False, "checkedAt": "", "available": False, "system": {}, "metrics": {}}
-    wan_bandwidth = load_wan_bandwidth_state(config) if config is not None else {"enabled": False, "available": False, "status": "Not configured"}
+    wan_bandwidth = _load_smoothed_wan_state(config) if config is not None else {"enabled": False, "available": True, "status": "Not configured", "downloadMbps": 0, "uploadMbps": 0}
 
     metadata = {
         "service": SERVICE_NAME,
@@ -4832,6 +4832,34 @@ def _verify_dashboard_session_cookie(api_token: str, raw_cookie: str) -> bool:
     return expires_at > int(datetime.now().astimezone().timestamp())
 
 
+def _load_smoothed_wan_state(config: AppConfig) -> dict[str, Any]:
+    """Return a display-safe rolling average of the most recent WAN samples."""
+    state = load_wan_bandwidth_state(config)
+    rows: list[tuple[float, float]] = []
+    try:
+        with sqlite3.connect(config.db_path, timeout=5) as conn:
+            conn.execute("PRAGMA busy_timeout = 5000")
+            rows = conn.execute(
+                "SELECT download_mbps, upload_mbps FROM wan_bandwidth_samples ORDER BY recorded_at DESC LIMIT 3"
+            ).fetchall()
+    except sqlite3.Error:
+        rows = []
+    if rows:
+        state["downloadMbps"] = sum(row[0] for row in rows) / len(rows)
+        state["uploadMbps"] = sum(row[1] for row in rows) / len(rows)
+        state["available"] = True
+        state["sampleCount"] = len(rows)
+        state["status"] = f"Live · {len(rows)}-sample average"
+    else:
+        # Keep the display numeric during startup or a transient SNMP gap.
+        state["downloadMbps"] = float(state.get("downloadMbps") or 0)
+        state["uploadMbps"] = float(state.get("uploadMbps") or 0)
+        state["available"] = True
+        state["sampleCount"] = 0
+        state["status"] = state.get("status") or "Awaiting samples"
+    return state
+
+
 def serve_interactive_dashboard(
     output_path: str,
     host: str,
@@ -4988,7 +5016,7 @@ def serve_interactive_dashboard(
                 period_map = {"5m": 300, "1h": 3600, "24h": 86400, "7d": 604800}
                 period = parse_qs(urlparse(self.path).query).get("period", ["5m"])[0]
                 seconds = period_map.get(period, 300)
-                current = load_wan_bandwidth_state(config)
+                current = _load_smoothed_wan_state(config)
                 points = load_wan_bandwidth_history(config, seconds, datetime.now().astimezone())
                 attribution_window = {"5m": 15, "1h": 60, "24h": 300, "7d": 900}.get(period, 15)
                 sample_times = [str(point.get("at") or "") for point in points]
@@ -5013,7 +5041,7 @@ def serve_interactive_dashboard(
                 self._send_json(HTTPStatus.OK, payload, no_store=True)
                 return
             if request_path == "/api/wan-bandwidth/current":
-                self._send_json(HTTPStatus.OK, load_wan_bandwidth_state(config), no_store=True)
+                self._send_json(HTTPStatus.OK, _load_smoothed_wan_state(config), no_store=True)
                 return
             if request_path in {"/", ""}:
                 request_path = f"/{file_path.name}"
