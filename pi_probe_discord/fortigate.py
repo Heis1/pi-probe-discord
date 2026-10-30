@@ -82,7 +82,10 @@ def fortigate_dashboard_event(line: str) -> dict[str, str] | None:
     elif category not in {"configuration_change", "ips_detection", "malware_detection", "application_control", "dns_bypass_observed"}:
         severity = "warning"
     source = fields.get("srcip") or fields.get("user") or fields.get("devname") or "FortiGate 60F"
-    detail_fields = ("logdesc", "msg", "action", "status", "policyid", "srcip", "dstip", "app")
+    # Destination addresses vary heavily during scans and blocked retries.
+    # Keep policy/application context, but omit those per-packet details so a
+    # burst remains one readable dashboard event instead of a noisy table.
+    detail_fields = ("logdesc", "msg", "action", "status", "policyid", "app")
     detail = "; ".join(f"{key}={fields[key]}" for key in detail_fields if fields.get(key))
     labels = {
         "dns_bypass_block": "Blocked DNS-over-HTTPS",
