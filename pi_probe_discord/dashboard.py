@@ -3061,6 +3061,10 @@ async function fetchWanBandwidth(period = wanPeriod) {
   catch (error) { wanPayload = { points: [], current: { available: false, status: `WAN data unavailable: ${error instanceof Error ? error.message : 'request error'}` }, stats: {} }; renderWanBandwidth(); }
   finally { wanFetchInFlight = false; }
 }
+async function fetchWanCurrent() {
+  try { const response = await fetch('/api/wan-bandwidth/current', { cache: 'no-store' }); if (!response.ok) throw new Error(`HTTP ${response.status}`); const current = await response.json(); setText('wanDownload', formatRate(current.downloadMbps)); setText('wanUpload', formatRate(current.uploadMbps)); setText('wanFreshness', current.lastSuccessAt ? `Last reading ${formatFreshness(current.lastSuccessAt, true)}` : 'No successful reading'); setText('wanStatus', current.available ? `Live · ${current.interface || 'wan1'} · ifIndex ${current.interfaceIndex ?? 'Unavailable'}` : (current.status || 'Unavailable')); }
+  catch (_) { /* Keep the latest readable rate during a transient request failure. */ }
+}
 function renderFirewallSignal() {
   const shell = document.getElementById('securityShell');
   clearNode(shell);
@@ -4301,7 +4305,7 @@ document.addEventListener('visibilitychange', () => {
 });
 scheduleNextRefresh();
 void fetchWanBandwidth('5m');
-window.setInterval(() => { if (wanPeriod === '5m') void fetchWanBandwidth(wanPeriod); }, 5000);
+window.setInterval(() => { void fetchWanCurrent(); if (wanPeriod === '5m') void fetchWanBandwidth(wanPeriod); }, 5000);
 </script>
 </body>
 </html>
@@ -5007,6 +5011,9 @@ def serve_interactive_dashboard(
                     "averageUploadMbps": (sum(point["uploadMbps"] for point in valid) / len(valid)) if valid else None,
                 }}
                 self._send_json(HTTPStatus.OK, payload, no_store=True)
+                return
+            if request_path == "/api/wan-bandwidth/current":
+                self._send_json(HTTPStatus.OK, load_wan_bandwidth_state(config), no_store=True)
                 return
             if request_path in {"/", ""}:
                 request_path = f"/{file_path.name}"
