@@ -2369,6 +2369,7 @@ let fortigate = {};
 let wanBandwidth = {};
 let wanPayload = { points: [], current: {}, stats: {} };
 let wanPeriod = '5m';
+let wanFetchInFlight = false;
 let inventory = {};
 let topology = {};
 let stats = {};
@@ -3053,9 +3054,12 @@ function formatBytes(value) {
   return `${bytes.toFixed(0)} B`;
 }
 async function fetchWanBandwidth(period = wanPeriod) {
+  if (wanFetchInFlight) return;
   wanPeriod = period;
+  wanFetchInFlight = true;
   try { const response = await fetch(`/api/wan-bandwidth?period=${encodeURIComponent(period)}`, { cache: 'no-store' }); if (!response.ok) throw new Error(`HTTP ${response.status}`); wanPayload = await response.json(); renderWanBandwidth(); }
   catch (error) { wanPayload = { points: [], current: { available: false, status: `WAN data unavailable: ${error instanceof Error ? error.message : 'request error'}` }, stats: {} }; renderWanBandwidth(); }
+  finally { wanFetchInFlight = false; }
 }
 function renderFirewallSignal() {
   const shell = document.getElementById('securityShell');
@@ -4297,7 +4301,7 @@ document.addEventListener('visibilitychange', () => {
 });
 scheduleNextRefresh();
 void fetchWanBandwidth('5m');
-window.setInterval(() => { void fetchWanBandwidth(wanPeriod); }, 5000);
+window.setInterval(() => { if (wanPeriod === '5m') void fetchWanBandwidth(wanPeriod); }, 5000);
 </script>
 </body>
 </html>
@@ -4987,7 +4991,7 @@ def serve_interactive_dashboard(
                 if points:
                     event_window_start = datetime.fromisoformat(sample_times[0]) - timedelta(seconds=attribution_window)
                     event_window_end = datetime.fromisoformat(sample_times[-1]) + timedelta(seconds=attribution_window)
-                    events = load_wan_talkers(config, event_window_start, event_window_end)
+                    events = load_wan_talkers(config, event_window_start, event_window_end, compact=(seconds > 3600))
                 else:
                     events = []
                 talkers = wan_talkers_from_events(events, sample_times, attribution_window)

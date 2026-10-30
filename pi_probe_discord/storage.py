@@ -13,6 +13,13 @@ _database_init_lock = threading.Lock()
 _initialized_databases: set[str] = set()
 
 
+def _connect(path: str | Path) -> sqlite3.Connection:
+    """Open a connection that cooperates with concurrent collectors/readers."""
+    connection = sqlite3.connect(path, timeout=30)
+    connection.execute("PRAGMA busy_timeout = 30000")
+    return connection
+
+
 def compact_text(value: str, limit: int) -> str:
     cleaned = " ".join((value or "").split())
     if len(cleaned) <= limit:
@@ -32,8 +39,8 @@ def init_database(config: AppConfig) -> None:
     with _database_init_lock:
         if database_key in _initialized_databases:
             return
-        conn = sqlite3.connect(db_path, timeout=15)
-        conn.execute("PRAGMA busy_timeout = 15000")
+        conn = _connect(db_path)
+        conn.execute("PRAGMA journal_mode = WAL")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS probe_runs (
@@ -106,7 +113,7 @@ def save_wan_bandwidth_sample(config: AppConfig, recorded_at: datetime, interfac
     raw_cutoff = (recorded_at - timedelta(hours=config.wan_bandwidth_raw_retention_hours)).isoformat()
     aggregate_cutoff = (recorded_at - timedelta(days=config.wan_bandwidth_aggregate_retention_days)).isoformat()
     bucket = recorded_at.replace(second=0, microsecond=0).isoformat()
-    with sqlite3.connect(config.db_path) as conn:
+    with _connect(config.db_path) as conn:
         conn.execute("INSERT OR REPLACE INTO wan_bandwidth_samples VALUES (?, ?, ?, ?)", (stamp, interface_index, download_mbps, upload_mbps))
         conn.execute("""
             INSERT INTO wan_bandwidth_minute (bucket_at, interface_index, avg_download_mbps, avg_upload_mbps, peak_download_mbps, peak_upload_mbps, sample_count)
@@ -129,7 +136,7 @@ def save_wan_talker(config: AppConfig, recorded_at: datetime, source_ip: str, so
         return
     init_database(config)
     cutoff = (recorded_at - timedelta(days=config.wan_bandwidth_aggregate_retention_days)).isoformat()
-    with sqlite3.connect(config.db_path) as conn:
+    with _connect(config.db_path) as conn:
         conn.execute(
             "INSERT INTO wan_bandwidth_talkers VALUES (?, ?, ?, ?)",
             (recorded_at.isoformat(), source_ip, source_name, max(0, int(byte_count))),
@@ -137,14 +144,20 @@ def save_wan_talker(config: AppConfig, recorded_at: datetime, source_ip: str, so
         conn.execute("DELETE FROM wan_bandwidth_talkers WHERE recorded_at < ?", (cutoff,))
 
 
-def load_wan_talkers(config: AppConfig, start: datetime, end: datetime) -> list[dict[str, Any]]:
+def load_wan_talkers(config: AppConfig, start: datetime, end: datetime, compact: bool = False) -> list[dict[str, Any]]:
     """Load retained traffic events for assigning to dashboard sample points."""
     init_database(config)
-    with sqlite3.connect(config.db_path) as conn:
-        rows = conn.execute(
-            "SELECT recorded_at, source_ip, source_name, byte_count FROM wan_bandwidth_talkers WHERE recorded_at >= ? AND recorded_at <= ? ORDER BY recorded_at",
-            (start.isoformat(), end.isoformat()),
-        ).fetchall()
+    with _connect(config.db_path) as conn:
+        if compact:
+            rows = conn.execute(
+                "SELECT MIN(recorded_at), source_ip, MAX(source_name), SUM(byte_count) FROM wan_bandwidth_talkers WHERE recorded_at >= ? AND recorded_at <= ? GROUP BY substr(recorded_at, 1, 16), source_ip ORDER BY MIN(recorded_at)",
+                (start.isoformat(), end.isoformat()),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT recorded_at, source_ip, source_name, byte_count FROM wan_bandwidth_talkers WHERE recorded_at >= ? AND recorded_at <= ? ORDER BY recorded_at",
+                (start.isoformat(), end.isoformat()),
+            ).fetchall()
     return [{"at": row[0], "ip": row[1], "name": row[2], "bytes": row[3]} for row in rows]
 
 
@@ -153,7 +166,7 @@ def load_wan_bandwidth_history(config: AppConfig, period_seconds: int, now: date
     cutoff = now - timedelta(seconds=max(60, period_seconds))
     raw_cutoff = now - timedelta(hours=config.wan_bandwidth_raw_retention_hours)
     points: list[dict[str, Any]] = []
-    with sqlite3.connect(config.db_path) as conn:
+    with _connect(config.db_path) as conn:
         if cutoff < raw_cutoff:
             rows = conn.execute("SELECT bucket_at, avg_download_mbps, avg_upload_mbps FROM wan_bandwidth_minute WHERE bucket_at >= ? AND bucket_at < ? ORDER BY bucket_at", (cutoff.isoformat(), raw_cutoff.isoformat())).fetchall()
             points.extend({"at": row[0], "downloadMbps": row[1], "uploadMbps": row[2], "aggregate": True} for row in rows)
@@ -163,7 +176,7 @@ def load_wan_bandwidth_history(config: AppConfig, period_seconds: int, now: date
 
 
 def save_run_record(config: AppConfig, record: RunRecord) -> None:
-    with sqlite3.connect(config.db_path) as conn:
+    with _connect(config.db_path) as conn:
         conn.execute(
             """
             INSERT INTO probe_runs (
@@ -203,7 +216,7 @@ def load_history_from_db(config: AppConfig, now: datetime) -> dict[str, list[dic
     history = {"download": [], "upload": [], "ping": []}
     cutoff = (now - timedelta(days=config.history_retention_days)).isoformat()
 
-    with sqlite3.connect(config.db_path) as conn:
+    with _connect(config.db_path) as conn:
         rows = conn.execute(
             """
             SELECT recorded_at, download_mbps, upload_mbps, ping_ms
@@ -226,7 +239,7 @@ def load_history_from_db(config: AppConfig, now: datetime) -> dict[str, list[dic
 
 def load_probe_runs_from_db(config: AppConfig, now: datetime, days: int = 30) -> list[dict[str, Any]]:
     cutoff = (now - timedelta(days=days)).isoformat()
-    with sqlite3.connect(config.db_path) as conn:
+    with _connect(config.db_path) as conn:
         rows = conn.execute(
             """
             SELECT recorded_at, hostname, speed_ok, speed_summary, download_mbps, upload_mbps, ping_ms, speed_warnings
@@ -258,7 +271,7 @@ def build_report(config: AppConfig, days: int) -> str:
     cutoff = (datetime.now().astimezone() - timedelta(days=days)).isoformat()
 
     try:
-        with sqlite3.connect(config.db_path) as conn:
+        with _connect(config.db_path) as conn:
             rows = conn.execute(
                 """
                 SELECT
