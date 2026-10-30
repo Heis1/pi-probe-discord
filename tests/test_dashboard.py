@@ -17,6 +17,7 @@ from urllib.request import Request, urlopen
 from pi_probe_discord.dashboard import (
     NmapDeviceRow,
     RouterEvent,
+    _downsample_wan_points,
     _version_string,
     apply_dashboard_nmap_override,
     build_network_diagnosis,
@@ -124,6 +125,18 @@ def make_config(base_dir: Path) -> AppConfig:
 
 
 class DashboardTests(unittest.TestCase):
+    def test_downsample_wan_points_caps_chart_payload_and_keeps_last_timestamp(self) -> None:
+        points = [
+            {"at": f"2026-01-01T00:{index:02d}:00+00:00", "downloadMbps": float(index), "uploadMbps": float(index + 1), "aggregate": False}
+            for index in range(10)
+        ]
+
+        compacted = _downsample_wan_points(points, max_points=3)
+
+        self.assertEqual(len(compacted), 3)
+        self.assertEqual(compacted[-1]["at"], points[-1]["at"])
+        self.assertTrue(all(point["aggregate"] for point in compacted))
+
     def test_dashboard_ignores_update_only_records(self) -> None:
         now = datetime(2026, 8, 27, 22, 0, 0)
         rows = _rows_from_run_records(

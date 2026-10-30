@@ -3027,12 +3027,7 @@ function renderWanBandwidth() {
   setText('wanAverage', `${formatRate(stats.averageDownloadMbps)} ↓ · ${formatRate(stats.averageUploadMbps)} ↑`);
   setText('wanFreshness', current.lastSuccessAt ? `Last reading ${formatFreshness(current.lastSuccessAt, true)}` : 'No successful reading');
   setText('wanStatus', current.available ? `Live · ${current.interface || 'wan1'} · ifIndex ${current.interfaceIndex ?? 'Unavailable'}` : (current.status || 'Unavailable'));
-  const attributionPoint = Array.isArray(wanPayload.points) && wanPayload.points.length ? wanPayload.points[wanPayload.points.length - 1] : {};
-  const talkers = Array.isArray(attributionPoint.talkers) ? attributionPoint.talkers : [];
-  const talkerText = talkers.length
-    ? `Devices using bandwidth near the latest sample: ${talkers.map(item => `${item.name ? `${item.name} (${item.ip})` : item.ip} · ${formatBytes(item.bytes)}`).join(' · ')}`
-    : 'Device attribution is waiting for FortiGate traffic syslog data. Enable the FortiGate syslog receiver and forward traffic logs to this Pi.';
-  setText('wanTalkers', talkerText);
+  setText('wanTalkers', 'Click a chart point to view the devices using bandwidth near that sample.');
   const svg = document.getElementById('wanChart'); clearNode(svg);
   const tooltip = document.getElementById('wanTooltip'); tooltip.hidden = true;
   const points = Array.isArray(wanPayload.points) ? wanPayload.points : [];
@@ -3049,11 +3044,12 @@ function renderWanBandwidth() {
   [['downloadMbps', '#38bdf8', 'Download'], ['uploadMbps', '#a78bfa', 'Upload']].forEach(([key, color, label]) => { const path = document.createElementNS('http://www.w3.org/2000/svg', 'path'); path.setAttribute('d', pathFor(key)); path.setAttribute('fill', 'none'); path.setAttribute('stroke', color); path.setAttribute('stroke-width', '3'); const title = document.createElementNS('http://www.w3.org/2000/svg', 'title'); title.textContent = `${label}: hover any point for values`; path.appendChild(title); svg.appendChild(path); });
   const chartPoints = points.map(point => ({ point, x: left + ((new Date(point.at).getTime() - minTime) / (maxTime - minTime)) * (right - left) }));
   points.forEach(point => { const x = left + ((new Date(point.at).getTime() - minTime) / (maxTime - minTime)) * (right - left); [['downloadMbps', '#38bdf8'], ['uploadMbps', '#a78bfa']].forEach(([key, color]) => { const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle'); circle.setAttribute('cx', x.toFixed(1)); circle.setAttribute('cy', (bottom - (Number(point[key]) / maxValue) * (bottom - top)).toFixed(1)); circle.setAttribute('r', '3'); circle.setAttribute('fill', color); svg.appendChild(circle); }); });
-  svg.onpointermove = (event) => { const rect = svg.getBoundingClientRect(); const chartX = (event.clientX - rect.left) * 1000 / rect.width; const nearest = chartPoints.reduce((best, candidate) => Math.abs(candidate.x - chartX) < Math.abs(best.x - chartX) ? candidate : best); const point = nearest.point; const talkers = Array.isArray(point.talkers) && point.talkers.length ? `\\nTop source: ${point.talkers.map(item => `${item.name ? `${item.name} ` : ''}${item.ip}`).join(', ')}` : ''; tooltip.textContent = `${new Date(point.at).toLocaleString()}\\nDownload ${formatRate(point.downloadMbps)}\\nUpload ${formatRate(point.uploadMbps)}${talkers}`; const wrap = svg.parentElement.getBoundingClientRect(); tooltip.style.left = `${Math.max(8, Math.min(wrap.width - 180, event.clientX - wrap.left + 12))}px`; tooltip.style.top = `${Math.max(8, event.clientY - wrap.top + 12)}px`; tooltip.hidden = false; };
+  svg.onpointermove = (event) => { const rect = svg.getBoundingClientRect(); const chartX = (event.clientX - rect.left) * 1000 / rect.width; const nearest = chartPoints.reduce((best, candidate) => Math.abs(candidate.x - chartX) < Math.abs(best.x - chartX) ? candidate : best); const point = nearest.point; tooltip.textContent = `${new Date(point.at).toLocaleString()}\\nDownload ${formatRate(point.downloadMbps)}\\nUpload ${formatRate(point.uploadMbps)}`; const wrap = svg.parentElement.getBoundingClientRect(); tooltip.style.left = `${Math.max(8, Math.min(wrap.width - 180, event.clientX - wrap.left + 12))}px`; tooltip.style.top = `${Math.max(8, event.clientY - wrap.top + 12)}px`; tooltip.hidden = false; };
   svg.onpointerleave = () => { tooltip.hidden = true; };
   svg.onpointerdown = (event) => { const rect = svg.getBoundingClientRect(); const x = (event.clientX - rect.left) * 1000 / rect.width; const y = (event.clientY - rect.top) * 260 / rect.height; const candidates = points.flatMap(point => { const pointX = left + ((new Date(point.at).getTime() - minTime) / (maxTime - minTime)) * (right - left); return ['downloadMbps', 'uploadMbps'].map(key => ({ point, x: pointX, y: bottom - (Number(point[key]) / maxValue) * (bottom - top) })); }); const nearest = candidates.reduce((best, candidate) => ((candidate.x - x) ** 2 + (candidate.y - y) ** 2) < ((best.x - x) ** 2 + (best.y - y) ** 2) ? candidate : best); if ((nearest.x - x) ** 2 + (nearest.y - y) ** 2 <= 196) { event.preventDefault(); openWanPointDialog(nearest.point); } };
 }
-function openWanPointDialog(point) { const dialog = document.getElementById('wanPointDialog'); const title = document.getElementById('wanPointTitle'); const stats = document.getElementById('wanPointStats'); const devices = document.getElementById('wanPointDevices'); title.textContent = new Date(point.at).toLocaleString(); clearNode(stats); clearNode(devices); [['Download', formatRate(point.downloadMbps)], ['Upload', formatRate(point.uploadMbps)], ['Sample type', point.aggregate ? 'Minute average' : 'Live 5-second sample'], ['Recorded', new Date(point.at).toLocaleTimeString()]].forEach(([label, value]) => { const card = document.createElement('div'); card.className = 'wan-point-stat'; const name = document.createElement('span'); name.textContent = label; const detail = document.createElement('strong'); detail.textContent = value; card.append(name, detail); stats.appendChild(card); }); const talkers = Array.isArray(point.talkers) ? point.talkers : []; if (!talkers.length) { const empty = document.createElement('div'); empty.className = 'empty'; empty.textContent = 'No device attribution was received for this sample.'; devices.appendChild(empty); } else { talkers.forEach(device => { const row = document.createElement('div'); row.className = 'wan-point-device'; const identity = document.createElement('div'); const name = document.createElement('b'); name.textContent = device.name || device.ip || 'Unknown device'; const ip = document.createElement('small'); ip.textContent = device.ip || 'IP unavailable'; identity.append(name, ip); const usage = document.createElement('span'); usage.textContent = formatBytes(device.bytes); row.append(identity, usage); devices.appendChild(row); }); } dialog.showModal(); document.getElementById('wanPointClose').focus(); }
+function renderWanPointDevices(devices, message = '') { const shell = document.getElementById('wanPointDevices'); clearNode(shell); if (!devices.length) { const empty = document.createElement('div'); empty.className = 'empty'; empty.textContent = message || 'No device attribution was received for this sample.'; shell.appendChild(empty); return; } devices.forEach(device => { const row = document.createElement('div'); row.className = 'wan-point-device'; const identity = document.createElement('div'); const name = document.createElement('b'); name.textContent = device.name || device.ip || 'Unknown device'; const ip = document.createElement('small'); ip.textContent = device.ip || 'IP unavailable'; identity.append(name, ip); const usage = document.createElement('span'); usage.textContent = formatBytes(device.bytes); row.append(identity, usage); shell.appendChild(row); }); }
+async function openWanPointDialog(point) { const dialog = document.getElementById('wanPointDialog'); const title = document.getElementById('wanPointTitle'); const stats = document.getElementById('wanPointStats'); title.textContent = new Date(point.at).toLocaleString(); dialog.dataset.sampleAt = point.at; clearNode(stats); [['Download', formatRate(point.downloadMbps)], ['Upload', formatRate(point.uploadMbps)], ['Sample type', point.aggregate ? 'Averaged chart point' : 'Live 5-second sample'], ['Recorded', new Date(point.at).toLocaleTimeString()]].forEach(([label, value]) => { const card = document.createElement('div'); card.className = 'wan-point-stat'; const name = document.createElement('span'); name.textContent = label; const detail = document.createElement('strong'); detail.textContent = value; card.append(name, detail); stats.appendChild(card); }); renderWanPointDevices([], 'Loading device attribution…'); if (!dialog.open) dialog.showModal(); document.getElementById('wanPointClose').focus(); try { const query = new URLSearchParams({ at: point.at, period: wanPeriod }); const response = await fetch(`/api/wan-bandwidth/point?${query}`, { cache: 'no-store' }); if (!response.ok) throw new Error(`HTTP ${response.status}`); const detail = await response.json(); if (dialog.open && dialog.dataset.sampleAt === point.at) renderWanPointDevices(Array.isArray(detail.talkers) ? detail.talkers : []); } catch (_) { if (dialog.open && dialog.dataset.sampleAt === point.at) renderWanPointDevices([], 'Device attribution could not be loaded for this sample.'); } }
 function formatBytes(value) {
   const bytes = Number(value);
   if (!Number.isFinite(bytes) || bytes < 0) return 'unknown usage';
@@ -4272,7 +4268,7 @@ async function fetchDashboardData(reason = 'poll') {
     document.getElementById('threshold').value = stats.thresholdMbps;
     initFilters();
     render();
-    void fetchWanBandwidth(wanPeriod);
+    if (wanPeriod === '5m') void fetchWanBandwidth(wanPeriod);
     scheduleNextRefresh();
     return true;
   } catch (error) {
@@ -4870,6 +4866,28 @@ def _load_smoothed_wan_state(config: AppConfig) -> dict[str, Any]:
     return state
 
 
+def _downsample_wan_points(points: list[dict[str, Any]], max_points: int = 600) -> list[dict[str, Any]]:
+    """Compact long WAN histories for fast API responses and browser rendering.
+
+    The chart needs a representative trend, not tens of thousands of SVG nodes.
+    Keep the final timestamp in each bucket so point-detail lookups remain exact.
+    """
+    if max_points < 1 or len(points) <= max_points:
+        return points
+    bucket_size = (len(points) + max_points - 1) // max_points
+    compacted: list[dict[str, Any]] = []
+    for start in range(0, len(points), bucket_size):
+        bucket = points[start:start + bucket_size]
+        final = dict(bucket[-1])
+        for key in ("downloadMbps", "uploadMbps"):
+            values = [float(point[key]) for point in bucket if isinstance(point.get(key), (int, float))]
+            if values:
+                final[key] = sum(values) / len(values)
+        final["aggregate"] = True
+        compacted.append(final)
+    return compacted
+
+
 def serve_interactive_dashboard(
     output_path: str,
     host: str,
@@ -5027,28 +5045,38 @@ def serve_interactive_dashboard(
                 period = parse_qs(urlparse(self.path).query).get("period", ["5m"])[0]
                 seconds = period_map.get(period, 300)
                 current = _load_smoothed_wan_state(config)
-                points = load_wan_bandwidth_history(config, seconds, datetime.now().astimezone())
-                attribution_window = {"5m": 15, "1h": 60, "24h": 300, "7d": 900}.get(period, 15)
-                sample_times = [str(point.get("at") or "") for point in points]
-                if points:
-                    event_window_start = datetime.fromisoformat(sample_times[0]) - timedelta(seconds=attribution_window)
-                    event_window_end = datetime.fromisoformat(sample_times[-1]) + timedelta(seconds=attribution_window)
-                    events = load_wan_talkers(config, event_window_start, event_window_end, compact=(seconds > 3600))
-                else:
-                    events = []
-                talkers = wan_talkers_from_events(events, sample_times, attribution_window)
-                if not talkers:
-                    talkers = wan_talkers_for_samples(config.fortigate_syslog_log_file, sample_times, attribution_window)
-                for point in points:
-                    point["talkers"] = talkers.get(str(point.get("at") or ""), [])
-                valid = [point for point in points if isinstance(point.get("downloadMbps"), (int, float)) and isinstance(point.get("uploadMbps"), (int, float))]
-                payload = {"period": period, "current": current, "points": points, "stats": {
+                history_points = load_wan_bandwidth_history(config, seconds, datetime.now().astimezone())
+                valid = [point for point in history_points if isinstance(point.get("downloadMbps"), (int, float)) and isinstance(point.get("uploadMbps"), (int, float))]
+                payload = {"period": period, "current": current, "points": _downsample_wan_points(history_points), "stats": {
                     "peakDownloadMbps": max((point["downloadMbps"] for point in valid), default=None),
                     "peakUploadMbps": max((point["uploadMbps"] for point in valid), default=None),
                     "averageDownloadMbps": (sum(point["downloadMbps"] for point in valid) / len(valid)) if valid else None,
                     "averageUploadMbps": (sum(point["uploadMbps"] for point in valid) / len(valid)) if valid else None,
                 }}
                 self._send_json(HTTPStatus.OK, payload, no_store=True)
+                return
+            if request_path == "/api/wan-bandwidth/point":
+                period_map = {"5m": 300, "1h": 3600, "24h": 86400, "7d": 604800}
+                query = parse_qs(urlparse(self.path).query)
+                period = query.get("period", ["5m"])[0]
+                sample_at = query.get("at", [""])[0]
+                try:
+                    sample_time = datetime.fromisoformat(sample_at)
+                except ValueError:
+                    self._send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "message": "Invalid sample time"}, no_store=True)
+                    return
+                seconds = period_map.get(period, 300)
+                attribution_window = {"5m": 15, "1h": 60, "24h": 300, "7d": 900}.get(period, 15)
+                events = load_wan_talkers(
+                    config,
+                    sample_time - timedelta(seconds=attribution_window),
+                    sample_time + timedelta(seconds=attribution_window),
+                    compact=(seconds > 3600),
+                )
+                talkers = wan_talkers_from_events(events, [sample_at], attribution_window).get(sample_at, [])
+                if not talkers:
+                    talkers = wan_talkers_for_samples(config.fortigate_syslog_log_file, [sample_at], attribution_window).get(sample_at, [])
+                self._send_json(HTTPStatus.OK, {"at": sample_at, "talkers": talkers}, no_store=True)
                 return
             if request_path == "/api/wan-bandwidth/current":
                 self._send_json(HTTPStatus.OK, _load_smoothed_wan_state(config), no_store=True)

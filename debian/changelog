@@ -1,3 +1,10 @@
+pi-probe-discord (1.2.16-1) unstable; urgency=medium
+
+  * Make WAN range changes fast by compacting chart history and loading
+    device attribution only for the selected point.
+
+ -- Codex Builder <noreply@example.invalid>  Fri, 30 Oct 2026 16:55:00 +1030
+
 pi-probe-discord (1.2.15-1) unstable; urgency=medium
 
   * Match nearby FortiGate traffic records across WAN history views.
