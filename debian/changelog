@@ -1,3 +1,10 @@
+pi-probe-discord (1.2.20-1) unstable; urgency=medium
+
+  * Retain only high-signal FortiGate syslog records outside compact WAN
+    attribution storage.
+
+ -- Codex Builder <noreply@example.invalid>  Fri, 30 Oct 2026 17:45:00 +1030
+
 pi-probe-discord (1.2.19-1) unstable; urgency=medium
 
   * Keep accepted application-control observations out of recent events.

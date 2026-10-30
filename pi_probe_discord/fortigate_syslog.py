@@ -76,10 +76,14 @@ def run_fortigate_syslog_receiver(config: object) -> int:
             message = payload.decode("utf-8", errors="replace").replace("\x00", " ").replace("\n", " ").strip()
             if message:
                 received_at = datetime.now().astimezone()
-                with log_file.open("a", encoding="utf-8") as output:
-                    output.write(f"{received_at.isoformat()} source={address[0]} {message}\n")
                 dashboard_event = fortigate_dashboard_event(message)
                 if dashboard_event is not None:
+                    # Retain enforcement and operational records for the
+                    # security summary. Accepted traffic is persisted as
+                    # compact WAN attribution below, not copied endlessly to
+                    # a text log.
+                    with log_file.open("a", encoding="utf-8") as output:
+                        output.write(f"{received_at.isoformat()} source={address[0]} {message}\n")
                     save_fortigate_event(
                         config,
                         received_at,
