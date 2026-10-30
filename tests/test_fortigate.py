@@ -19,9 +19,11 @@ class FortigateTests(unittest.TestCase):
 
     def test_dashboard_event_excludes_allowed_traffic_and_coalesces_security_context(self) -> None:
         allowed = 'type="traffic" subtype="forward" action="accept" srcip=192.168.1.20 dstintf="wan1"'
+        allowed_application = 'type="utm" subtype="app-ctrl" action="pass" srcip=192.168.1.20 app="SSL"'
         denied = 'type="traffic" subtype="forward" action="deny" srcip=192.168.1.20 dstip=8.8.8.8 policyid=12'
 
         self.assertIsNone(fortigate_dashboard_event(allowed))
+        self.assertIsNone(fortigate_dashboard_event(allowed_application))
         event = fortigate_dashboard_event(denied)
         self.assertIsNotNone(event)
         assert event is not None

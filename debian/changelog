@@ -1,3 +1,9 @@
+pi-probe-discord (1.2.19-1) unstable; urgency=medium
+
+  * Keep accepted application-control observations out of recent events.
+
+ -- Codex Builder <noreply@example.invalid>  Fri, 30 Oct 2026 17:35:00 +1030
+
 pi-probe-discord (1.2.18-1) unstable; urgency=medium
 
   * Further coalesce repetitive FortiGate deny events in the dashboard feed.

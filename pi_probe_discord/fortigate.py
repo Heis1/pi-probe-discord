@@ -64,6 +64,8 @@ def fortigate_dashboard_event(line: str) -> dict[str, str] | None:
     """
     fields = _forti_fields(line)
     category = classify_fortigate_event(line)
+    if category in {"application_control", "dns_bypass_observed"}:
+        return None
     combined = " ".join(fields.get(key, "") for key in ("type", "subtype", "eventtype", "logdesc", "msg", "action", "status")).lower()
     if category is None:
         if "link" in combined and any(word in combined for word in ("down", "up", "change", "fail")):
