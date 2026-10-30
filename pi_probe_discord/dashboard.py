@@ -1748,19 +1748,6 @@ body.theme-clean select, body.theme-clean input { background: rgba(255,255,255,.
 .wan-chart-wrap { position:relative; }
 .wan-chart { width:100%; height:clamp(260px,42vh,560px); display:block; border:1px solid var(--border); border-radius:14px; background:var(--panel-2); }
 .wan-tooltip { position:absolute; z-index:4; max-width:min(360px,calc(100% - 16px)); padding:9px 11px; border:1px solid var(--border); border-radius:9px; background:rgba(10,16,30,.96); color:#e2e8f0; font-size:12px; line-height:1.45; white-space:pre-line; box-shadow:0 8px 24px rgba(0,0,0,.28); pointer-events:none; }
-.wan-detail-backdrop { position:fixed; inset:0; z-index:50; display:grid; place-items:center; padding:20px; background:rgba(2,6,23,.72); backdrop-filter:blur(5px); }
-.wan-detail { width:min(680px,100%); max-height:min(82vh,760px); overflow:auto; padding:22px; border:1px solid rgba(56,189,248,.35); border-radius:20px; background:var(--panel); box-shadow:0 24px 70px rgba(0,0,0,.48); }
-.wan-detail-head { display:flex; justify-content:space-between; gap:16px; align-items:flex-start; }
-.wan-detail-kicker { color:var(--accent); font-size:11px; font-weight:900; text-transform:uppercase; letter-spacing:.1em; }
-.wan-detail-title { margin:5px 0 0; font-size:23px; letter-spacing:-.03em; }
-.wan-detail-close { border:1px solid var(--border); border-radius:9px; padding:7px 10px; color:var(--text); background:var(--panel-2); cursor:pointer; font-weight:800; }
-.wan-detail-stats { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin:18px 0; }
-.wan-detail-stat { padding:14px; border:1px solid var(--border); border-radius:13px; background:var(--panel-2); }
-.wan-detail-stat span { display:block; color:var(--muted); font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:.07em; }
-.wan-detail-stat strong { display:block; margin-top:6px; font-size:22px; letter-spacing:-.04em; }
-.wan-device-list { display:grid; gap:8px; margin-top:10px; }
-.wan-device-row { display:flex; justify-content:space-between; gap:16px; padding:12px; border:1px solid var(--border); border-radius:11px; background:var(--panel-2); }
-.wan-device-row b { display:block; font-size:14px; }.wan-device-row small { display:block; margin-top:3px; color:var(--muted); }.wan-device-row span { white-space:nowrap; color:var(--accent); font-weight:800; }
 .wan-controls { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
 .wan-period.active { background:rgba(56,189,248,.24); border-color:var(--accent); }
 .security-grid { display:grid; grid-template-columns:1.3fr repeat(3,minmax(120px,.55fr)); gap:12px; }
@@ -2151,7 +2138,6 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
   .panel-stamp { align-self: flex-start; }
   .keepalive-grid { grid-template-columns: 1fr; }
   .wan-grid { grid-template-columns:repeat(2,minmax(120px,1fr)); }
-  .wan-detail-stats { grid-template-columns:1fr; }
   .action-inline input { min-width: 0; }
   .security-action { align-items: flex-start; flex-direction: column; }
   .security-action span { text-align: left; }
@@ -2283,13 +2269,6 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
     <div class="wan-chart-wrap"><svg id="wanChart" class="wan-chart" viewBox="0 0 1000 260" preserveAspectRatio="none" role="img" aria-label="WAN download and upload bandwidth graph"></svg><div id="wanTooltip" class="wan-tooltip" hidden></div></div>
     <div id="wanTalkers" class="helper-text" aria-live="polite"></div>
   </section>
-
-  <div id="wanDetailBackdrop" class="wan-detail-backdrop" hidden role="presentation">
-    <section class="wan-detail" role="dialog" aria-modal="true" aria-labelledby="wanDetailTitle">
-      <div class="wan-detail-head"><div><div class="wan-detail-kicker">Bandwidth sample</div><h2 id="wanDetailTitle" class="wan-detail-title"></h2></div><button id="wanDetailClose" class="wan-detail-close" type="button" aria-label="Close sample details">Close</button></div>
-      <div id="wanDetailStats" class="wan-detail-stats"></div><div class="wan-detail-kicker">Devices using bandwidth</div><div id="wanDetailDevices" class="wan-device-list"></div>
-    </section>
-  </div>
 
   <section class="panel keepalive-section">
     <div class="panel-head"><div><h2>FortiGate 60F</h2><p>Primary firewall health via read-only SNMPv3.</p></div><div class="panel-stamp" id="fortigateFreshness"></div></div>
@@ -3065,17 +3044,7 @@ function renderWanBandwidth() {
   points.forEach(point => { const x = left + ((new Date(point.at).getTime() - minTime) / (maxTime - minTime)) * (right - left); [['downloadMbps', '#38bdf8'], ['uploadMbps', '#a78bfa']].forEach(([key, color]) => { const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle'); circle.setAttribute('cx', x.toFixed(1)); circle.setAttribute('cy', (bottom - (Number(point[key]) / maxValue) * (bottom - top)).toFixed(1)); circle.setAttribute('r', '3'); circle.setAttribute('fill', color); svg.appendChild(circle); }); });
   svg.onpointermove = (event) => { const rect = svg.getBoundingClientRect(); const chartX = (event.clientX - rect.left) * 1000 / rect.width; const nearest = chartPoints.reduce((best, candidate) => Math.abs(candidate.x - chartX) < Math.abs(best.x - chartX) ? candidate : best); const point = nearest.point; const talkers = Array.isArray(point.talkers) && point.talkers.length ? `\\nTop source: ${point.talkers.map(item => `${item.name ? `${item.name} ` : ''}${item.ip}`).join(', ')}` : ''; tooltip.textContent = `${new Date(point.at).toLocaleString()}\\nDownload ${formatRate(point.downloadMbps)}\\nUpload ${formatRate(point.uploadMbps)}${talkers}`; const wrap = svg.parentElement.getBoundingClientRect(); tooltip.style.left = `${Math.max(8, Math.min(wrap.width - 180, event.clientX - wrap.left + 12))}px`; tooltip.style.top = `${Math.max(8, event.clientY - wrap.top + 12)}px`; tooltip.hidden = false; };
   svg.onpointerleave = () => { tooltip.hidden = true; };
-  svg.onclick = (event) => { const rect = svg.getBoundingClientRect(); const chartX = (event.clientX - rect.left) * 1000 / rect.width; const point = chartPoints.reduce((best, candidate) => Math.abs(candidate.x - chartX) < Math.abs(best.x - chartX) ? candidate : best).point; openWanPointDetail(point); };
 }
-function openWanPointDetail(point) {
-  const backdrop = document.getElementById('wanDetailBackdrop'); const title = document.getElementById('wanDetailTitle'); const stats = document.getElementById('wanDetailStats'); const devices = document.getElementById('wanDetailDevices');
-  title.textContent = new Date(point.at).toLocaleString(); clearNode(stats); clearNode(devices);
-  [['Download', formatRate(point.downloadMbps)], ['Upload', formatRate(point.uploadMbps)], ['Sample type', point.aggregate ? 'Minute average' : 'Live 5-second sample'], ['Recorded', new Date(point.at).toLocaleTimeString()]].forEach(([label, value]) => { const card = document.createElement('div'); card.className = 'wan-detail-stat'; const labelNode = document.createElement('span'); labelNode.textContent = label; const valueNode = document.createElement('strong'); valueNode.textContent = value; card.append(labelNode, valueNode); stats.appendChild(card); });
-  const talkers = Array.isArray(point.talkers) ? point.talkers : [];
-  if (!talkers.length) { const empty = document.createElement('div'); empty.className = 'empty'; empty.textContent = 'No device attribution was received for this sample.'; devices.appendChild(empty); } else { talkers.forEach((device) => { const row = document.createElement('div'); row.className = 'wan-device-row'; const identity = document.createElement('div'); const name = document.createElement('b'); name.textContent = device.name || device.ip || 'Unknown device'; const ip = document.createElement('small'); ip.textContent = device.ip || 'IP unavailable'; identity.append(name, ip); const usage = document.createElement('span'); usage.textContent = formatBytes(device.bytes); row.append(identity, usage); devices.appendChild(row); }); }
-  backdrop.hidden = false; document.getElementById('wanDetailClose').focus();
-}
-function closeWanPointDetail() { document.getElementById('wanDetailBackdrop').hidden = true; }
 function formatBytes(value) {
   const bytes = Number(value);
   if (!Number.isFinite(bytes) || bytes < 0) return 'unknown usage';
@@ -4306,9 +4275,6 @@ async function fetchDashboardData(reason = 'poll') {
 }
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (getThemeChoice() === 'auto') applyTheme('auto'); });
 document.querySelectorAll('[data-wan-period]').forEach(button => button.addEventListener('click', () => { document.querySelectorAll('[data-wan-period]').forEach(item => item.classList.toggle('active', item === button)); void fetchWanBandwidth(button.dataset.wanPeriod || '5m'); }));
-document.getElementById('wanDetailClose').addEventListener('click', closeWanPointDetail);
-document.getElementById('wanDetailBackdrop').addEventListener('click', event => { if (event.target === event.currentTarget) closeWanPointDetail(); });
-document.addEventListener('keydown', event => { if (event.key === 'Escape') closeWanPointDetail(); });
 window.addEventListener('resize', () => render());
 document.getElementById('theme').value = getThemeChoice();
 document.getElementById('theme').addEventListener('change', event => applyTheme(event.target.value));
