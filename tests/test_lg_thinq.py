@@ -35,7 +35,7 @@ class LGThinQTests(unittest.TestCase):
             )
             responses = iter([
                 _Response([{"deviceId": "fridge-1", "deviceInfo": {"deviceType": "DEVICE_REFRIGERATOR", "alias": "Kitchen fridge", "modelName": "GF-VN600BM"}}]),
-                _Response({"doorStatus": [{"locationName": "MAIN", "doorState": "CLOSE"}], "temperature": [{"locationName": "FRIDGE", "temperature": "3"}], "refrigeration": {"expressMode": False, "freshAirFilter": "AUTO"}}),
+                _Response({"doorStatus": [{"locationName": "MAIN", "doorState": "CLOSE"}], "temperature": [{"locationName": "FRIDGE", "targetTemperature": 3, "unit": "C"}], "refrigeration": {"expressMode": False, "freshAirFilter": "AUTO"}}),
             ])
             with patch.dict(os.environ, {"PI_PROBE_LG_THINQ_PAT": "pat-secret"}, clear=False), patch("pi_probe_discord.lg_thinq.requests.get", side_effect=lambda *args, **kwargs: next(responses)):
                 snapshot = collect_lg_thinq_snapshot(config)
@@ -44,5 +44,5 @@ class LGThinQTests(unittest.TestCase):
             self.assertEqual(snapshot["status"]["doors"], ["MAIN: Close"])
             persisted = (root / "lg-thinq" / "latest.json").read_text(encoding="utf-8")
             self.assertNotIn("pat-secret", persisted)
-            self.assertEqual(load_lg_thinq_state(config)["status"]["temperatures"], ["FRIDGE: 3"])
+            self.assertEqual(load_lg_thinq_state(config)["status"]["temperatures"], ["FRIDGE: 3 °C"])
 

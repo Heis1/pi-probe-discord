@@ -375,7 +375,7 @@ Start `pi-probe-discord-fortigate-syslog.service`. In FortiGate **Log & Report â
 
 ### LG ThinQ refrigerator
 
-Pi Probe can display a configured LG ThinQ refrigerator's current door state, reported compartment temperatures, Express Mode, and fresh-air-filter status. It uses LG's official ThinQ Connect cloud API; the dashboard contains the filtered appliance status only, never the personal access token (PAT).
+Pi Probe can display a configured LG ThinQ refrigerator's current door state, reported compartment temperature setpoints, Express Mode, and (where supplied by the appliance) fresh-air-filter status. It uses LG's official ThinQ Connect cloud API; the dashboard contains the filtered appliance status only, never the personal access token (PAT).
 
 Create a PAT at `https://connect-pat.lgthinq.com` for the same LG account used by the fridge. Grant device and status read permissions. Then enable the collector in `/etc/pi-probe-discord/pihole-update-discord.env`:
 

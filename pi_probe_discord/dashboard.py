@@ -3045,10 +3045,10 @@ function renderLGThinQ() {
   const values = [
     ['Appliance', device.name || 'LG refrigerator'],
     ['Door', Array.isArray(status.doors) && status.doors.length ? status.doors.join(' · ') : 'Unavailable'],
-    ['Temperature', Array.isArray(status.temperatures) && status.temperatures.length ? status.temperatures.join(' · ') : 'Unavailable'],
+    ['Set temperature', Array.isArray(status.temperatures) && status.temperatures.length ? status.temperatures.join(' · ') : 'Unavailable'],
     ['Express mode', status.expressMode === true ? 'On' : status.expressMode === false ? 'Off' : 'Unavailable'],
-    ['Fresh air filter', status.freshAirFilter || 'Unavailable'],
   ];
+  if (status.freshAirFilter) values.push(['Fresh air filter', status.freshAirFilter]);
   values.forEach(([label, value]) => {
     const card = document.createElement('div'); card.className = `keepalive-card ${lgThinQ.available ? 'up' : 'down'}`;
     const title = document.createElement('div'); title.className = 'device-name'; title.textContent = label;

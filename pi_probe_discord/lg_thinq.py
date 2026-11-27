@@ -107,10 +107,14 @@ def _read_status(status: Any) -> dict[str, Any]:
     temperatures: list[str] = []
     for row in data.get("temperature", []) if isinstance(data.get("temperature"), list) else []:
         if isinstance(row, dict):
-            temperature = _value(row, "temperature", "currentTemperature", "temp")
+            # This refrigerator reports its configured compartment setpoint,
+            # rather than a live sensor reading.
+            temperature = _value(row, "targetTemperature", "targetTemperatureC", "temperature", "currentTemperature", "temp")
             location = _value(row, "locationName", "location") or "Compartment"
             if temperature:
-                temperatures.append(f"{location}: {temperature}")
+                unit = _value(row, "unit")
+                suffix = f" °{unit.upper()}" if unit else ""
+                temperatures.append(f"{location}: {temperature}{suffix}")
     refrigeration = data.get("refrigeration") if isinstance(data.get("refrigeration"), dict) else {}
     return {
         "doors": doors,

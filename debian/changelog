@@ -1,3 +1,10 @@
+pi-probe-discord (1.2.24-1) unstable; urgency=medium
+
+  * Display LG refrigerator temperature setpoints with units and omit
+    unsupported filter telemetry.
+
+ -- Codex Builder <noreply@example.invalid>  Thu, 27 Nov 2026 18:25:00 +1030
+
 pi-probe-discord (1.2.23-1) unstable; urgency=medium
 
   * Add a read-only LG ThinQ refrigerator dashboard collector.
