@@ -382,7 +382,7 @@ Create a PAT at `https://connect-pat.lgthinq.com` for the same LG account used b
 ```text
 PI_PROBE_LG_THINQ_ENABLED="true"
 PI_PROBE_LG_THINQ_COUNTRY="AU"
-PI_PROBE_LG_THINQ_REGION="aic"
+PI_PROBE_LG_THINQ_REGION="kic"
 PI_PROBE_LG_THINQ_DEVICE_MODEL="GF-VN600BM"
 ```
 

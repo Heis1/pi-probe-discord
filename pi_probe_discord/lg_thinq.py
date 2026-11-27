@@ -48,7 +48,7 @@ def _headers(config: object, pat: str) -> dict[str, str]:
 
 
 def _request(config: object, pat: str, endpoint: str) -> Any:
-    region = str(getattr(config, "lg_thinq_region", "aic")).lower()
+    region = str(getattr(config, "lg_thinq_region", "kic")).lower()
     url = f"https://api-{region}.lgthinq.com/{endpoint.lstrip('/')}"
     try:
         response = requests.get(url, headers=_headers(config, pat), timeout=int(getattr(config, "lg_thinq_timeout_seconds", 10)))

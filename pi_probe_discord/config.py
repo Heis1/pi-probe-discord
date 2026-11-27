@@ -347,7 +347,7 @@ def load_config(base_dir: Path | None = None, require_webhook: bool = True) -> A
         wan_bandwidth_aggregate_retention_days=max(1, int(os.environ.get("PI_PROBE_WAN_BANDWIDTH_AGGREGATE_RETENTION_DAYS", "7"))),
         lg_thinq_enabled=_env_bool("PI_PROBE_LG_THINQ_ENABLED", False),
         lg_thinq_country=os.environ.get("PI_PROBE_LG_THINQ_COUNTRY", "AU").strip().upper() or "AU",
-        lg_thinq_region=os.environ.get("PI_PROBE_LG_THINQ_REGION", "aic").strip().lower() or "aic",
+        lg_thinq_region=os.environ.get("PI_PROBE_LG_THINQ_REGION", "kic").strip().lower() or "kic",
         lg_thinq_device_id=os.environ.get("PI_PROBE_LG_THINQ_DEVICE_ID", "").strip(),
         lg_thinq_device_model=os.environ.get("PI_PROBE_LG_THINQ_DEVICE_MODEL", "").strip(),
         lg_thinq_secret_file=os.environ.get("PI_PROBE_LG_THINQ_SECRET_FILE", str(DEFAULT_LG_THINQ_SECRET_FILE)),

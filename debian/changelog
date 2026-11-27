@@ -1,6 +1,7 @@
-pi-probe-discord (1.2.21-1) unstable; urgency=medium
+pi-probe-discord (1.2.22-1) unstable; urgency=medium
 
   * Add a read-only LG ThinQ refrigerator dashboard collector.
+  * Route Australian ThinQ accounts to LG's KIC API region.
 
  -- Codex Builder <noreply@example.invalid>  Thu, 27 Nov 2026 18:15:00 +1030
 

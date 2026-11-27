@@ -113,7 +113,7 @@ class AppConfig:
     wan_bandwidth_aggregate_retention_days: int = 7
     lg_thinq_enabled: bool = False
     lg_thinq_country: str = "AU"
-    lg_thinq_region: str = "aic"
+    lg_thinq_region: str = "kic"
     lg_thinq_device_id: str = ""
     lg_thinq_device_model: str = ""
     lg_thinq_secret_file: str = ""
