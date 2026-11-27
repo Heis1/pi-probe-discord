@@ -1,3 +1,9 @@
+pi-probe-discord (1.2.26-1) unstable; urgency=medium
+
+  * Restore the enabled LG ThinQ polling timer after package upgrades.
+
+ -- Codex Builder <noreply@example.invalid>  Thu, 27 Nov 2026 21:10:00 +1030
+
 pi-probe-discord (1.2.25-1) unstable; urgency=medium
 
   * Remove repeated LG internal model identifiers from healthy status cards.
