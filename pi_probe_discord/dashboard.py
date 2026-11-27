@@ -3053,8 +3053,12 @@ function renderLGThinQ() {
     const card = document.createElement('div'); card.className = `keepalive-card ${lgThinQ.available ? 'up' : 'down'}`;
     const title = document.createElement('div'); title.className = 'device-name'; title.textContent = label;
     const current = document.createElement('div'); current.className = 'keepalive-status'; current.textContent = value;
-    const meta = document.createElement('div'); meta.className = 'keepalive-meta'; meta.textContent = lgThinQ.available ? (device.model || 'LG ThinQ') : (lgThinQ.error || 'ThinQ API unavailable');
-    card.append(title, current, meta); cards.appendChild(card);
+    card.append(title, current);
+    if (!lgThinQ.available) {
+      const meta = document.createElement('div'); meta.className = 'keepalive-meta';
+      meta.textContent = lgThinQ.error || 'ThinQ API unavailable'; card.appendChild(meta);
+    }
+    cards.appendChild(card);
   });
 }
 function renderFortiWiFi30E() {

@@ -1,3 +1,9 @@
+pi-probe-discord (1.2.25-1) unstable; urgency=medium
+
+  * Remove repeated LG internal model identifiers from healthy status cards.
+
+ -- Codex Builder <noreply@example.invalid>  Thu, 27 Nov 2026 18:32:00 +1030
+
 pi-probe-discord (1.2.24-1) unstable; urgency=medium
 
   * Display LG refrigerator temperature setpoints with units and omit
