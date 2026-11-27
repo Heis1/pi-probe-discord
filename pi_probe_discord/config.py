@@ -40,6 +40,8 @@ DEFAULT_FORTIGATE_SECRET_FILE = DEFAULT_CONFIG_DIR / "fortigate.env"
 DEFAULT_FORTIGATE_STATE_JSON = DEFAULT_DATA_DIR / "fortigate" / "latest.json"
 DEFAULT_FORTIGATE_SYSLOG_FILE = DEFAULT_DATA_DIR / "fortigate-syslog" / "fortigate.log"
 DEFAULT_WAN_BANDWIDTH_STATE_JSON = DEFAULT_DATA_DIR / "wan-bandwidth" / "latest.json"
+DEFAULT_LG_THINQ_SECRET_FILE = DEFAULT_CONFIG_DIR / "lg-thinq.env"
+DEFAULT_LG_THINQ_STATE_JSON = DEFAULT_DATA_DIR / "lg-thinq" / "latest.json"
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -148,6 +150,28 @@ def load_fortigate_secrets(config: AppConfig) -> dict[str, str]:
     if not token:
         raise RuntimeError(f"FortiGate secret file must define PI_PROBE_FORTIGATE_API_TOKEN: {secret_path}")
     return {"api_token": token}
+
+
+def load_lg_thinq_secrets(config: AppConfig) -> dict[str, str]:
+    """Load the revocable LG ThinQ PAT without exposing it to dashboard JSON."""
+    if not config.lg_thinq_enabled:
+        return {}
+    token = os.environ.get("PI_PROBE_LG_THINQ_PAT", "").strip()
+    if token:
+        return {"pat": token}
+    secret_path = Path(config.lg_thinq_secret_file)
+    validate_router_webui_secret_file(secret_path)
+    for raw_line in secret_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        if key.strip().upper() == "PI_PROBE_LG_THINQ_PAT":
+            token = value.strip().strip('"').strip("'")
+            break
+    if not token:
+        raise RuntimeError(f"LG ThinQ secret file must define PI_PROBE_LG_THINQ_PAT: {secret_path}")
+    return {"pat": token}
 
 
 def validate_webhook_url(webhook_url: str) -> str:
@@ -321,4 +345,12 @@ def load_config(base_dir: Path | None = None, require_webhook: bool = True) -> A
         wan_bandwidth_interval_seconds=max(5, int(os.environ.get("PI_PROBE_WAN_BANDWIDTH_INTERVAL_SECONDS", "5"))),
         wan_bandwidth_raw_retention_hours=max(1, int(os.environ.get("PI_PROBE_WAN_BANDWIDTH_RAW_RETENTION_HOURS", "24"))),
         wan_bandwidth_aggregate_retention_days=max(1, int(os.environ.get("PI_PROBE_WAN_BANDWIDTH_AGGREGATE_RETENTION_DAYS", "7"))),
+        lg_thinq_enabled=_env_bool("PI_PROBE_LG_THINQ_ENABLED", False),
+        lg_thinq_country=os.environ.get("PI_PROBE_LG_THINQ_COUNTRY", "AU").strip().upper() or "AU",
+        lg_thinq_region=os.environ.get("PI_PROBE_LG_THINQ_REGION", "aic").strip().lower() or "aic",
+        lg_thinq_device_id=os.environ.get("PI_PROBE_LG_THINQ_DEVICE_ID", "").strip(),
+        lg_thinq_device_model=os.environ.get("PI_PROBE_LG_THINQ_DEVICE_MODEL", "").strip(),
+        lg_thinq_secret_file=os.environ.get("PI_PROBE_LG_THINQ_SECRET_FILE", str(DEFAULT_LG_THINQ_SECRET_FILE)),
+        lg_thinq_state_json=os.environ.get("PI_PROBE_LG_THINQ_STATE_JSON", str(DEFAULT_LG_THINQ_STATE_JSON)),
+        lg_thinq_timeout_seconds=max(1, int(os.environ.get("PI_PROBE_LG_THINQ_TIMEOUT_SECONDS", "10"))),
     )

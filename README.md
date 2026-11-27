@@ -373,6 +373,30 @@ PI_PROBE_FIREWALL_LOG_PATHS="/var/lib/pi-probe-discord/fortigate-syslog/fortigat
 
 Start `pi-probe-discord-fortigate-syslog.service`. In FortiGate **Log & Report → Log Settings**, enable **Send logs to syslog**, set the Pi's address and port `5514`, and use UDP. Start with traffic, UTM, and event logs; denied traffic is useful context and allowed traffic can be intentionally noisy.
 
+### LG ThinQ refrigerator
+
+Pi Probe can display a configured LG ThinQ refrigerator's current door state, reported compartment temperatures, Express Mode, and fresh-air-filter status. It uses LG's official ThinQ Connect cloud API; the dashboard contains the filtered appliance status only, never the personal access token (PAT).
+
+Create a PAT at `https://connect-pat.lgthinq.com` for the same LG account used by the fridge. Grant device and status read permissions. Then enable the collector in `/etc/pi-probe-discord/pihole-update-discord.env`:
+
+```text
+PI_PROBE_LG_THINQ_ENABLED="true"
+PI_PROBE_LG_THINQ_COUNTRY="AU"
+PI_PROBE_LG_THINQ_REGION="aic"
+PI_PROBE_LG_THINQ_DEVICE_MODEL="GF-VN600BM"
+```
+
+Install the PAT in a separate protected file:
+
+```bash
+sudo install -o root -g root -m 600 /usr/share/pi-probe-discord/lg-thinq.env.example /etc/pi-probe-discord/lg-thinq.env
+sudoedit /etc/pi-probe-discord/lg-thinq.env
+sudo systemctl enable --now pi-probe-discord-lg-thinq.timer
+sudo pi-probe-discord lg-thinq
+```
+
+The collector is deliberately read-only. Keep temperature and mode changes in LG ThinQ until controls have been explicitly designed and reviewed for the dashboard.
+
 ## Firewall examples
 
 LAN-only example:

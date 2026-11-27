@@ -111,6 +111,14 @@ class AppConfig:
     wan_bandwidth_interval_seconds: int = 5
     wan_bandwidth_raw_retention_hours: int = 24
     wan_bandwidth_aggregate_retention_days: int = 7
+    lg_thinq_enabled: bool = False
+    lg_thinq_country: str = "AU"
+    lg_thinq_region: str = "aic"
+    lg_thinq_device_id: str = ""
+    lg_thinq_device_model: str = ""
+    lg_thinq_secret_file: str = ""
+    lg_thinq_state_json: str = "/var/lib/pi-probe-discord/lg-thinq/latest.json"
+    lg_thinq_timeout_seconds: int = 10
     discord_reporting_enabled: bool = True
     discord_report_modes: list[str] = field(default_factory=lambda: ["full", "speedtest-only", "update-only", "firewall"])
 

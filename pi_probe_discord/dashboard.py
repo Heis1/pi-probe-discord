@@ -1442,6 +1442,8 @@ def _build_dashboard_payload(
     diagnosis_updated_at = _latest_timestamp([latest_event_at, inventory_scanned_at, latest_pihole_at, latest_speed_at]) or generated_at
     keepalive = load_keepalive_state(config) if config is not None else {"enabled": False, "checkedAt": "", "devices": []}
     fortigate = load_fortigate_state(config) if config is not None else {"enabled": False, "checkedAt": "", "available": False, "system": {}, "metrics": {}}
+    from .lg_thinq import load_lg_thinq_state
+    lg_thinq = load_lg_thinq_state(config) if config is not None else {"enabled": False, "checkedAt": "", "available": False, "device": {}, "status": {}}
     wan_bandwidth = _load_smoothed_wan_state(config) if config is not None else {"enabled": False, "available": True, "status": "Not configured", "downloadMbps": 0, "uploadMbps": 0}
 
     metadata = {
@@ -1461,6 +1463,7 @@ def _build_dashboard_payload(
             "diagnosis": diagnosis_updated_at.isoformat(),
             "keepalive": str(keepalive.get("checkedAt") or ""),
             "fortigate": str(fortigate.get("checkedAt") or ""),
+            "lgThinQ": str(lg_thinq.get("checkedAt") or ""),
         },
     }
     diagnosis = build_network_diagnosis(
@@ -1497,6 +1500,7 @@ def _build_dashboard_payload(
         "firewall": firewall_data,
         "keepalive": keepalive,
         "fortigate": fortigate,
+        "lgThinQ": lg_thinq,
         "wanBandwidth": wan_bandwidth,
         "inventory": {
             "scannedAt": nmap_meta.get("scannedAt", ""),
@@ -2308,6 +2312,12 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
   </section>
 
   <section class="panel keepalive-section">
+    <div class="panel-head"><div><h2>LG Fridge</h2><p>ThinQ cloud status. Controls remain in the ThinQ app.</p></div><div class="panel-stamp" id="lgThinQFreshness"></div></div>
+    <div id="lgThinQCards" class="keepalive-grid"></div>
+    <div id="lgThinQEmpty" class="empty" style="display:none">LG ThinQ fridge reporting is not configured.</div>
+  </section>
+
+  <section class="panel keepalive-section">
     <div class="panel-head"><div><h2>FortiWiFi 30E</h2><p>Secondary wireless and management device health via read-only SNMPv3.</p></div><div class="panel-stamp" id="forti30eFreshness"></div></div>
     <div id="forti30eCards" class="keepalive-grid"></div>
     <div id="forti30eEmpty" class="empty" style="display:none">FortiWiFi 30E SNMP monitoring is not configured.</div>
@@ -2396,6 +2406,7 @@ let deviceRows = [];
 let firewall = {};
 let keepalive = {};
 let fortigate = {};
+let lgThinQ = {};
 let wanBandwidth = {};
 let wanPayload = { points: [], current: {}, stats: {} };
 let wanPeriod = '5m';
@@ -2428,6 +2439,7 @@ function hydratePayload(nextPayload) {
   firewall = payload.firewall || {};
   keepalive = payload.keepalive || {};
   fortigate = payload.fortigate || {};
+  lgThinQ = payload.lgThinQ || {};
   wanBandwidth = payload.wanBandwidth || {};
   inventory = payload.inventory || {};
   topology = payload.topology || {};
@@ -2829,6 +2841,7 @@ function renderFreshness() {
   setFreshness('diagnosisFreshness', refreshed.diagnosis, 'Data');
   setFreshness('keepaliveFreshness', refreshed.keepalive, 'Checked');
   setFreshness('fortigateFreshness', refreshed.fortigate, 'Checked');
+  setFreshness('lgThinQFreshness', refreshed.lgThinQ, 'Checked');
   setFreshness('securityFreshness', refreshed.firewall || refreshed.dashboard || meta.generated_at, 'Reviewed', true);
   setFreshness('eventsFreshness', refreshed.events, 'Data');
   setFreshness('inventoryFreshness', refreshed.inventory, 'Scan');
@@ -3020,6 +3033,28 @@ function renderFortigate() {
     const status = document.createElement('div'); status.className = 'keepalive-status'; status.textContent = security.available ? Number(value || 0).toLocaleString() : 'Unavailable';
     const meta = document.createElement('div'); meta.className = 'keepalive-meta'; meta.textContent = security.available ? `Last ${security.windowHours || 24}h; event records, not incidents.` : (security.error || 'FortiGate syslog not configured');
     card.append(title, status, meta); cards.appendChild(card);
+  });
+}
+function renderLGThinQ() {
+  const cards = document.getElementById('lgThinQCards');
+  const empty = document.getElementById('lgThinQEmpty');
+  clearNode(cards);
+  if (!lgThinQ.enabled) { cards.style.display = 'none'; empty.style.display = 'block'; return; }
+  cards.style.display = 'grid'; empty.style.display = 'none';
+  const device = lgThinQ.device || {}; const status = lgThinQ.status || {};
+  const values = [
+    ['Appliance', device.name || 'LG refrigerator'],
+    ['Door', Array.isArray(status.doors) && status.doors.length ? status.doors.join(' · ') : 'Unavailable'],
+    ['Temperature', Array.isArray(status.temperatures) && status.temperatures.length ? status.temperatures.join(' · ') : 'Unavailable'],
+    ['Express mode', status.expressMode === true ? 'On' : status.expressMode === false ? 'Off' : 'Unavailable'],
+    ['Fresh air filter', status.freshAirFilter || 'Unavailable'],
+  ];
+  values.forEach(([label, value]) => {
+    const card = document.createElement('div'); card.className = `keepalive-card ${lgThinQ.available ? 'up' : 'down'}`;
+    const title = document.createElement('div'); title.className = 'device-name'; title.textContent = label;
+    const current = document.createElement('div'); current.className = 'keepalive-status'; current.textContent = value;
+    const meta = document.createElement('div'); meta.className = 'keepalive-meta'; meta.textContent = lgThinQ.available ? (device.model || 'LG ThinQ') : (lgThinQ.error || 'ThinQ API unavailable');
+    card.append(title, current, meta); cards.appendChild(card);
   });
 }
 function renderFortiWiFi30E() {
@@ -4257,6 +4292,7 @@ function render() {
   renderDnsCorrelation(data);
   renderWanBandwidth();
   renderFortigate();
+  renderLGThinQ();
   renderFortiWiFi30E();
   renderFirewallSignal();
   renderDiagnosis();
@@ -4576,6 +4612,7 @@ def load_dashboard_data_payload(output_path: str) -> dict[str, Any]:
     from .config import load_config
     from .firewall import FirewallConfig, collect_firewall_snapshot
     from .fortigate import load_fortigate_state
+    from .lg_thinq import load_lg_thinq_state
     from .keepalive import load_keepalive_state
 
     html = Path(output_path).read_text(encoding="utf-8")
@@ -4602,7 +4639,7 @@ def load_dashboard_data_payload(output_path: str) -> dict[str, Any]:
             nmap_rows, nmap_meta = _load_nmap_inventory_rows(config)
             return {
                 "data": [], "events": [], "pihole": [], "firewall": {},
-                "keepalive": load_keepalive_state(config), "fortigate": load_fortigate_state(config),
+                "keepalive": load_keepalive_state(config), "fortigate": load_fortigate_state(config), "lgThinQ": load_lg_thinq_state(config),
                 "devices": [{"name": row.name, "hostname": row.hostname, "ip": row.ip} for row in nmap_rows],
                 "inventory": {"deviceCount": nmap_meta.get("deviceCount", len(nmap_rows)), "scannedAt": nmap_meta.get("scannedAt", "")},
                 "meta": {"refreshed": {}}, "stats": {}, "score": {}, "diagnosis": {}, "thresholds": {},
@@ -4628,6 +4665,7 @@ def load_dashboard_data_payload(output_path: str) -> dict[str, Any]:
     }
     payload["keepalive"] = load_keepalive_state(config)
     payload["fortigate"] = load_fortigate_state(config)
+    payload["lgThinQ"] = load_lg_thinq_state(config)
     # Core Network Health follows the current keep-alive state.  Recalculate
     # it here so a per-device ping toggle takes effect without waiting for a
     # full dashboard rebuild.
@@ -4673,6 +4711,7 @@ def load_dashboard_data_payload(output_path: str) -> dict[str, Any]:
         if isinstance(refreshed, dict):
             refreshed["keepalive"] = str(payload["keepalive"].get("checkedAt") or "")
             refreshed["fortigate"] = str(payload["fortigate"].get("checkedAt") or "")
+            refreshed["lgThinQ"] = str(payload["lgThinQ"].get("checkedAt") or "")
     return payload
 
 

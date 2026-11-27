@@ -46,6 +46,7 @@ from .router_snmp import (
 from .speedtest_runner import run_speedtest_measurement
 from .keepalive import run_keepalive
 from .fortigate import collect_fortigate_snapshot
+from .lg_thinq import collect_lg_thinq_snapshot
 from .wan_bandwidth import collect_wan_bandwidth
 from .wan_bandwidth import collect_wan_bandwidth
 from .smtp_log_receiver import run_smtp_log_receiver
@@ -349,6 +350,11 @@ def run_keepalive_check() -> str:
 def run_fortigate_check() -> str:
     config = load_config(require_webhook=False)
     return json.dumps(collect_fortigate_snapshot(config), indent=2)
+
+
+def run_lg_thinq_check() -> str:
+    config = load_config(require_webhook=False)
+    return json.dumps(collect_lg_thinq_snapshot(config), indent=2)
 
 
 def run_wan_bandwidth_check() -> str:

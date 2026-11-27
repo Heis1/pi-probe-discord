@@ -46,6 +46,11 @@ class CliTests(unittest.TestCase):
         self.assertEqual(mode, "network-diagnose")
         self.assertIsNone(extra)
 
+    def test_parse_mode_lg_thinq(self) -> None:
+        mode, extra = parse_mode(["pi-probe-discord", "lg-thinq"])
+        self.assertEqual(mode, "lg-thinq")
+        self.assertIsNone(extra)
+
 
 if __name__ == "__main__":
     unittest.main()

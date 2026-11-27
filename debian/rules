@@ -34,6 +34,7 @@ override_dh_auto_install:
 	install -m 0644 pi-probe-discord-bot.env.example debian/pi-probe-discord/usr/share/pi-probe-discord/pi-probe-discord-bot.env.example
 	install -m 0644 router-webui.env.example debian/pi-probe-discord/usr/share/pi-probe-discord/router-webui.env.example
 	install -m 0644 fortigate.env.example debian/pi-probe-discord/usr/share/pi-probe-discord/fortigate.env.example
+	install -m 0644 lg-thinq.env.example debian/pi-probe-discord/usr/share/pi-probe-discord/lg-thinq.env.example
 	install -d debian/pi-probe-discord/etc/logrotate.d
 	install -m 0644 debian/logrotate/fortiwifi debian/pi-probe-discord/etc/logrotate.d/fortiwifi
 	install -d debian/pi-probe-discord/lib/systemd/system
@@ -50,6 +51,8 @@ override_dh_auto_install:
 	install -m 0644 debian/systemd/pi-probe-discord-keepalive.timer debian/pi-probe-discord/lib/systemd/system/pi-probe-discord-keepalive.timer
 	install -m 0644 debian/systemd/pi-probe-discord-fortigate.service debian/pi-probe-discord/lib/systemd/system/pi-probe-discord-fortigate.service
 	install -m 0644 debian/systemd/pi-probe-discord-fortigate.timer debian/pi-probe-discord/lib/systemd/system/pi-probe-discord-fortigate.timer
+	install -m 0644 debian/systemd/pi-probe-discord-lg-thinq.service debian/pi-probe-discord/lib/systemd/system/pi-probe-discord-lg-thinq.service
+	install -m 0644 debian/systemd/pi-probe-discord-lg-thinq.timer debian/pi-probe-discord/lib/systemd/system/pi-probe-discord-lg-thinq.timer
 	install -m 0644 debian/systemd/pi-probe-discord-wan-bandwidth.service debian/pi-probe-discord/lib/systemd/system/pi-probe-discord-wan-bandwidth.service
 	install -m 0644 debian/systemd/pi-probe-discord-wan-bandwidth.timer debian/pi-probe-discord/lib/systemd/system/pi-probe-discord-wan-bandwidth.timer
 	install -m 0644 debian/systemd/pi-probe-discord-fortigate-syslog.service debian/pi-probe-discord/lib/systemd/system/pi-probe-discord-fortigate-syslog.service

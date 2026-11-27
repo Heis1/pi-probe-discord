@@ -16,6 +16,7 @@ from .app import (
     run_dashboard_server,
     run_keepalive_check,
     run_fortigate_check,
+    run_lg_thinq_check,
     run_wan_bandwidth_check,
     run_wan_talker_backfill,
     run_smtp_log_listener,
@@ -53,6 +54,7 @@ def parse_mode(argv: list[str]) -> tuple[str, int | None]:
         "network-diagnose",
         "keepalive",
         "fortigate",
+        "lg-thinq",
         "wan-bandwidth",
         "wan-talker-backfill",
         "smtp-log-listener",
@@ -69,7 +71,7 @@ def parse_mode(argv: list[str]) -> tuple[str, int | None]:
         return "doctor", None
     if len(argv) >= 2:
         raise ValueError(
-            "Usage: pihole_update_report.py [full|speedtest-only|update-only|keepalive|install|firewall|firewall-chart|router|router-listener|doctor|dashboard-html|dashboard-serve|dashboard-check|nmap-scan|nmap-devices|nmap-override|network-diagnose] | report [days]"
+            "Usage: pihole_update_report.py [full|speedtest-only|update-only|keepalive|fortigate|lg-thinq|install|firewall|firewall-chart|router|router-listener|doctor|dashboard-html|dashboard-serve|dashboard-check|nmap-scan|nmap-devices|nmap-override|network-diagnose] | report [days]"
         )
     return "full", None
 
@@ -195,6 +197,13 @@ def main(argv: list[str] | None = None) -> int:
             print(str(exc), file=sys.stderr)
             return 1
         return 0
+    if mode == "lg-thinq":
+        try:
+            print(run_lg_thinq_check())
+            return 0
+        except RuntimeError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
     if mode == "wan-bandwidth":
         try:
             print(run_wan_bandwidth_check())
