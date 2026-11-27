@@ -34,7 +34,7 @@ class LGThinQTests(unittest.TestCase):
                 lg_thinq_state_json=str(root / "lg-thinq" / "latest.json"),
             )
             responses = iter([
-                _Response([{"deviceId": "fridge-1", "deviceType": "DEVICE_REFRIGERATOR", "alias": "Kitchen fridge", "modelName": "GF-VN600BM"}]),
+                _Response([{"deviceId": "fridge-1", "deviceInfo": {"deviceType": "DEVICE_REFRIGERATOR", "alias": "Kitchen fridge", "modelName": "GF-VN600BM"}}]),
                 _Response({"doorStatus": [{"locationName": "MAIN", "doorState": "CLOSE"}], "temperature": [{"locationName": "FRIDGE", "temperature": "3"}], "refrigeration": {"expressMode": False, "freshAirFilter": "AUTO"}}),
             ])
             with patch.dict(os.environ, {"PI_PROBE_LG_THINQ_PAT": "pat-secret"}, clear=False), patch("pi_probe_discord.lg_thinq.requests.get", side_effect=lambda *args, **kwargs: next(responses)):

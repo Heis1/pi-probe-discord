@@ -72,9 +72,19 @@ def _value(row: dict[str, Any], *keys: str) -> str:
 
 def _choose_refrigerator(config: object, devices: Any) -> dict[str, Any]:
     rows = devices if isinstance(devices, list) else []
+    # ThinQ returns the stable device ID at the top level and appliance
+    # metadata under deviceInfo. Flatten that public metadata for selection.
+    normalised: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        item = dict(row)
+        if isinstance(row.get("deviceInfo"), dict):
+            item.update(row["deviceInfo"])
+        normalised.append(item)
     configured_id = str(getattr(config, "lg_thinq_device_id", "")).strip()
     model_hint = str(getattr(config, "lg_thinq_device_model", "")).strip().lower()
-    refrigerators = [row for row in rows if isinstance(row, dict) and _REFRIGERATOR in _value(row, "deviceType", "device_type").upper()]
+    refrigerators = [row for row in normalised if "REFRIGERATOR" in _value(row, "deviceType", "device_type").upper()]
     if configured_id:
         refrigerators = [row for row in refrigerators if _value(row, "deviceId", "device_id", "id") == configured_id]
     if model_hint:
